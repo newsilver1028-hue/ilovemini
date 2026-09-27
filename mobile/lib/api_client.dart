@@ -11,7 +11,7 @@ class ApiClient {
   static final sessionExpired = ValueNotifier<int>(0);
   final http.Client _client;
   final _storage = const FlutterSecureStorage();
-  static const _baseUrl = String.fromEnvironment('ILOVEMINI_API_URL', defaultValue: 'http://10.0.2.2:8000/api');
+  static const _baseUrl = String.fromEnvironment('ILOVEMINI_API_URL', defaultValue: 'https://ilovemini.onrender.com/api');
   static const demoMode = bool.fromEnvironment('ILOVEMINI_DEMO', defaultValue: false);
   static final List<Map<String, dynamic>> _demoVehicles = [
     {'id': 1, 'public_id': '00000000-0000-4000-8000-000000000001', 'model_name': 'MINI Cooper S', 'trim': 'Favoured', 'nickname': '미리보기 MINI', 'generation': '4세대 F66', 'model_year': 2025, 'current_odometer_km': 27487},
