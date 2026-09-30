@@ -1,15 +1,71 @@
 from django.core.cache import cache
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.test import override_settings
 from django.core.management import call_command
 from django.utils import timezone
 from rest_framework.test import APIClient
 from datetime import date, timedelta
 from unittest.mock import patch
+import json
+from urllib.parse import unquote
 from .admin import NoticeAdminForm, OfferAdminForm, PartnerAdminForm
-from .models import LedgerEntry, Reminder, Vehicle, VehicleOwnership, Partner, PartnerStaff, Notice, PushDevice, AttendanceCheckin
+from .models import LedgerEntry, Reminder, Vehicle, VehicleOwnership, Partner, PartnerStaff, Notice, PushDevice, AttendanceCheckin, PartnerBooking
 
 User = get_user_model()
+
+
+class CafeSearchTests(TestCase):
+    def test_cafe_search_requires_server_credentials(self):
+        response = APIClient().get("/api/cafe/search/?q=미션")
+        self.assertEqual(response.status_code, 503)
+
+    @override_settings(NAVER_API_HUB_CLIENT_ID="test-id", NAVER_API_HUB_CLIENT_SECRET="test-secret")
+    def test_cafe_search_calls_naver_api_live_and_returns_links_without_persisting(self):
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self): return json.dumps({"total": 1, "items": [{
+                "title": "<b>MINI</b> 미션 정비", "description": "락업클러치 점검 내용",
+                "link": "https://cafe.naver.com/ilovemini/123", "cafename": "아이러브미니",
+                "cafeurl": "https://cafe.naver.com/ilovemini",
+            }]}).encode()
+        with patch("core.views.urlopen", return_value=FakeResponse()) as request:
+            response = APIClient().get("/api/cafe/search/?q=미션")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["items"][0]["title"], "MINI 미션 정비")
+        self.assertEqual(response.data["items"][0]["link"], "https://cafe.naver.com/ilovemini/123")
+        self.assertIn("아이러브미니", unquote(request.call_args.args[0].full_url))
+
+    def test_cafe_answer_requires_server_key(self):
+        with override_settings(OPENAI_API_KEY=""):
+            response = APIClient().post("/api/cafe/answer/", {"q": "F56 미션"}, format="json")
+        self.assertEqual(response.status_code, 503)
+
+    @override_settings(OPENAI_API_KEY="server-test-key", OPENAI_SEARCH_MODEL="gpt-test")
+    def test_cafe_answer_searches_public_cafe_and_returns_only_cafe_citations(self):
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self): return json.dumps({
+                "output_text": "카페 공개글에 따르면 우선 진단이 필요합니다.",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "카페 공개글에 따르면 우선 진단이 필요합니다.", "annotations": [
+                    {"type": "url_citation", "url_citation": {"url": "https://cafe.naver.com/minilover/123", "title": "F56 미션 점검"}},
+                    {"type": "url_citation", "url_citation": {"url": "https://example.com/untrusted", "title": "무관한 출처"}},
+                ]}]}]
+            }).encode()
+
+        with patch("core.views.urlopen", return_value=FakeResponse()) as upstream:
+            response = APIClient().post("/api/cafe/answer/", {"q": "F56 미션 변속 충격"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(response.data["live_search"])
+        self.assertEqual(response.data["sources"], [{"title": "F56 미션 점검", "url": "https://cafe.naver.com/minilover/123"}])
+        request = upstream.call_args.args[0]
+        request_body = json.loads(request.data)
+        self.assertEqual(request.get_header("Authorization"), "Bearer server-test-key")
+        self.assertEqual(request_body["tools"][0]["filters"]["allowed_domains"], ["cafe.naver.com"])
+        self.assertEqual(request_body["tool_choice"], "required")
+        self.assertIn("site:cafe.naver.com/minilover", request_body["input"])
 
 
 class AttendanceCheckinTests(TestCase):
@@ -38,7 +94,7 @@ class AttendanceCheckinTests(TestCase):
                 response = self.client.post("/api/attendance/", {}, format="json")
         self.assertEqual(response.data["earned_points"], 4000)
         self.assertEqual(response.data["streak_days"], 7)
-        self.assertEqual(response.data["balance_points"], 9000)
+        self.assertEqual(response.data["balance_points"], 10000)
 
 class ApiAccessTests(TestCase):
     def setUp(self):
@@ -71,6 +127,53 @@ class ApiAccessTests(TestCase):
         self.assertEqual(ownership.user, self.member)
         self.assertEqual(ownership.verification_status, VehicleOwnership.VerificationStatus.USER_CLAIMED)
         self.assertEqual(str(vehicle.public_id), response.data["public_id"])
+
+    def test_partner_booking_is_saved_and_visible_to_customer(self):
+        partner = Partner.objects.create(name="예약 테스트 업체", is_active=True)
+        scheduled_at = (timezone.now() + timedelta(days=2)).isoformat()
+        response = self.client.post("/api/bookings/", {
+            "partner": partner.pk, "vehicle": self.mine.pk, "scheduled_at": scheduled_at,
+            "service_type": "엔진오일 교환", "contact_phone": "010-1234-5678", "customer_note": "오전 희망",
+        }, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        booking = PartnerBooking.objects.get(pk=response.data["id"])
+        self.assertEqual(booking.customer, self.member)
+        self.assertEqual(booking.status, PartnerBooking.Status.REQUESTED)
+        self.assertEqual(self.client.get("/api/bookings/").data[0]["partner_name"], partner.name)
+
+    def test_booking_access_is_scoped_and_partner_can_only_respond_to_assigned_shop(self):
+        shop = Partner.objects.create(name="권한 예약업체", is_active=True)
+        other_shop = Partner.objects.create(name="다른 예약업체", is_active=True)
+        booking = PartnerBooking.objects.create(customer=self.member, partner=shop,
+            scheduled_at=timezone.now() + timedelta(days=1), service_type="정비")
+        shop_user = User.objects.create_user(username="booking-shop", password="Long-test-password-789")
+        other_user = User.objects.create_user(username="other-booking-shop", password="Long-test-password-789")
+        PartnerStaff.objects.create(user=shop_user, partner=shop, can_manage_bookings=True, is_active=True)
+        PartnerStaff.objects.create(user=other_user, partner=other_shop, can_manage_bookings=True, is_active=True)
+        shop_client = APIClient(); shop_client.force_authenticate(shop_user)
+        other_client = APIClient(); other_client.force_authenticate(other_user)
+        self.assertEqual(shop_client.get("/api/bookings/").data[0]["id"], booking.pk)
+        self.assertEqual(other_client.get("/api/bookings/").data, [])
+        denied = other_client.post(f"/api/bookings/{booking.pk}/respond/", {"status": "confirmed"}, format="json")
+        self.assertEqual(denied.status_code, 404)
+        accepted = shop_client.post(f"/api/bookings/{booking.pk}/respond/", {"status": "confirmed"}, format="json")
+        self.assertEqual(accepted.status_code, 200, accepted.data)
+        self.assertEqual(booking.__class__.objects.get(pk=booking.pk).status, PartnerBooking.Status.CONFIRMED)
+        cancelled = self.client.post(f"/api/bookings/{booking.pk}/cancel/", {}, format="json")
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertEqual(booking.__class__.objects.get(pk=booking.pk).status, PartnerBooking.Status.CANCELLED)
+
+    def test_passport_scan_requires_assigned_active_service_staff(self):
+        public_data = {"vehicle_public_id": str(self.mine.public_id)}
+        denied = self.client.post("/api/vehicles/scan-passport/", public_data, format="json")
+        self.assertEqual(denied.status_code, 403)
+        partner = Partner.objects.create(name="QR 업체", is_active=True)
+        worker = User.objects.create_user(username="qr-worker", password="Long-test-password-789")
+        PartnerStaff.objects.create(user=worker, partner=partner, can_verify_records=True, is_active=True)
+        worker_client = APIClient(); worker_client.force_authenticate(worker)
+        ok = worker_client.post("/api/vehicles/scan-passport/", public_data, format="json")
+        self.assertEqual(ok.status_code, 200, ok.data)
+        self.assertEqual(ok.data["vehicle"]["model_name"], self.mine.model_name)
 
     def test_member_cannot_create_ledger_entry_for_another_members_car(self):
         response = self.client.post("/api/ledger/", {
@@ -219,6 +322,20 @@ class ApiAccessTests(TestCase):
         self.assertEqual(blocked_delete.status_code, 409)
         blocked_vehicle_delete = self.client.delete(f"/api/vehicles/{self.mine.pk}/")
         self.assertEqual(blocked_vehicle_delete.status_code, 409)
+
+    def test_partner_cannot_accidentally_duplicate_same_vehicle_service(self):
+        partner_user = User.objects.create_user(username="duplicate-shop", password="Long-test-password-789")
+        partner = Partner.objects.create(name="중복 방지 업체", is_active=True)
+        PartnerStaff.objects.create(partner=partner, user=partner_user, can_verify_records=True, is_active=True)
+        partner_client = APIClient(); partner_client.force_authenticate(partner_user)
+        payload = {"vehicle_public_id": str(self.mine.public_id), "partner": partner.pk,
+                   "kind": "service", "entry_date": timezone.localdate().isoformat(),
+                   "odometer_km": 43000, "description": "엔진오일 교환"}
+        first = partner_client.post("/api/ledger/partner-verified/", payload, format="json")
+        duplicate = partner_client.post("/api/ledger/partner-verified/", payload, format="json")
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(duplicate.status_code, 409)
+        self.assertEqual(duplicate.data["duplicate_record_id"], first.data["id"])
 
     def test_verified_record_integrity_binds_its_source(self):
         partner_user = User.objects.create_user(username="source-shop", password="Long-test-password-789")
@@ -435,7 +552,7 @@ class PartnerSyncCommandTests(TestCase):
         self.assertEqual(Partner.objects.count(), 27)
         partner = Partner.objects.get(name="랩스타모터스")
         self.assertTrue(partner.is_active)
-        self.assertEqual(partner.cafe_url, "https://cafe.naver.com/f-e/cafes/13071593/menus/286")
+        self.assertEqual(partner.cafe_url, "https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/286")
         self.assertFalse(Partner.objects.filter(name="랩스터터스").exists())
         package = Partner.objects.get(name="대한민국대표 금호타이어")
         self.assertEqual(package.service_categories, ["신차패키지", "타이어"])

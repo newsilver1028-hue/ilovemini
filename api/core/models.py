@@ -192,6 +192,7 @@ class PartnerStaff(models.Model):
     partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="staff_members")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="partner_memberships")
     can_verify_records = models.BooleanField(default=False)
+    can_manage_bookings = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -200,6 +201,34 @@ class PartnerStaff(models.Model):
 
     def __str__(self):
         return f"{self.partner} · {self.user}"
+
+
+class PartnerBooking(models.Model):
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "접수 대기"
+        CONFIRMED = "confirmed", "예약 확정"
+        REJECTED = "rejected", "예약 거절"
+        CANCELLED = "cancelled", "취소"
+        COMPLETED = "completed", "완료"
+
+    customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="partner_bookings")
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="bookings")
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.SET_NULL, null=True, blank=True, related_name="bookings")
+    requested_at = models.DateTimeField(default=timezone.now)
+    scheduled_at = models.DateTimeField()
+    service_type = models.CharField(max_length=100)
+    customer_note = models.CharField(max_length=500, blank=True)
+    contact_phone = models.CharField(max_length=24, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.REQUESTED)
+    partner_note = models.CharField(max_length=500, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-requested_at"]
+        indexes = [models.Index(fields=["partner", "scheduled_at", "status"], name="core_partne_partner_427ead_idx")]
+
+    def __str__(self):
+        return f"{self.partner} · {self.scheduled_at:%Y-%m-%d %H:%M} · {self.get_status_display()}"
 
 class Offer(models.Model):
     partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="offers")

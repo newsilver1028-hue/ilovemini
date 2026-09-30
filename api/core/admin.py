@@ -177,9 +177,9 @@ class PartnerAdmin(admin.ModelAdmin):
 
 @admin.register(PartnerStaff)
 class PartnerStaffAdmin(admin.ModelAdmin):
-    list_display = ("user", "partner", "can_verify_records", "is_active", "created_at")
-    list_editable = ("can_verify_records", "is_active")
-    list_filter = ("partner", "can_verify_records", "is_active")
+    list_display = ("user", "partner", "can_verify_records", "can_manage_bookings", "is_active", "created_at")
+    list_editable = ("can_verify_records", "can_manage_bookings", "is_active")
+    list_filter = ("partner", "can_verify_records", "can_manage_bookings", "is_active")
     search_fields = ("user__username", "user__email", "partner__name")
     readonly_fields = ("created_at",)
 
@@ -222,3 +222,51 @@ class VehicleTransferCodeAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False
 
+
+# Grade changes are restricted to operators; staff cannot promote themselves.
+from django.contrib.auth import get_user_model
+from django.contrib.auth.admin import UserAdmin
+from django.core.exceptions import ValidationError
+from .member_roles import GRADES, assign_member_grade, member_grade
+
+
+def grade_action(code):
+    @admin.action(description=f"회원 등급을 {GRADES[code]}(으)로 변경")
+    def action(modeladmin, request, queryset):
+        for user in queryset:
+            try:
+                assign_member_grade(request.user, user, code)
+                modeladmin.log_change(request, user, f"회원 등급: {GRADES[code]}")
+            except ValidationError as exc:
+                modeladmin.message_user(request, f"{user}: {' '.join(exc.messages)}", level="ERROR")
+    action.__name__ = f"set_grade_{code}"
+    return action
+
+
+User = get_user_model()
+admin.site.unregister(User)
+
+
+@admin.register(User)
+class MemberUserAdmin(UserAdmin):
+    list_display = (*UserAdmin.list_display, "ilovemini_grade")
+    actions = [grade_action(code) for code in GRADES]
+
+    @admin.display(description="회원 등급")
+    def ilovemini_grade(self, obj):
+        return GRADES[member_grade(obj)]
+
+    def has_module_permission(self, request):
+        return request.user.is_active and request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return self.has_module_permission(request)
+
+    def has_add_permission(self, request):
+        return self.has_module_permission(request)
+
+    def has_change_permission(self, request, obj=None):
+        return self.has_module_permission(request)
+
+    def has_delete_permission(self, request, obj=None):
+        return self.has_module_permission(request) and (obj is None or obj.pk != request.user.pk)

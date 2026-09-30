@@ -1,8 +1,15 @@
 import hashlib
+import html
+import json
+import re
 import secrets
 from datetime import timedelta
+from urllib.parse import urlencode, urlparse
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 from django.db import transaction
+from django.conf import settings
 from django.db.models import F, Q, Sum
 from django.utils import timezone
 from rest_framework import permissions, serializers, status, viewsets
@@ -14,15 +21,126 @@ from rest_framework.throttling import ScopedRateThrottle
 from .integrity import ledger_record_hash, legacy_ledger_record_hash
 from .models import (
     Vehicle, LedgerEntry, Reminder, Notice, Partner, Offer, PushDevice, VehicleTransferCode,
-    PartnerStaff, VehicleOwnership, AttendanceCheckin,
+    PartnerStaff, VehicleOwnership, AttendanceCheckin, PartnerBooking,
 )
 from .permissions import OwnerOrStaff, SafeMethodsOrStaff
-from .serializers import VehicleSerializer, LedgerEntrySerializer, ReminderSerializer, NoticeSerializer, PartnerSerializer, OfferSerializer
+from .serializers import VehicleSerializer, LedgerEntrySerializer, ReminderSerializer, NoticeSerializer, PartnerSerializer, OfferSerializer, PartnerBookingSerializer
 
 class HealthView(APIView):
     permission_classes = [permissions.AllowAny]
     def get(self, request):
-        return Response({"status": "ok", "service": "ilovemini-api"})
+        from django.db import connection
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+        except Exception:
+            return Response({"status": "degraded", "service": "ilovemini-api", "database": "unavailable"}, status=503)
+        return Response({"status": "ok", "service": "ilovemini-api", "database": "ok"})
+
+
+class CafeSearchView(APIView):
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "cafe_search"
+
+    def get(self, request):
+        query = str(request.query_params.get("q", "")).strip()
+        if len(query) < 2 or len(query) > 80:
+            return Response({"detail": "검색어는 2자 이상 80자 이하로 입력해 주세요."}, status=400)
+        if not settings.NAVER_API_HUB_CLIENT_ID or not settings.NAVER_API_HUB_CLIENT_SECRET:
+            return Response({"detail": "네이버 검색 API 키를 서버 환경설정에 등록해야 합니다."}, status=503)
+        params = urlencode({"query": f"아이러브미니 {query}", "display": 10, "start": 1, "sort": "sim", "format": "json"})
+        upstream = Request(
+            "https://naverapihub.apigw.ntruss.com/search/v1/cafearticle?" + params,
+            headers={
+                "X-NCP-APIGW-API-KEY-ID": settings.NAVER_API_HUB_CLIENT_ID,
+                "X-NCP-APIGW-API-KEY": settings.NAVER_API_HUB_CLIENT_SECRET,
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urlopen(upstream, timeout=7) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, ValueError):
+            return Response({"detail": "네이버 카페 검색에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요."}, status=502)
+
+        def plain(value):
+            return html.unescape(re.sub(r"<[^>]+>", "", str(value or ""))).strip()
+
+        rows = []
+        for item in payload.get("items", []):
+            link = str(item.get("link", ""))
+            if not link.startswith("https://cafe.naver.com/"):
+                continue
+            rows.append({"title": plain(item.get("title")), "description": plain(item.get("description")),
+                         "link": link, "cafe_name": plain(item.get("cafename")),
+                         "cafe_url": str(item.get("cafeurl", ""))})
+        # Search API output is returned live; it is not persisted or sent to an AI summarizer.
+        return Response({"query": query, "items": rows, "total": payload.get("total", len(rows)),
+                         "source": "NAVER API HUB · 공개 카페 검색"})
+
+
+class CafeAnswerView(APIView):
+    """Search public ILOVEMINI Cafe pages on demand and answer with citations."""
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "cafe_answer"
+
+    def post(self, request):
+        query = str(request.data.get("q", "")).strip()
+        if len(query) < 2 or len(query) > 120:
+            return Response({"detail": "질문은 2자 이상 120자 이하로 입력해 주세요."}, status=400)
+        if not settings.OPENAI_API_KEY:
+            return Response({"detail": "AI 검색 서버가 아직 연결되지 않았습니다."}, status=503)
+
+        prompt = (
+            "사용자가 MINI 차량 관련 질문을 했습니다. Responses API의 웹 검색으로 실제 검색을 반드시 수행하세요. "
+            "검색어에는 site:cafe.naver.com/minilover 를 포함하고 아이러브미니 네이버 카페의 공개 게시글을 우선 확인하세요. "
+            "카페 글에서 근거를 찾지 못하면 그 사실을 먼저 밝히고, 근거가 없는 정비 사실을 만들어내지 마세요. "
+            "정비 안전과 관련된 답변은 단정하지 말고 전문가 점검이 필요할 수 있음을 안내하세요. "
+            "답변은 한국어로 간결하게 쓰고, 검색한 게시글을 인용해 주세요.\n\n질문: " + query
+        )
+        body = json.dumps({
+            "model": settings.OPENAI_SEARCH_MODEL,
+            "tools": [{"type": "web_search", "filters": {"allowed_domains": ["cafe.naver.com"]}}],
+            "tool_choice": "required",
+            "include": ["web_search_call.action.sources"],
+            "input": prompt,
+        }).encode("utf-8")
+        upstream = Request(
+            "https://api.openai.com/v1/responses", data=body,
+            headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                     "Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(upstream, timeout=45) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, ValueError):
+            return Response({"detail": "카페 검색 답변을 가져오지 못했어요. 잠시 후 다시 시도해 주세요."}, status=502)
+
+        answer = str(payload.get("output_text", "")).strip()
+        sources = {}
+        for item in payload.get("output", []):
+            if item.get("type") == "message":
+                for part in item.get("content", []):
+                    if part.get("type") == "output_text":
+                        answer = answer or str(part.get("text", "")).strip()
+                        for annotation in part.get("annotations", []):
+                            citation = annotation.get("url_citation", {})
+                            url = str(citation.get("url", ""))
+                            if url.startswith("https://") and urlparse(url).hostname in {"cafe.naver.com", "m.cafe.naver.com"}:
+                                sources[url] = {"title": str(citation.get("title") or "아이러브미니 카페 게시글"), "url": url}
+            if item.get("type") == "web_search_call":
+                for source in item.get("action", {}).get("sources", []):
+                    url = str(source.get("url", ""))
+                    if url.startswith("https://") and urlparse(url).hostname in {"cafe.naver.com", "m.cafe.naver.com"}:
+                        sources.setdefault(url, {"title": str(source.get("title") or "아이러브미니 카페 게시글"), "url": url})
+        if not answer:
+            return Response({"detail": "검색 결과에서 답변을 만들지 못했어요. 다른 표현으로 질문해 주세요."}, status=502)
+        return Response({"query": query, "answer": answer, "sources": list(sources.values())[:6],
+                         "source": "아이러브미니 카페 공개글 웹 검색", "live_search": True})
 
 
 def _attendance_payload(user, today):
@@ -86,6 +204,32 @@ class VehicleViewSet(viewsets.ModelViewSet):
             ownerships__user=self.request.user,
             ownerships__ended_at__isnull=True,
         ).distinct()
+
+    class PassportScanInput(serializers.Serializer):
+        vehicle_public_id = serializers.UUIDField()
+
+    @action(detail=False, methods=["post"], url_path="scan-passport")
+    def scan_passport(self, request):
+        data = self.PassportScanInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        if not PartnerStaff.objects.filter(
+            user=request.user, is_active=True, can_verify_records=True, partner__is_active=True,
+        ).exists():
+            return Response({"detail": "승인된 협력업체 정비이력 권한이 필요합니다."}, status=status.HTTP_403_FORBIDDEN)
+        vehicle = Vehicle.objects.filter(public_id=data.validated_data["vehicle_public_id"], status="active").first()
+        if vehicle is None:
+            return Response({"detail": "차량 Passport QR을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+        history = vehicle.ledger_entries.select_related("partner").order_by("-entry_date", "-id")[:100]
+        return Response({
+            "vehicle": {"public_id": str(vehicle.public_id), "model_name": vehicle.model_name,
+                        "generation": vehicle.generation, "model_year": vehicle.model_year,
+                        "current_odometer_km": vehicle.current_odometer_km},
+            "history": [{"id": row.pk, "date": row.entry_date.isoformat(), "kind": row.kind,
+                         "odometer_km": row.odometer_km, "description": row.get_kind_display() if row.created_at < (vehicle.current_ownership.started_at if vehicle.current_ownership else timezone.now()) else row.description,
+                         "partner": row.partner.name if row.partner_id else None,
+                         "verified": row.source == LedgerEntry.Source.PARTNER}
+                        for row in history],
+        })
     def perform_create(self, serializer):
         with transaction.atomic():
             vehicle = serializer.save()
@@ -370,6 +514,15 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
             ).first()
             if vehicle is None:
                 return Response({"detail": "차량 Passport QR을 확인할 수 없거나 비활성 차량입니다."}, status=status.HTTP_400_BAD_REQUEST)
+            duplicate = LedgerEntry.objects.filter(
+                vehicle=vehicle, kind=data.validated_data["kind"],
+                entry_date=data.validated_data["entry_date"], odometer_km=data.validated_data["odometer_km"],
+                description__iexact=data.validated_data["description"].strip(),
+                corrects__isnull=True,
+            ).first()
+            if duplicate is not None:
+                return Response({"detail": "같은 차량·날짜·주행거리·작업내용의 기록이 이미 있습니다.",
+                                 "duplicate_record_id": duplicate.pk}, status=status.HTTP_409_CONFLICT)
             correction = data.validated_data.get("corrects")
             if correction is not None:
                 correction.refresh_from_db()
@@ -491,3 +644,70 @@ class OfferViewSet(viewsets.ReadOnlyModelViewSet):
         ).filter(
             Q(ends_at__isnull=True) | Q(ends_at__gte=now)
         )
+
+
+class PartnerBookingViewSet(viewsets.ModelViewSet):
+    serializer_class = PartnerBookingSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "booking"
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        memberships = PartnerStaff.objects.filter(user=self.request.user, is_active=True,
+            can_manage_bookings=True, partner__is_active=True).values("partner_id")
+        return PartnerBooking.objects.select_related("partner", "vehicle", "customer").filter(
+            Q(customer=self.request.user) | Q(partner_id__in=memberships)
+        ).distinct()
+
+    def perform_create(self, serializer):
+        booking = serializer.save(customer=self.request.user)
+        try:
+            from .push import send_booking_notification
+            send_booking_notification(booking)
+        except Exception:
+            # Booking persistence must not fail when push delivery is unavailable.
+            pass
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel_booking(self, request, pk=None):
+        booking = self.get_object()
+        if booking.customer_id != request.user.id:
+            return Response({"detail": "예약자만 취소할 수 있습니다."}, status=status.HTTP_403_FORBIDDEN)
+        if booking.status not in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED):
+            return Response({"detail": "현재 상태에서는 취소할 수 없습니다."}, status=status.HTTP_409_CONFLICT)
+        booking.status = PartnerBooking.Status.CANCELLED
+        booking.save(update_fields=["status", "updated_at"])
+        try:
+            from .push import send_booking_cancel_notification
+            send_booking_cancel_notification(booking)
+        except Exception:
+            pass
+        return Response(self.get_serializer(booking).data)
+
+    @action(detail=True, methods=["post"], url_path="respond")
+    def respond(self, request, pk=None):
+        booking = self.get_object()
+        if not PartnerStaff.objects.filter(user=request.user, partner=booking.partner,
+                is_active=True, can_manage_bookings=True).exists():
+            return Response({"detail": "이 업체의 예약 관리 권한이 없습니다."}, status=status.HTTP_403_FORBIDDEN)
+        if booking.status != PartnerBooking.Status.REQUESTED:
+            return Response({"detail": "이미 처리된 예약 요청입니다."}, status=status.HTTP_409_CONFLICT)
+        outcome = request.data.get("status")
+        allowed = ((PartnerBooking.Status.CONFIRMED, PartnerBooking.Status.REJECTED)
+                   if booking.status == PartnerBooking.Status.REQUESTED
+                   else (PartnerBooking.Status.COMPLETED,) if booking.status == PartnerBooking.Status.CONFIRMED else ())
+        if outcome not in allowed:
+            return Response({"detail": "대기 중인 요청은 확정·거절, 확정된 예약은 완료 처리할 수 있습니다."}, status=status.HTTP_400_BAD_REQUEST)
+        note = str(request.data.get("partner_note", "")).strip()
+        if len(note) > 500:
+            return Response({"detail": "안내 메모는 500자 이내로 입력해 주세요."}, status=status.HTTP_400_BAD_REQUEST)
+        booking.status = outcome
+        booking.partner_note = note
+        booking.save(update_fields=["status", "partner_note", "updated_at"])
+        try:
+            from .push import send_booking_status_notification
+            send_booking_status_notification(booking)
+        except Exception:
+            pass
+        return Response(self.get_serializer(booking).data)

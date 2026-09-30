@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Vehicle, LedgerEntry, Reminder, Notice, Partner, Offer
+from django.utils import timezone
+from .models import Vehicle, LedgerEntry, Reminder, Notice, Partner, Offer, PartnerBooking, PartnerStaff
 from .integrity import ledger_record_hash, legacy_ledger_record_hash
 
 class VehicleSerializer(serializers.ModelSerializer):
@@ -110,3 +111,48 @@ class OfferSerializer(serializers.ModelSerializer):
     class Meta:
         model = Offer
         fields = ["id", "partner", "partner_name", "title", "description", "starts_at", "ends_at", "redemption_instructions"]
+
+
+class PartnerBookingSerializer(serializers.ModelSerializer):
+    partner_name = serializers.CharField(source="partner.name", read_only=True)
+    vehicle_name = serializers.CharField(source="vehicle.model_name", read_only=True, allow_null=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    can_manage = serializers.SerializerMethodField()
+    is_customer = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PartnerBooking
+        fields = ["id", "partner", "partner_name", "vehicle", "vehicle_name", "scheduled_at",
+                  "service_type", "customer_note", "contact_phone", "status", "status_label", "can_manage", "is_customer",
+                  "partner_note", "requested_at", "updated_at"]
+        read_only_fields = ["id", "partner_name", "vehicle_name", "status", "partner_note", "requested_at", "updated_at"]
+
+    def get_can_manage(self, obj):
+        request = self.context.get("request")
+        return bool(request and PartnerStaff.objects.filter(user=request.user, partner=obj.partner,
+            is_active=True, can_manage_bookings=True).exists())
+
+    def get_is_customer(self, obj):
+        request = self.context.get("request")
+        return bool(request and obj.customer_id == request.user.id)
+
+    def validate_partner(self, partner):
+        if not partner.is_active:
+            raise serializers.ValidationError("현재 예약을 받지 않는 업체입니다.")
+        return partner
+
+    def validate_scheduled_at(self, value):
+        if value <= timezone.now():
+            raise serializers.ValidationError("현재 시각 이후의 예약 희망 시간을 선택해 주세요.")
+        return value
+
+    def validate_vehicle(self, vehicle):
+        request = self.context["request"]
+        if vehicle is not None and vehicle.owner_id != request.user.id:
+            raise serializers.ValidationError("내 계정에 등록된 차량만 선택할 수 있습니다.")
+        return vehicle
+
+    def validate(self, attrs):
+        if not attrs.get("service_type", "").strip():
+            raise serializers.ValidationError({"service_type": "방문 목적을 입력해 주세요."})
+        return attrs
