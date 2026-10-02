@@ -120,6 +120,12 @@ class ApiClient {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> latestCafePosts() async {
+    final response = await _client.get(_uri('cafe/latest'));
+    if (response.statusCode != 200) throw Exception(_message(response));
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> checkIn() async {
     if (demoMode) {
       final rows = await _readDemoCheckins();

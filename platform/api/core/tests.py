@@ -37,6 +37,32 @@ class CafeSearchTests(TestCase):
         self.assertEqual(response.data["items"][0]["link"], "https://cafe.naver.com/ilovemini/123")
         self.assertIn("아이러브미니", unquote(request.call_args.args[0].full_url))
 
+    def test_cafe_latest_requires_server_credentials(self):
+        response = APIClient().get("/api/cafe/latest/")
+        self.assertEqual(response.status_code, 503)
+
+    @override_settings(NAVER_API_HUB_CLIENT_ID="test-id", NAVER_API_HUB_CLIENT_SECRET="test-secret")
+    def test_cafe_latest_requests_date_order_filters_our_cafe_and_returns_at_most_ten(self):
+        rows = [{
+            "title": f"<b>MINI</b> 정비 소식 {i}", "description": "최신 공개글",
+            "link": f"https://cafe.naver.com/minilover/{i}", "cafename": "아이러브미니",
+            "cafeurl": "https://cafe.naver.com/minilover",
+        } for i in range(12)]
+        rows.insert(0, {"title": "다른 카페 글", "link": "https://cafe.naver.com/other/1",
+                        "cafename": "다른 카페", "cafeurl": "https://cafe.naver.com/other"})
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self): return json.dumps({"total": 99, "items": rows}).encode()
+        with patch("core.views.urlopen", return_value=FakeResponse()) as upstream:
+            response = APIClient().get("/api/cafe/latest/")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data["items"]), 10)
+        self.assertTrue(all("/minilover/" in item["link"] for item in response.data["items"]))
+        self.assertEqual(response.data["items"][0]["title"], "MINI 정비 소식 0")
+        self.assertIn("sort=date", upstream.call_args.args[0].full_url)
+        self.assertIn("query=MINI", upstream.call_args.args[0].full_url)
+
     def test_cafe_answer_requires_server_key(self):
         with override_settings(OPENAI_API_KEY=""):
             response = APIClient().post("/api/cafe/answer/", {"q": "F56 미션"}, format="json")

@@ -33,6 +33,7 @@
 
 - 네이버 로그인 앱 Callback URL에는 위 `NAVER_REDIRECT_URI`의 전체 주소를 등록합니다. 서비스 URL이 바뀌면 둘 다 맞춰야 합니다.
 - `NAVER_API_HUB_CLIENT_ID/SECRET`은 로그인용 키가 아닙니다. NCP 콘솔에서 NAVER API HUB 키를 만들고 Search의 Cafe Article API를 켭니다.
+- `/api/cafe/latest/`는 NAVER API HUB Cafe Article 검색을 `sort=date`로 호출해 아이러브미니 공개글 가운데 최신순 최대 10건을 앱에 표시합니다. 네이버 검색 API 기반이므로 카페의 비공개 글이나 검색 색인에 잡히지 않은 글은 포함되지 않습니다.
 - 검색 API는 공개 검색 결과만 반환합니다. 비공개 회원 전용 글까지 가져오거나 API 결과를 쌓아 AI 학습 데이터로 만드는 기능은 포함하지 않았습니다. 네이버 API 이용 조건에서 검색 결과의 별도 저장·재가공이 제한되어 있으므로, AI Q&A는 카페 운영자가 별도로 제공·사용 허락한 원문 자료를 확보한 뒤 붙입니다.
 
 ## 앱을 실제 API에 연결하기

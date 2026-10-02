@@ -82,6 +82,51 @@ class CafeSearchView(APIView):
                          "source": "NAVER API HUB · 공개 카페 검색"})
 
 
+class CafeLatestView(APIView):
+    """Fetch recent public ILOVEMINI cafe posts through NAVER API HUB search."""
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "cafe_search"
+
+    def get(self, request):
+        if not settings.NAVER_API_HUB_CLIENT_ID or not settings.NAVER_API_HUB_CLIENT_SECRET:
+            return Response({"detail": "네이버 검색 API 키를 서버 환경설정에 등록해야 합니다."}, status=503)
+        params = urlencode({"query": "MINI", "display": 30, "start": 1, "sort": "date", "format": "json"})
+        upstream = Request(
+            "https://naverapihub.apigw.ntruss.com/search/v1/cafearticle?" + params,
+            headers={
+                "X-NCP-APIGW-API-KEY-ID": settings.NAVER_API_HUB_CLIENT_ID,
+                "X-NCP-APIGW-API-KEY": settings.NAVER_API_HUB_CLIENT_SECRET,
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urlopen(upstream, timeout=7) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, ValueError):
+            return Response({"detail": "카페 최신글을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요."}, status=502)
+
+        def plain(value):
+            return html.unescape(re.sub(r"<[^>]+>", "", str(value or ""))).strip()
+
+        rows = []
+        for item in payload.get("items", []):
+            link = str(item.get("link", ""))
+            if not link.startswith("https://cafe.naver.com/"):
+                continue
+            cafe_url = str(item.get("cafeurl", ""))
+            cafe_name = plain(item.get("cafename"))
+            cafe_slug = urlparse(cafe_url).path.strip("/").lower()
+            if cafe_slug not in {"minilover", "ilovemini"} and cafe_name not in {"아이러브미니", "ILOVEMINI"}:
+                continue
+            rows.append({"title": plain(item.get("title")), "description": plain(item.get("description")),
+                         "link": link, "cafe_name": cafe_name or "아이러브미니", "cafe_url": cafe_url})
+            if len(rows) == 10:
+                break
+        return Response({"items": rows, "total": payload.get("total", len(rows)),
+                         "source": "NAVER API HUB · 아이러브미니 공개글 · 최신순"})
+
+
 class CafeAnswerView(APIView):
     """Search public ILOVEMINI Cafe pages on demand and answer with citations."""
     permission_classes = [permissions.AllowAny]
