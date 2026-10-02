@@ -1,0 +1,20 @@
+.cafe-products-section{margin-top:24px;padding-bottom:20px}
+.cafe-products-intro{margin:-6px 0 12px;color:var(--muted);font-size:13px}
+.cafe-product-carousel{position:relative;margin:0;overflow:hidden}
+.cafe-product-track{display:flex;gap:12px;overflow-x:auto;padding:0;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain;touch-action:pan-x pan-y}
+.cafe-product-track::-webkit-scrollbar{display:none}
+.cafe-product-slide{flex:0 0 100%;min-width:0;scroll-snap-align:start;overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--white)}
+.cafe-product-picture{position:relative;aspect-ratio:1/1;overflow:hidden;background:#fff}
+.cafe-product-picture img{display:block;width:100%;height:100%;object-fit:contain;background:#fff}
+.cafe-product-meta{padding:14px 15px 15px}
+.cafe-product-meta h3{margin:0;font-size:18px;line-height:1.35;letter-spacing:-.03em;color:var(--ink)}
+.cafe-product-meta p{margin:5px 0 10px;color:var(--muted);font-size:13px}
+.cafe-product-status{display:inline-flex;align-items:center;min-height:30px;padding:5px 10px;border-radius:999px;background:var(--soft);color:var(--muted);font-size:12px;font-weight:750}
+.cafe-product-controls{position:absolute;right:12px;bottom:12px;display:flex;align-items:center;gap:1px;padding:3px 5px;border-radius:999px;background:rgba(20,20,23,.78);color:#fff;backdrop-filter:blur(6px);z-index:2}
+.cafe-product-controls button{width:34px;height:34px;border:0;border-radius:50%;background:transparent;color:#fff;font-size:22px;line-height:1;cursor:pointer}
+.cafe-product-controls button:focus-visible{outline:2px solid #fff;outline-offset:1px}
+.cafe-product-controls #cafeProductPause{font-size:15px}
+.cafe-product-controls span{min-width:44px;text-align:center;font-size:13px;font-weight:750}
+.cafe-product-note{margin:10px 2px 0;color:var(--muted);font-size:12px}
+:is(body.dark,body[data-theme="dark"]) .cafe-product-picture,:is(body.dark,body[data-theme="dark"]) .cafe-product-picture img{background:#fff}
+@media(prefers-reduced-motion:reduce){.cafe-product-track{scroll-behavior:auto}}

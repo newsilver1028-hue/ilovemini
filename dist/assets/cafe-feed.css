@@ -1,0 +1,17 @@
+.cafe-search-form{display:grid;gap:10px}
+.cafe-search-form input{width:100%;min-height:48px;padding:0 13px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--ink);font:inherit;font-size:16px}
+.cafe-search-form input:focus{outline:3px solid #bd243422;border-color:#bd2434}
+.cafe-search-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.cafe-search-actions button{min-height:46px;border:0;border-radius:11px;background:#bd2434;color:#fff;font:inherit;font-size:14px;font-weight:800;cursor:pointer}
+.cafe-search-actions button.cafe-post-search{border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.cafe-posts-section{margin-top:16px;padding:16px;background:var(--white,#fff);border:1px solid var(--line);border-radius:18px}
+.cafe-posts-status{padding:14px 2px;color:var(--muted);font-size:14px;line-height:1.55}
+.cafe-posts-status.is-error{color:var(--accent,#bd2434)}
+.cafe-posts-list{display:grid;gap:9px}
+.cafe-post-card{display:block;padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:var(--bg);color:var(--ink);text-decoration:none}
+.cafe-post-card:hover,.cafe-post-card:focus-visible{border-color:#bd2434;outline:none;box-shadow:0 0 0 3px #bd24341a}
+.cafe-post-card strong{display:block;font-size:15px;line-height:1.4}
+.cafe-post-card p{margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.5}
+.cafe-post-card small{display:block;margin-top:8px;color:var(--muted);font-size:12px}
+.cafe-open-link{margin-top:10px;text-align:center}
+@media(max-width:360px){.cafe-search-actions{grid-template-columns:1fr}.cafe-posts-section{padding:13px}}
