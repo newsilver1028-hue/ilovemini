@@ -1,0 +1,50 @@
+x-api-environment: &api-environment
+  DJANGO_SECRET_KEY: local-dev-only-change-me
+  LEDGER_INTEGRITY_KEY: ${LEDGER_INTEGRITY_KEY:-local-dev-ledger-integrity-key-change-me}
+  DJANGO_DEBUG: "1"
+  POSTGRES_DB: ilovemini
+  POSTGRES_USER: ilovemini
+  POSTGRES_PASSWORD: local-dev-only
+  POSTGRES_HOST: db
+  NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+  NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
+  NAVER_REDIRECT_URI: ${NAVER_REDIRECT_URI:-}
+  NAVER_API_HUB_CLIENT_ID: ${NAVER_API_HUB_CLIENT_ID:-}
+  NAVER_API_HUB_CLIENT_SECRET: ${NAVER_API_HUB_CLIENT_SECRET:-}
+  MOBILE_AUTH_REDIRECT_URI: ilovemini://auth
+  FCM_ENABLED: ${FCM_ENABLED:-0}
+  GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ilovemini
+      POSTGRES_USER: ilovemini
+      POSTGRES_PASSWORD: local-dev-only
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ilovemini"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  api:
+    build: ./api
+    environment: *api-environment
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+  reminder-scheduler:
+    build: ./api
+    environment: *api-environment
+    command: ["sh", "-c", "if [ \"$$FCM_ENABLED\" != \"1\" ]; then echo 'FCM disabled; scheduler idle.'; sleep infinity; fi; until python -c \"import urllib.request; urllib.request.urlopen('http://api:8000/api/health/')\"; do sleep 5; done; while true; do python manage.py send_due_reminders; sleep 3600; done"]
+    depends_on:
+      api:
+        condition: service_started
+volumes:
+  postgres_data:

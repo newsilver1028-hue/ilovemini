@@ -1,0 +1,13 @@
+services:
+  api:
+    environment:
+      FCM_ENABLED: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-admin.json
+    volumes:
+      - ${FIREBASE_ADMIN_KEY_FILE:?Set FIREBASE_ADMIN_KEY_FILE to the service-account JSON path}:/run/secrets/firebase-admin.json:ro
+  reminder-scheduler:
+    environment:
+      FCM_ENABLED: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-admin.json
+    volumes:
+      - ${FIREBASE_ADMIN_KEY_FILE:?Set FIREBASE_ADMIN_KEY_FILE to the service-account JSON path}:/run/secrets/firebase-admin.json:ro
