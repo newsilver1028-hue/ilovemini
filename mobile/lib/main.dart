@@ -11,9 +11,12 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'api_client.dart';
 import 'firebase_options.dart';
+import 'partner_map.dart';
+import 'partner_directory.dart';
 
 final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 bool firebaseReady = false;
+final appThemeMode = ValueNotifier<ThemeMode>(ThemeMode.system);
 
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
@@ -38,9 +41,14 @@ const paper = Color(0xFFF4F4F6);
 
 const favouredF66PhotoAsset = 'assets/images/mini_f66_favoured_red.png';
 const maybachS580FrontAsset = 'assets/images/maybach-s580-front.webp';
-const cafeMiniAlbumUrl = 'https://cafe.naver.com/f-e/cafes/13071593';
+const naverCafeMobileUrl = 'https://m.cafe.naver.com/minilover/';
 const partnerInquiryUrl = 'https://naver.me/xTb4h7ZR';
-const iloveMiniWebsiteUrl = 'https://ilovemini.co.kr';
+const recommendedCafeItems = <Map<String, String>>[
+  {'title': '차량용 거치대', 'detail': '차량용 스마트폰 거치 아이템 · 호환 정보 확인 중', 'image': 'assets/images/mini-recommended-items/item-01-phone-holder.png'},
+  {'title': '실내 고정 브래킷', 'detail': '실내 고정용 부품 · 적용 차종 확인 중', 'image': 'assets/images/mini-recommended-items/item-02-interior-brackets.png'},
+  {'title': '프런트 그릴 파츠', 'detail': '외장 그릴 부품 · 적용 차종 확인 중', 'image': 'assets/images/mini-recommended-items/item-03-grille-parts.png'},
+  {'title': '기어 노브·부츠', 'detail': '수동 기어 노브와 부츠 · 적용 차종 확인 중', 'image': 'assets/images/mini-recommended-items/item-04-shift-knob.png'},
+];
 
 const iloveMiniCafeNotices = <Map<String, String>>[
   {'title': '[추석 이벤트] 우리 가족 자동차 자랑대회 🧧', 'category': '추석 이벤트', 'url': 'https://m.site.naver.com/2hkWt'},
@@ -60,7 +68,7 @@ Future<void> _openCafeNotice(BuildContext context, String url) async {
   final uri = Uri.tryParse(url);
   try {
     if (uri == null || uri.scheme != 'https' || uri.host.isEmpty ||
-        !await launchUrl(uri, mode: LaunchMode.externalApplication)) throw Exception();
+        !await launchUrl(uri, mode: LaunchMode.externalApplication, webOnlyWindowName: '_top')) throw Exception();
   } catch (_) {
     if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('카페 원문을 열지 못했습니다.')),
@@ -88,10 +96,9 @@ class CafeNoticeFeed extends StatelessWidget {
 }
 
 const partnerBanners = <Map<String, String>>[
-  {'asset': 'assets/images/partner-banner-kumho.webp', 'alt': '금호타이어와 타이어프로의 아이러브미니 제휴 회원 이벤트', 'url': 'https://m.site.naver.com/2hkXc'},
-  {'asset': 'assets/images/partner-banner-deutsch.webp', 'alt': '도이치모터스 MINI 전시장 전차종 시승 안내'},
-  {'asset': 'assets/images/partner-banner-printtrap.webp', 'alt': '프린트랩 수입차 부품과 자가 정비 지원 안내'},
-  {'asset': 'assets/images/partner-banner-greeting.webp', 'alt': '같은 미니를 만나면 반가운 인사 캠페인'},
+  {'asset': 'assets/images/partner-square-kumho.png', 'alt': '금호타이어와 타이어프로의 아이러브미니 제휴 회원 이벤트', 'url': 'https://m.site.naver.com/2hkXc'},
+  {'asset': 'assets/images/partner-square-deutsch.png', 'alt': '도이치모터스 MINI 전시장 전차종 시승 안내'},
+  {'asset': 'assets/images/partner-square-printtrap.png', 'alt': '프린트랩 수입차 부품과 자가 정비 지원 안내'},
 ];
 
 class AffiliateBannerCarousel extends StatefulWidget {
@@ -101,7 +108,37 @@ class AffiliateBannerCarousel extends StatefulWidget {
 }
 
 class _AffiliateBannerCarouselState extends State<AffiliateBannerCarousel> {
-  int currentPage = 0;
+  static const _bannerCount = 3;
+  final PageController _controller = PageController(initialPage: 1);
+  Timer? _timer;
+  int currentPage = 1;
+  bool paused = false;
+
+  int get logicalPage => currentPage <= 0 ? _bannerCount : currentPage > _bannerCount ? 1 : currentPage;
+
+  @override
+  void initState() { super.initState(); _startTimer(); }
+
+  void _startTimer() {
+    _timer?.cancel();
+    if (paused) return;
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted && _controller.hasClients) _controller.nextPage(duration: const Duration(milliseconds: 360), curve: Curves.easeOutCubic);
+    });
+  }
+
+  void _onPageChanged(int index) {
+    if (!mounted) return;
+    setState(() => currentPage = index);
+    if (index == 0 || index == _bannerCount + 1) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_controller.hasClients) return;
+        final target = index == 0 ? _bannerCount : 1;
+        _controller.jumpToPage(target);
+        setState(() => currentPage = target);
+      });
+    }
+  }
 
   Future<void> _openBanner(Map<String, String> banner) async {
     final url = banner['url'];
@@ -109,33 +146,39 @@ class _AffiliateBannerCarouselState extends State<AffiliateBannerCarousel> {
   }
 
   @override
-  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    const SectionHeading(title: '제휴 배너', subtitle: '카페 제휴 소식'),
-    const SizedBox(height: 9),
-    SizedBox(height: 76, child: PageView.builder(
-      itemCount: partnerBanners.length,
-      onPageChanged: (index) => setState(() => currentPage = index),
-      itemBuilder: (context, index) {
-        final banner = partnerBanners[index];
-        final image = ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.asset(
-          banner['asset']!, width: double.infinity, height: 76, fit: BoxFit.cover,
-          semanticLabel: banner['alt'],
-        ));
-        final url = banner['url'];
-        return Padding(padding: const EdgeInsets.only(right: 2), child: url == null
-          ? image
-          : Semantics(button: true, label: '${banner['alt']} 자세히 보기', child: InkWell(
-              borderRadius: BorderRadius.circular(12), onTap: () => _openBanner(banner), child: image,
-            )));
-      },
-    )),
-    const SizedBox(height: 7),
-    Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(partnerBanners.length, (index) => AnimatedContainer(
-      duration: const Duration(milliseconds: 180), margin: const EdgeInsets.symmetric(horizontal: 3),
-      width: currentPage == index ? 15 : 5, height: 5,
-      decoration: BoxDecoration(color: currentPage == index ? brandRed : const Color(0xFFD4D5D8), borderRadius: BorderRadius.circular(4)),
-    ))),
-  ]);
+  void dispose() { _timer?.cancel(); _controller.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width - 40;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SectionHeading(title: '제휴 배너', subtitle: '카페 제휴 소식'),
+      const SizedBox(height: 9),
+      ClipRRect(borderRadius: BorderRadius.circular(14), child: SizedBox(height: width, child: Stack(children: [
+        PageView.builder(
+          controller: _controller,
+          itemCount: _bannerCount + 2,
+          onPageChanged: _onPageChanged,
+          itemBuilder: (context, page) {
+            final index = page == 0 ? _bannerCount - 1 : page == _bannerCount + 1 ? 0 : page - 1;
+            final banner = partnerBanners[index];
+            final image = Image.asset(banner['asset']!, width: width, height: width, fit: BoxFit.cover, semanticLabel: banner['alt']);
+            final url = banner['url'];
+            return url == null ? image : Semantics(button: true, label: '${banner['alt']} 자세히 보기', child: InkWell(onTap: () => _openBanner(banner), child: image));
+          },
+        ),
+        Positioned(right: 9, bottom: 9, child: DecoratedBox(
+          decoration: BoxDecoration(color: const Color(0xC7191A1E), borderRadius: BorderRadius.circular(24)),
+          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3), child: Row(mainAxisSize: MainAxisSize.min, children: [
+            IconButton(visualDensity: VisualDensity.compact, tooltip: '이전 배너', onPressed: () => _controller.previousPage(duration: const Duration(milliseconds: 280), curve: Curves.easeOut), icon: const Icon(Icons.chevron_left, color: Colors.white, size: 20)),
+            Text('$logicalPage / $_bannerCount', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800)),
+            IconButton(visualDensity: VisualDensity.compact, tooltip: '다음 배너', onPressed: () => _controller.nextPage(duration: const Duration(milliseconds: 280), curve: Curves.easeOut), icon: const Icon(Icons.chevron_right, color: Colors.white, size: 20)),
+            IconButton(visualDensity: VisualDensity.compact, tooltip: paused ? '자동 넘김 재생' : '자동 넘김 일시정지', onPressed: () { setState(() => paused = !paused); if (paused) { _timer?.cancel(); } else { _startTimer(); } }, icon: Icon(paused ? Icons.play_arrow : Icons.pause, color: Colors.white, size: 18)),
+          ])),
+        )),
+      ]))),
+    ]);
+  }
 }
 
 class CafeNoticeListPage extends StatelessWidget {
@@ -180,10 +223,6 @@ bool hasFavouredF66Photo(Map<String, dynamic> vehicle) {
 bool hasMaybachPhoto(Map<String, dynamic> vehicle) =>
     '${vehicle['model_name'] ?? ''} ${vehicle['trim'] ?? ''}'.toLowerCase().contains('maybach');
 
-String _favouredVehicleTitle(Map<String, dynamic> vehicle) {
-  final model = (vehicle['model_name'] ?? 'MINI Cooper S').toString().trim();
-  return model.toLowerCase().contains('favoured') || model.contains('페이버드') ? model : '$model Favoured';
-}
 
 class VehiclePhoto extends StatelessWidget {
   const VehiclePhoto({required this.vehicle, this.height = 118, super.key});
@@ -216,15 +255,18 @@ String formatKilometers(dynamic value) {
 class IloveMiniApp extends StatelessWidget {
   const IloveMiniApp({super.key});
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  Widget build(BuildContext context) => ValueListenableBuilder<ThemeMode>(
+      valueListenable: appThemeMode,
+      builder: (context, mode, _) => MaterialApp(
         title: 'ILOVEMINI',
         debugShowCheckedModeBanner: false,
         scaffoldMessengerKey: scaffoldMessengerKey,
         theme: _appTheme(Brightness.light),
         darkTheme: _appTheme(Brightness.dark),
-        themeMode: ThemeMode.system,
+        themeMode: mode,
         home: const MainShell(),
-      );
+      ),
+    );
 }
 
 ThemeData _appTheme(Brightness brightness) {
@@ -233,10 +275,10 @@ ThemeData _appTheme(Brightness brightness) {
   final surface = isDark ? const Color(0xFF25262C) : Colors.white;
   final text = isDark ? const Color(0xFFF3F3F5) : ink;
   final muted = isDark ? const Color(0xFFB2B3BC) : const Color(0xFF686B73);
-  final accent = isDark ? const Color(0xFFFF939B) : brandRed;
+  final accent = brandRed;
   final border = isDark ? const Color(0xFF3B3D44) : const Color(0xFFDFE0E4);
   final scheme = ColorScheme.fromSeed(seedColor: brandRed, brightness: brightness).copyWith(
-    primary: accent, onPrimary: isDark ? ink : Colors.white,
+    primary: accent, onPrimary: Colors.white,
     primaryContainer: isDark ? const Color(0xFF3D282E) : const Color(0xFFFBECEF),
     onPrimaryContainer: accent, surface: surface, onSurface: text,
     onSurfaceVariant: muted, outline: border, outlineVariant: border,
@@ -249,7 +291,7 @@ ThemeData _appTheme(Brightness brightness) {
     colorScheme: scheme, dividerColor: border,
     appBarTheme: AppBarTheme(backgroundColor: background, foregroundColor: text, surfaceTintColor: Colors.transparent, elevation: 0, toolbarHeight: 74),
     cardTheme: CardThemeData(color: surface, surfaceTintColor: Colors.transparent, elevation: 0, margin: const EdgeInsets.symmetric(vertical: 5), shape: shape),
-    navigationBarTheme: NavigationBarThemeData(backgroundColor: background, surfaceTintColor: Colors.transparent, indicatorColor: scheme.primaryContainer, height: 76),
+    navigationBarTheme: NavigationBarThemeData(backgroundColor: background, surfaceTintColor: Colors.transparent, indicatorColor: Colors.transparent, iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(color: states.contains(WidgetState.selected) ? brandRed : muted)), labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(color: states.contains(WidgetState.selected) ? brandRed : muted, fontSize: 12)), height: 76),
     inputDecorationTheme: InputDecorationTheme(filled: true, fillColor: surface,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: border)),
       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: border)),
@@ -315,7 +357,7 @@ class _MainShellState extends State<MainShell> {
 
   void _onSessionExpired() {
     if (!mounted) return;
-    setState(() { signedIn = false; tab = 3; });
+    setState(() { signedIn = false; tab = 4; });
     scaffoldMessengerKey.currentState?.showSnackBar(
       const SnackBar(content: Text('로그인이 만료되었습니다. 다시 로그인해 주세요.')));
   }
@@ -408,16 +450,17 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Semantics(button: true, label: 'ILOVEMINI 홈으로 이동', child: InkWell(
+      appBar: AppBar(centerTitle: false, title: Semantics(button: true, label: 'ILOVEMINI 홈으로 이동', child: InkWell(
         mouseCursor: SystemMouseCursors.click,
         borderRadius: BorderRadius.circular(8),
         onTap: () => setState(() => tab = 0),
-        child: const Row(mainAxisSize: MainAxisSize.min, children: [BrandLogo(height: 52), SizedBox(width: 12), Text('ILOVEMINI', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: 2))]),
-      ))),
+        child: const Row(mainAxisSize: MainAxisSize.min, children: [BrandLogo(height: 52), SizedBox(width: 12), Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('ILOVEMINI', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: 2)), Text('OWNERS COMMUNITY', style: TextStyle(fontSize: 8, letterSpacing: 2))])]),
+      )) , actions: [IconButton(tooltip: '화면 테마 변경', icon: Icon(Theme.of(context).brightness == Brightness.dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined), onPressed: () { appThemeMode.value = Theme.of(context).brightness == Brightness.dark ? ThemeMode.light : ThemeMode.dark; })]),
       body: switch (tab) {
         0 => HomePage(api: api, signedIn: signedIn, onOpenGarage: () => setState(() => tab = 1), onLogin: _login),
         1 => GaragePage(key: ValueKey('garage-$signedIn'), api: api, signedIn: signedIn, onLogin: _login),
-        2 => CatalogPage(api: api, path: 'partners', title: 'ILOVEMINI 협력업체'),
+        2 => CafePage(api: api),
+        3 => CatalogPage(api: api, path: 'partners', title: 'ILOVEMINI 협력업체'),
         _ => AccountPage(api: api, signedIn: signedIn, pushEnabled: pushEnabled, onPushChanged: _setPushEnabled, onLogin: _login, onLogout: () async { await _removePushInstallation(); await api.logout(); if (mounted) setState(() { signedIn = false; pushEnabled = false; }); }, onManageVehicles: () => setState(() => tab = 1)),
       },
       bottomNavigationBar: NavigationBar(
@@ -425,9 +468,10 @@ class _MainShellState extends State<MainShell> {
         onDestinationSelected: (value) => setState(() => tab = value),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: '홈'),
-          NavigationDestination(icon: Icon(Icons.directions_car_outlined), selectedIcon: Icon(Icons.directions_car), label: '내 차'),
-          NavigationDestination(icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: '업체'),
-          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: '마이'),
+          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long_outlined), label: '차계부'),
+          NavigationDestination(icon: Icon(Icons.forum_outlined), selectedIcon: Icon(Icons.forum), label: '카페'),
+          NavigationDestination(icon: Icon(Icons.build_outlined), selectedIcon: Icon(Icons.build_outlined), label: '업체'),
+          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'MY'),
         ],
       ),
     );
@@ -452,55 +496,187 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.fromLTRB(20, 14, 20, 28), children: [
     VehicleOverview(key: ValueKey('overview-$signedIn'), api: api, signedIn: signedIn, onGarage: onOpenGarage),
-    const SizedBox(height: 18),
-    const CafeKnowledgeSearch(),
-    const SizedBox(height: 18),
-    AttendanceCheckinCard(api: api, signedIn: signedIn, onLogin: onLogin),
-    const SizedBox(height: 8),
-    const SectionHeading(title: '카페 공지사항', subtitle: '필독 2건'),
-    const CafeNoticeFeed(previewCount: 2),
-    const SizedBox(height: 12),
-    const CafeMiniAlbumPreview(),
-    const SizedBox(height: 12),
+    const SizedBox(height: 10),
+    Row(children: [
+      Expanded(child: OutlinedButton.icon(onPressed: onOpenGarage, icon: const Icon(Icons.add), label: const Text('기록 추가'))),
+      const SizedBox(width: 12),
+      Expanded(child: OutlinedButton.icon(onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => CatalogPage(api: api, path: 'partners', title: '업체 찾기 · 예약'))), icon: const Icon(Icons.storefront_outlined), label: const Text('업체 찾기'))),
+    ]),
+    const SizedBox(height: 16),
+    const SectionHeading(title: '제휴 배너', subtitle: '카페 제휴 소식'),
+    const SizedBox(height: 10),
     const AffiliateBannerCarousel(),
-    if (ApiClient.demoMode) ...[
-      const SizedBox(height: 10),
-      Text('차량 정보는 시제품 예시입니다.', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-    ],
   ]);
 }
 
+class CafePage extends StatelessWidget {
+  const CafePage({required this.api, super.key});
+  final ApiClient api;
+  @override
+  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.fromLTRB(20, 24, 20, 28), children: [
+    CafeKnowledgeSearch(api: api),
+    const SizedBox(height: 14),
+    CafeLatestFeed(api: api),
+    const SizedBox(height: 16),
+    const RecommendedCafeItemsCarousel(),
+  ]);
+}
+
+class RecommendedCafeItemsCarousel extends StatefulWidget {
+  const RecommendedCafeItemsCarousel({super.key});
+  @override
+  State<RecommendedCafeItemsCarousel> createState() => _RecommendedCafeItemsCarouselState();
+}
+
+class _RecommendedCafeItemsCarouselState extends State<RecommendedCafeItemsCarousel> {
+  static const _interval = Duration(seconds: 5);
+  late final PageController _controller;
+  Timer? _timer;
+  int _page = 1;
+  bool _paused = false;
+
+  int get _logicalPage {
+    if (_page <= 0) return recommendedCafeItems.length;
+    if (_page > recommendedCafeItems.length) return 1;
+    return _page;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = PageController(initialPage: _page);
+    _startTimer();
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    if (_paused) return;
+    _timer = Timer.periodic(_interval, (_) {
+      if (!mounted || !_controller.hasClients) return;
+      _controller.nextPage(duration: const Duration(milliseconds: 360), curve: Curves.easeOutCubic);
+    });
+  }
+
+  void _onPageChanged(int page) {
+    if (!mounted) return;
+    setState(() => _page = page);
+    if (page == 0 || page == recommendedCafeItems.length + 1) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_controller.hasClients) return;
+        final target = page == 0 ? recommendedCafeItems.length : 1;
+        _controller.jumpToPage(target);
+        setState(() => _page = target);
+      });
+    }
+  }
+
+  void _togglePause() {
+    setState(() => _paused = !_paused);
+    if (_paused) {
+      _timer?.cancel();
+    } else {
+      _startTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width - 40;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SectionHeading(title: 'MINI 추천 아이템', subtitle: '회원 추천 아이템'),
+      const SizedBox(height: 2),
+      Text('제품 정보와 MINI 호환 여부를 확인하고 있어요.', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      const SizedBox(height: 9),
+      Card(clipBehavior: Clip.antiAlias, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        SizedBox(
+          height: width,
+          child: Stack(children: [
+            PageView.builder(
+              controller: _controller,
+              itemCount: recommendedCafeItems.length + 2,
+              onPageChanged: _onPageChanged,
+              itemBuilder: (context, page) {
+                final itemIndex = page == 0 ? recommendedCafeItems.length - 1 : page == recommendedCafeItems.length + 1 ? 0 : page - 1;
+                final item = recommendedCafeItems[itemIndex];
+                return ColoredBox(
+                  color: Colors.white,
+                  child: Image.asset(item['image']!, fit: BoxFit.contain, semanticLabel: item['title'],
+                    errorBuilder: (context, error, stackTrace) => const Center(child: Icon(Icons.image_not_supported_outlined, size: 42))),
+                );
+              },
+            ),
+            Positioned(right: 9, bottom: 9, child: DecoratedBox(
+              decoration: BoxDecoration(color: const Color(0xC7191A1E), borderRadius: BorderRadius.circular(24)),
+              child: Padding(padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3), child: Row(mainAxisSize: MainAxisSize.min, children: [
+                IconButton(visualDensity: VisualDensity.compact, tooltip: '이전 아이템', onPressed: () => _controller.previousPage(duration: const Duration(milliseconds: 280), curve: Curves.easeOut), icon: const Icon(Icons.chevron_left, color: Colors.white, size: 20)),
+                Text('$_logicalPage / ${recommendedCafeItems.length}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800)),
+                IconButton(visualDensity: VisualDensity.compact, tooltip: '다음 아이템', onPressed: () => _controller.nextPage(duration: const Duration(milliseconds: 280), curve: Curves.easeOut), icon: const Icon(Icons.chevron_right, color: Colors.white, size: 20)),
+                IconButton(visualDensity: VisualDensity.compact, tooltip: _paused ? '자동 넘김 재생' : '자동 넘김 일시정지', onPressed: _togglePause, icon: Icon(_paused ? Icons.play_arrow : Icons.pause, color: Colors.white, size: 18)),
+              ])),
+            )),
+          ]),
+        ),
+        Padding(padding: const EdgeInsets.fromLTRB(14, 11, 14, 13), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(recommendedCafeItems[_logicalPage - 1]['title']!, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 3),
+          Text(recommendedCafeItems[_logicalPage - 1]['detail']!, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 8),
+          const Align(alignment: Alignment.centerLeft, child: Chip(visualDensity: VisualDensity.compact, label: Text('구매 링크 준비 중'))),
+        ])),
+      ])),
+      const SizedBox(height: 6),
+      Text('실제 등록 전 상품명과 적용 차종을 확인할 예정입니다.', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+    ]);
+  }
+}
+
 class CafeKnowledgeSearch extends StatefulWidget {
-  const CafeKnowledgeSearch({super.key});
+  const CafeKnowledgeSearch({required this.api, super.key});
+  final ApiClient api;
   @override
   State<CafeKnowledgeSearch> createState() => _CafeKnowledgeSearchState();
 }
 
 class _CafeKnowledgeSearchState extends State<CafeKnowledgeSearch> {
   final queryController = TextEditingController();
-  List<Map<String, String>> results = [];
-  bool searched = false;
+  String? searchError;
 
-  void search(String value) {
-    final query = value.trim().toLowerCase();
-    if (query.isEmpty) return;
-    final terms = query.split(RegExp(r'\s+')).where((term) => term.length > 1).toList();
-    setState(() {
-      searched = true;
-      results = iloveMiniCafeNotices.where((notice) {
-        final text = '${notice['title']} ${notice['category']}'.toLowerCase();
-        return terms.any((term) => text.contains(term));
-      }).take(3).toList();
-    });
-  }
+  Future<void> search([String? value]) => _openSearch(value: value);
 
-  Future<void> searchNaver() async {
-    final query = '${queryController.text.trim()} 아이러브미니';
-    final uri = Uri.https('search.naver.com', '/search.naver', {'where': 'article', 'query': query});
+  Future<void> searchNaver() => _openSearch(cafe: true);
+
+  Future<void> _openSearch({String? value, bool cafe = false}) async {
+    final query = (value ?? queryController.text).trim();
+    if (query.length < 2 || query.length > 120) {
+      setState(() => searchError = '질문을 2~120자로 입력해 주세요.');
+      return;
+    }
+    queryController.text = query;
+    setState(() => searchError = null);
+    final uri = cafe
+        ? Uri.https('m.cafe.naver.com', '/ca-fe/web/cafes/13071593/search', {
+            'q': query, 'mi': '0', 'ta': 'SUBJECT', 'pc': 'ALL', 'od': 'NEW',
+          })
+        : Uri.https('search.naver.com', '/search.naver', {
+            'query': query, 'qvt': '0', 'ssc': 'tab.ait.all',
+          });
     try {
-      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) throw Exception();
+      // Native iOS/Android delegates HTTPS to the system, outside the app WebView.
+      // The web build navigates the top-level window instead of creating a popup.
+      final opened = await launchUrl(uri,
+        mode: LaunchMode.externalApplication,
+        webOnlyWindowName: '_top',
+      );
+      if (!opened) throw Exception('외부 검색 화면을 열지 못했습니다.');
     } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('네이버 검색을 열지 못했습니다.')));
+      if (mounted) setState(() => searchError = '네이버 검색을 열지 못했습니다. 다시 시도해 주세요.');
     }
   }
 
@@ -508,34 +684,97 @@ class _CafeKnowledgeSearchState extends State<CafeKnowledgeSearch> {
   void dispose() { queryController.dispose(); super.dispose(); }
 
   @override
-  Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     Row(children: [
-      Container(width: 38, height: 38, decoration: BoxDecoration(color: brandRed, borderRadius: BorderRadius.circular(12)), alignment: Alignment.center, child: const Icon(Icons.manage_search_rounded, color: Colors.white)),
-      const SizedBox(width: 11),
-      const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('MINI 정비 지식 검색', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
-        Text('연결된 아이러브미니 카페 공지와 정비 정보를 찾아보세요.', style: TextStyle(fontSize: 12)),
-      ])),
+      Expanded(child: TextField(controller: queryController,
+        style: const TextStyle(fontSize: 16),
+        maxLength: 120,
+        textInputAction: TextInputAction.search,
+        onSubmitted: search,
+        decoration: const InputDecoration(hintText: '검색어 입력', counterText: '', isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+      )),
+      const SizedBox(width: 6),
+      Tooltip(message: '네이버 AI 검색', child: SizedBox(height: 42, child: FilledButton(
+        style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 11), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+        onPressed: () => search(),
+        child: const Text('AI 검색', maxLines: 1, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+      ))),
+      const SizedBox(width: 6),
+      Tooltip(message: '아이러브미니 카페 검색', child: SizedBox(height: 42, child: OutlinedButton(
+        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+        onPressed: searchNaver,
+        child: const Text('카페 검색', maxLines: 1, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+      ))),
     ]),
-    const SizedBox(height: 12),
-    TextField(controller: queryController, textInputAction: TextInputAction.search, onSubmitted: search,
-      decoration: InputDecoration(labelText: '정비 질문 또는 검색어', hintText: '예: 락업클러치 미션 교체', suffixIcon: IconButton(tooltip: '검색', onPressed: () => search(queryController.text), icon: const Icon(Icons.search)))),
-    const SizedBox(height: 8),
-    Wrap(spacing: 7, runSpacing: 4, children: ['락업클러치·미션', '카오디오·전장', '타이어'].map((prompt) => ActionChip(label: Text(prompt), onPressed: () {
-      final query = prompt == '락업클러치·미션' ? '락업클러치 미션 교체' : prompt == '카오디오·전장' ? '카오디오 오디오' : '타이어';
-      queryController.text = query;
-      search(query);
-    })).toList()),
-    if (searched) ...[
-      const Divider(height: 22),
-      Text(results.isEmpty
-        ? '연결된 공지 목록에서는 관련 글을 찾지 못했습니다. 네이버 카페 게시글 검색으로 더 찾아보세요.'
-        : '연결된 카페 공지에서 관련 글 ${results.length}건을 찾았습니다. 자료가 제목과 링크에 한정되어 있으니 정비 내용은 원문에서 확인해 주세요.',
-        style: const TextStyle(fontSize: 13, height: 1.45)),
-      ...results.map((notice) => CafeNoticeTile(notice: notice)),
+    if (searchError != null) ...[
+      const SizedBox(height: 8),
+      Text(searchError!, style: const TextStyle(fontSize: 13, color: brandRed)),
     ],
-    Align(alignment: Alignment.centerRight, child: TextButton.icon(onPressed: searchNaver, icon: const Icon(Icons.open_in_new, size: 16), label: const Text('네이버 카페 게시글에서 더 검색'))),
-    Text('시제품은 연결된 공지 목록을 검색합니다. 전체 게시글 AI 요약은 허용된 데이터 연동 후 제공됩니다.', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+  ])));
+}
+
+class CafeLatestFeed extends StatefulWidget {
+  const CafeLatestFeed({required this.api, super.key});
+  final ApiClient api;
+  @override
+  State<CafeLatestFeed> createState() => _CafeLatestFeedState();
+}
+
+class _CafeLatestFeedState extends State<CafeLatestFeed> {
+  late Future<Map<String, dynamic>> _posts;
+
+  @override
+  void initState() {
+    super.initState();
+    _posts = widget.api.latestCafePosts();
+  }
+
+  void _reload() => setState(() => _posts = widget.api.latestCafePosts());
+
+  Future<void> _openPost(Map<String, dynamic> post) async {
+    final uri = Uri.tryParse((post['link'] ?? '').toString());
+    if (uri == null || uri.scheme != 'https' || !uri.host.endsWith('cafe.naver.com')) return;
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('네이버 카페 글을 열지 못했습니다.')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.fromLTRB(14, 14, 14, 8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Row(children: [
+      const Expanded(child: SectionHeading(title: '아이러브미니 최신글', subtitle: '공개글 · MINI 검색 최신순')),
+      IconButton(tooltip: '최신글 새로고침', onPressed: _reload, icon: const Icon(Icons.refresh_rounded)),
+    ]),
+    FutureBuilder<Map<String, dynamic>>(
+      future: _posts,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
+        }
+        if (snapshot.hasError) return Padding(padding: const EdgeInsets.only(bottom: 8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('카페 최신글을 불러오지 못했어요. ${snapshot.error.toString().replaceFirst('Exception: ', '')}', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.error)),
+          TextButton.icon(onPressed: _reload, icon: const Icon(Icons.refresh, size: 16), label: const Text('다시 불러오기')),
+        ]));
+        final rows = (snapshot.data?['items'] as List?)?.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList() ?? const <Map<String, dynamic>>[];
+        if (rows.isEmpty) return const Padding(padding: EdgeInsets.only(bottom: 14), child: Text('현재 검색 API에서 확인되는 공개 게시글이 없습니다.', style: TextStyle(fontSize: 13)));
+        return Column(children: rows.take(10).map((post) => InkWell(
+          onTap: () => _openPost(post),
+          child: Padding(padding: const EdgeInsets.symmetric(vertical: 11), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Padding(padding: EdgeInsets.only(top: 6, right: 10), child: Icon(Icons.circle, size: 7, color: brandRed)),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text((post['title'] ?? '아이러브미니 카페 게시글').toString(), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, height: 1.4)),
+              if ((post['description'] ?? '').toString().isNotEmpty) ...[
+                const SizedBox(height: 3),
+                Text((post['description']).toString(), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.4)),
+              ],
+              const SizedBox(height: 3),
+              Text('${post['cafe_name'] ?? '아이러브미니'} · 네이버 카페 원문', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ])),
+            const Icon(Icons.open_in_new_rounded, size: 16),
+          ])),
+        )).toList()),
+      },
+    ),
   ])));
 }
 
@@ -585,7 +824,6 @@ class _AttendanceCheckinCardState extends State<AttendanceCheckinCard> {
         final points = (data['balance_points'] as num?)?.toInt() ?? 0;
         final streak = (data['streak_days'] as num?)?.toInt() ?? 0;
         final checked = data['checked_in_today'] == true;
-        final checkins = (data['checkins'] as List? ?? const []).take(7).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             const Icon(Icons.event_available, color: brandRed),
@@ -595,14 +833,6 @@ class _AttendanceCheckinCardState extends State<AttendanceCheckinCard> {
           ]),
           const SizedBox(height: 6),
           Text('매일 출석 1,000P · 7일 연속 보너스 3,000P · 현재 $streak일 연속', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-          if (checkins.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Wrap(spacing: 6, runSpacing: 6, children: checkins.map((row) => Chip(
-              visualDensity: VisualDensity.compact,
-              avatar: const Icon(Icons.check, size: 14),
-              label: Text('${row['date']} · +${row['points']}P', style: const TextStyle(fontSize: 10)),
-            )).toList()),
-          ],
           const SizedBox(height: 10),
           SizedBox(width: double.infinity, child: FilledButton.icon(
             onPressed: busy || snapshot.connectionState == ConnectionState.waiting ? null : _checkIn,
@@ -617,65 +847,91 @@ class _AttendanceCheckinCardState extends State<AttendanceCheckinCard> {
   );
 }
 
-class CafeMiniAlbumPreview extends StatelessWidget {
+class CafeMiniAlbumPreview extends StatefulWidget {
   const CafeMiniAlbumPreview({super.key});
+  @override
+  State<CafeMiniAlbumPreview> createState() => _CafeMiniAlbumPreviewState();
+}
+
+class _CafeMiniAlbumPreviewState extends State<CafeMiniAlbumPreview> {
+  static const _posts = [
+    {'image': 'album-01.jpg', 'title': '연휴 끝', 'author': '꼬마악동', 'meta': '01:05 · 조회 137'},
+    {'image': 'album-02.jpg', 'title': '명절이라 디테일링 …', 'author': '구름아', 'meta': '26.09.25 · 조회 220'},
+    {'image': 'album-03.jpg', 'title': '몇년만에 손세차.. F60', 'author': '케인지F60촌놈', 'meta': '26.09.25 · 조회 147'},
+    {'image': 'album-04.jpg', 'title': '블랙의 세차', 'author': '집가이', 'meta': '26.09.25 · 조회 187'},
+    {'image': 'album-05.jpg', 'title': '3개월만에 차 받았어…', 'author': '빵빵도우', 'meta': '26.09.23 · 조회 250'},
+    {'image': 'album-06.jpg', 'title': '하루를 마감하는 미니', 'author': '집가이', 'meta': '26.09.23 · 조회 159'},
+  ];
+  final ScrollController _scrollController = ScrollController();
+  int _index = 0;
+
+  void _updateIndex(double cardStep) {
+    if (!_scrollController.hasClients) return;
+    final next = (_scrollController.offset / cardStep).round().clamp(0, _posts.length - 1);
+    if (next != _index && mounted) setState(() => _index = next);
+  }
+
+  void _move(double cardStep, int direction) {
+    if (!_scrollController.hasClients) return;
+    final destination = (_scrollController.offset + cardStep * direction)
+        .clamp(0.0, _scrollController.position.maxScrollExtent).toDouble();
+    _scrollController.animateTo(destination, duration: const Duration(milliseconds: 280), curve: Curves.easeOut);
+  }
+
+  @override
+  void dispose() { _scrollController.dispose(); super.dispose(); }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    const posts = [
-      {'image': 'album-01.jpg', 'title': '연휴 끝', 'author': '꼬마악동', 'meta': '01:05 · 조회 137'},
-      {'image': 'album-02.jpg', 'title': '명절이라 디테일링 …', 'author': '구름아', 'meta': '26.09.25 · 조회 220'},
-      {'image': 'album-03.jpg', 'title': '몇년만에 손세차.. F60', 'author': '케인지F60촌놈', 'meta': '26.09.25 · 조회 147'},
-      {'image': 'album-04.jpg', 'title': '블랙의 세차', 'author': '집가이', 'meta': '26.09.25 · 조회 187'},
-      {'image': 'album-05.jpg', 'title': '3개월만에 차 받았어…', 'author': '빵빵도우', 'meta': '26.09.23 · 조회 250'},
-      {'image': 'album-06.jpg', 'title': '하루를 마감하는 미니', 'author': '집가이', 'meta': '26.09.23 · 조회 159'},
-    ];
+    final cardWidth = (MediaQuery.sizeOf(context).width - 40) * .7;
+    final cardStep = cardWidth + 12;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const SectionHeading(title: '미니앨범', subtitle: '카페 회원들의 MINI 이야기'),
-      const SizedBox(height: 8),
-      Card(
-        color: theme.colorScheme.surface,
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: posts.length,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3, crossAxisSpacing: 9, mainAxisSpacing: 14, mainAxisExtent: 181,
-            ),
-            itemBuilder: (context, index) {
-              final post = posts[index];
-              return Semantics(
-                button: true,
-                label: '${post['title']}, ${post['author']}. 아이러브미니 카페 미니앨범 열기',
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(10),
-                  onTap: () => _openCafeNotice(context, cafeMiniAlbumUrl),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: AspectRatio(
-                        aspectRatio: 1,
-                        child: Image.asset('assets/images/mini-album/${post['image']}', fit: BoxFit.cover),
-                      ),
+      Row(children: [
+        const Expanded(child: SectionHeading(title: '미니앨범', subtitle: '카페 회원들의 MINI 이야기')),
+        IconButton(tooltip: '이전 사진', onPressed: _index == 0 ? null : () => _move(cardStep, -1), icon: const Icon(Icons.chevron_left)),
+        Text('${_index + 1} / ${_posts.length}', style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
+        IconButton(tooltip: '다음 사진', onPressed: _index == _posts.length - 1 ? null : () => _move(cardStep, 1), icon: const Icon(Icons.chevron_right)),
+      ]),
+      SizedBox(height: cardWidth + 82, child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) { _updateIndex(cardStep); return false; },
+        child: ListView.separated(
+          controller: _scrollController,
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          itemCount: _posts.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 12),
+          itemBuilder: (context, index) {
+            final post = _posts[index];
+            return SizedBox(width: cardWidth, child: Semantics(
+              button: true,
+              label: '${post['title']}, ${post['author']}. 아이러브미니 카페 미니앨범 열기',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => _openCafeNotice(context, naverCafeMobileUrl),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: AspectRatio(
+                      aspectRatio: 1,
+                      child: Image.asset('assets/images/mini-album/${post['image']}', fit: BoxFit.cover),
                     ),
-                    const SizedBox(height: 5),
-                    Text(post['title']!, maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 3),
-                    Text(post['author']!, maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurface)),
-                    const SizedBox(height: 2),
-                    Text(post['meta']!, maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
-                  ]),
-                ),
-              );
-            },
-          ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(post['title']!, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 3),
+                  Text(post['author']!, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurface)),
+                  const SizedBox(height: 2),
+                  Text(post['meta']!, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
+                ]),
+              ),
+            ));
+          },
         ),
-      ),
+      )),
     ]);
   }
 }
@@ -711,10 +967,11 @@ class _VehicleOverviewState extends State<VehicleOverview> {
       child: Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           const Expanded(child: Text('내 차량', style: TextStyle(fontWeight: FontWeight.w800))),
+          if (vehicle != null) IconButton(tooltip: '차량 QR', onPressed: () => showVehiclePassportQr(context, vehicle), icon: const Icon(Icons.qr_code_2)),
           TextButton(onPressed: widget.onGarage, child: const Text('차량 관리')),
         ]),
         if (vehicle != null && (hasFavouredF66Photo(vehicle) || hasMaybachPhoto(vehicle)))
-          VehiclePhoto(vehicle: vehicle, height: 118),
+          VehiclePhoto(vehicle: vehicle, height: 220),
         Text(vehicleTitle, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -.5)),
         const SizedBox(height: 4),
         Text(subtitle, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
@@ -729,6 +986,13 @@ class _VehicleOverviewState extends State<VehicleOverview> {
   });
 }
 
+Map<String, String>? partnerExternalActions(String name) {
+  if (name.contains('얼마면탈까')) return {'label': '상담', 'contact': 'https://pf.kakao.com/_xerCTG/chat', 'site': 'https://openestimate.co.kr/'};
+  if (name.contains('프린트랩')) return {'label': '상담', 'contact': 'https://pf.kakao.com/_mxlrHj/chat', 'site': 'https://smartstore.naver.com/print_lab/'};
+  if (name.contains('금호타이어')) return {'label': '채널', 'contact': 'https://pf.kakao.com/_XNxdxkxl', 'site': 'https://www.kumhotire.com/ko/index.do'};
+  return null;
+}
+
 class CatalogPage extends StatefulWidget {
   const CatalogPage({required this.api, required this.path, required this.title, this.compact = false, super.key});
   final ApiClient api;
@@ -739,28 +1003,19 @@ class CatalogPage extends StatefulWidget {
 }
 
 class _CatalogPageState extends State<CatalogPage> {
-  static const _regionalCollisionPartners = <Map<String, dynamic>>[
-    {'id': 'local-koreadiesel', 'name': '한국디젤카연구소 논산', 'region': '충남 논산', 'address': '충남 논산', 'region_group': '전라/경상/충청 협력업체', 'category': '사고수리 전문', 'service_categories': ['사고수리', '판금·도색', '디젤 정비', '정비'], 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/543', 'map_url': 'https://map.naver.com/p/search/%ED%95%9C%EA%B5%AD%EB%94%94%EC%A0%A4%EC%B9%B4%EC%97%B0%EA%B5%AC%EC%86%8C%20%EB%85%BC%EC%82%B0'},
-    {'id': 'local-ablemotors', 'name': '에이블모터스 부산', 'region': '부산', 'address': '부산', 'region_group': '전라/경상/충청 협력업체', 'category': '사고수리 전문', 'service_categories': ['사고수리', '판금·도색', '수입차 정비', '정비'], 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/288', 'map_url': 'https://map.naver.com/p/search/%EC%97%90%EC%9D%B4%EB%B8%94%EB%AA%A8%ED%84%B0%EC%8A%A4%20%EB%B6%80%EC%82%B0'},
-    {'id': 'local-jetly', 'name': '제틀리시 부산', 'region': '부산', 'address': '부산', 'region_group': '전라/경상/충청 협력업체', 'category': '사고수리 전문', 'service_categories': ['사고수리', '판금·도색', '정비'], 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/636', 'map_url': 'https://map.naver.com/p/search/%EC%A0%9C%ED%8B%80%EB%A6%AC%EC%8B%9C%20%EB%B6%80%EC%82%B0'},
-  ];
-  List<Map<String, dynamic>> _includeRegionalCollisionPartners(List<Map<String, dynamic>> source) {
-    final merged = source.map((item) => Map<String, dynamic>.from(item)).toList();
-    for (final local in _regionalCollisionPartners) {
-      final index = merged.indexWhere((item) => item['name'] == local['name']);
-      if (index < 0) {
-        merged.add(Map<String, dynamic>.from(local));
-      } else {
-        final existing = merged[index];
-        final categories = (existing['service_categories'] as List? ?? const []).map((value) => value.toString()).toSet();
-        categories.addAll((local['service_categories'] as List).map((value) => value.toString()));
-        merged[index] = {...existing, ...local, 'id': existing['id'], 'service_categories': categories.toList()};
-      }
-    }
-    return merged;
-  }
   late Future<List<Map<String, dynamic>>> itemsFuture;
-  String query = '', filter = '전체';
+  String query = '', filter = '전체', regionFilter = '전체 지역';
+  String mapQuery = '대한민국';
+  final mapPanelKey = GlobalKey();
+  void showPartnerMap(Map<String, dynamic> item) {
+    final actions = partnerExternalActions('${item['name']}');
+    if (actions != null) { _openCafeNotice(context, actions['contact']!); return; }
+    setState(() => mapQuery = '${item['name']} ${item['address'] ?? item['region'] ?? ''}'.trim());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final panel = mapPanelKey.currentContext;
+      if (panel != null) Scrollable.ensureVisible(panel, alignment: .1, duration: const Duration(milliseconds: 300));
+    });
+  }
   @override
   void initState() { super.initState(); itemsFuture = widget.api.list(widget.path); }
   @override
@@ -778,7 +1033,6 @@ class _CatalogPageState extends State<CatalogPage> {
   bool matches(Map<String, dynamic> item) {
     final categories = (item['service_categories'] as List? ?? []).join(' ');
     final text = '${item['name']} ${item['region']} $categories'.toLowerCase();
-    final region = (item['region'] ?? '').toString();
     final categoryMatch = switch (filter) {
       '정비' => categories.contains('정비') || categories.contains('수입차'),
       '사고수리' => categories.contains('사고') || categories.contains('판금'),
@@ -788,10 +1042,10 @@ class _CatalogPageState extends State<CatalogPage> {
       '부품·튜닝' => categories.contains('부품') || categories.contains('튜닝'),
       '신차패키지' => _partnerSpecialty(item) == '신차패키지',
       '수도권' => _partnerRegionGroup(item) == '서울/경기 협력업체' && _partnerSpecialty(item) != '신차패키지',
-      '전라/경상/충청' => _partnerRegionGroup(item) == '전라/경상/충청 협력업체',
+      '지방' => _partnerRegionGroup(item) == '전라/경상/충청 협력업체',
       _ => true,
     };
-    return categoryMatch && text.contains(query.trim().toLowerCase());
+    return categoryMatch && (regionFilter == '전체 지역' || _partnerRegionGroup(item) == regionFilter) && text.contains(query.trim().toLowerCase());
   }
   void openItem(Map<String, dynamic> item) {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => widget.path == 'partners'
@@ -812,7 +1066,7 @@ class _CatalogPageState extends State<CatalogPage> {
     if (text.contains('사고')) return '사고수리 전문';
     if (text.contains('유리')) return '차량유리 전문';
     if (RegExp(r'전장|오디오|튜닝|부품').hasMatch(text)) return '전장류 전문';
-    if (RegExp(r'휠|타이어').hasMatch(text)) return '휠 전문';
+    if (RegExp(r'휠|타이어').hasMatch(text)) return '휠·타이어 전문';
     return '정비 전문';
   }
   bool _partnerHasSpecialty(Map<String, dynamic> item, String specialty) {
@@ -821,49 +1075,41 @@ class _CatalogPageState extends State<CatalogPage> {
       '사고수리 전문' => text.contains('사고') || text.contains('판금'),
       '차량유리 전문' => text.contains('유리'),
       '전장류 전문' => RegExp(r'전장|오디오').hasMatch(text),
-      '휠 전문' => RegExp(r'휠|타이어').hasMatch(text),
-      '정비 전문' => RegExp(r'정비|수리|서비스|디젤').hasMatch(text),
+      '휠·타이어 전문' => RegExp(r'휠|타이어').hasMatch(text),
+      '사고수리·정비 전문' => (text.contains('사고') || text.contains('판금')) && RegExp(r'정비|수리|서비스|디젤').hasMatch(text),
+      '부품·튜닝 전문' => text.contains('부품') || (text.contains('튜닝') && !RegExp(r'전장|오디오').hasMatch(text)),
+      '정비 전문' => RegExp(r'정비|서비스|디젤').hasMatch(text) || (text.contains('수리') && !RegExp(r'사고|판금|도색|휠').hasMatch(text)),
       _ => _partnerSpecialty(item) == specialty,
     };
   }
-  bool _partnerInfoPending(Map<String, dynamic> item) =>
-      (item['region'] ?? '').toString().contains('확인 필요') && (item['cafe_url'] ?? '').toString().isEmpty;
   List<Widget> _partnerGroupTiles(List<Map<String, dynamic>> items) {
-    const regions = ['서울/경기 협력업체', '전라/경상/충청 협력업체'];
-    const specialties = ['신차패키지', '사고수리 전문', '차량유리 전문', '전장류 전문', '휠 전문', '정비 전문'];
-    final packages = items.where((item) => _partnerSpecialty(item) == '신차패키지').toList();
-    return [
-      if (packages.isNotEmpty) Card(clipBehavior: Clip.antiAlias, child: ExpansionTile(
-        title: const Text('신차패키지', style: TextStyle(fontWeight: FontWeight.w800)),
-        subtitle: Text('${packages.length}곳 · 지역·연락처 확인 중'),
-        children: packages.map((item) => ListTile(
-          title: Text((item['name'] ?? '').toString()),
-          subtitle: Text(_partnerInfoPending(item) ? '정보 확인 중 · 지역 미확인' : (item['region'] ?? '').toString()),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => openItem(item),
-        )).toList(),
-      )),
-      ...regions.map((region) {
-      final regionItems = items.where((item) => _partnerSpecialty(item) != '신차패키지' && _partnerRegionGroup(item) == region).toList();
-      final grouped = <String, List<Map<String, dynamic>>>{for (final name in specialties) name: regionItems.where((item) => _partnerHasSpecialty(item, name)).toList()};
-      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Padding(padding: const EdgeInsets.fromLTRB(8, 16, 8, 6), child: Row(children: [
-          Expanded(child: Text(region, style: const TextStyle(fontWeight: FontWeight.w800))),
-          Text('${regionItems.length}곳', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
-        ])),
-        ...specialties.where((name) => grouped[name]!.isNotEmpty).map((name) => Card(clipBehavior: Clip.antiAlias, child: ExpansionTile(
-          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: Text('${grouped[name]!.length}곳'),
-          children: grouped[name]!.map((item) => ListTile(
-            title: Text((item['name'] ?? '').toString()),
-            subtitle: Text((item['region'] ?? '').toString()),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => openItem(item),
-          )).toList(),
-        ))),
-      ]);
-      }),
-    ];
+    const groups = ['사고수리 전문', '차량유리 전문', '전장류 전문', '휠·타이어 전문', '부품·튜닝 전문', '정비 전문', '신차패키지'];
+    return ['서울/경기 협력업체', '전라/경상/충청 협력업체', '신차패키지'].expand((region) {
+      final shops = items.where((item) => region == '신차패키지' ? _partnerSpecialty(item) == '신차패키지' : _partnerSpecialty(item) != '신차패키지' && _partnerRegionGroup(item) == region).toList();
+      if (shops.isEmpty) return <Widget>[];
+      final headings = region == '전라/경상/충청 협력업체' ? ['사고수리·정비 전문'] : region == '신차패키지' ? ['신차패키지'] : groups;
+      return <Widget>[
+        Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Row(children: [Expanded(child: Text(region == '서울/경기 협력업체' ? '수도권 협력업체' : region == '신차패키지' ? '신차패키지 업체' : '지방 협력업체', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18))), Text('${shops.length}곳')])),
+        ...headings.map((group) {
+          final list = shops.where((item) => group == '사고수리·정비 전문' || _partnerHasSpecialty(item, group)).toList();
+          if (list.isEmpty) return const SizedBox.shrink();
+          return Card(clipBehavior: Clip.antiAlias, child: ExpansionTile(
+            key: PageStorageKey('partner-$region-$group-$filter-$query'),
+            initiallyExpanded: filter != '전체' || query.isNotEmpty,
+            title: Text(group, style: const TextStyle(fontWeight: FontWeight.w700)),
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [Text('${list.length}곳'), const SizedBox(width: 12), const Icon(Icons.add, color: brandRed)]),
+            children: list.map((item) {
+              final external = partnerExternalActions('${item['name']}');
+              return Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                InkWell(onTap: () => openItem(item), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${item['name']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)), const SizedBox(height: 6), Text('${(item['address'] ?? '').toString().isNotEmpty ? item['address'] : item['region']} · ${item['category'] ?? group}', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))])),
+                const SizedBox(height: 10),
+                Row(children: [Expanded(child: OutlinedButton(onPressed: () => showPartnerMap(item), child: Text(external?['label'] ?? '지도보기'))), const SizedBox(width: 8), Expanded(child: FilledButton(onPressed: () => external == null ? openItem(item) : _openCafeNotice(context, external['site']!), child: Text(external == null ? '예약 요청' : '사이트 이동')))]),
+              ]));
+            }).toList(),
+          ));
+        }),
+      ];
+    }).toList();
   }
   @override
   Widget build(BuildContext context) {
@@ -874,32 +1120,40 @@ class _CatalogPageState extends State<CatalogPage> {
           return const Padding(padding: EdgeInsets.all(20), child: Center(child: CircularProgressIndicator()));
         }
         if (snapshot.hasError) return Column(children: [
-          const InfoCard(text: '목록을 불러오지 못했습니다. 인터넷 연결과 로그인 상태를 확인해 주세요.'),
+          InfoCard(text: snapshot.error is TimeoutException ? '서버가 시작하는 데 시간이 걸리고 있습니다. 잠시 후 다시 시도해 주세요.' : '목록 요청 실패: ${snapshot.error.toString().replaceFirst("Exception: ", "")}'),
           TextButton(onPressed: reload, child: const Text('다시 시도')),
         ]);
         final apiItems = snapshot.data ?? [];
         final isPartners = widget.path == 'partners';
-        final all = isPartners ? _includeRegionalCollisionPartners(apiItems) : apiItems;
+        final all = isPartners ? alignPartnerDirectory(apiItems) : apiItems;
         final items = isPartners ? all.where(matches).toList() : all;
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           if (isPartners) ...[
             if (!widget.compact) ...[
-              Text('ILOVEMINI 협력업체\n성지를 찾아요', style: const TextStyle(fontSize: 25, height: 1.12, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
+              const Text('ILOVEMINI PARTNERS', style: TextStyle(color: brandRed, letterSpacing: 3, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 10),
+              Text('협력업체 찾기', style: const TextStyle(fontSize: 25, height: 1.12, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
               const SizedBox(height: 8),
-              Text('기존에 확인된 협력업체를 분야별로 살펴보고 문의하세요.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              Text('분야와 지역으로 찾고, 지도 확인과 예약 요청을 한곳에서 진행하세요.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
               const SizedBox(height: 18),
-              TextField(decoration: const InputDecoration(labelText: '업체명, 지역, 서비스 검색', prefixIcon: Icon(Icons.search)),
-                onChanged: (value) => setState(() => query = value)),
+              Row(children: [Expanded(flex: 3, child: TextField(decoration: const InputDecoration(hintText: '업체명 정비 항목 검색'), onChanged: (value) => setState(() => query = value))), const SizedBox(width: 10), Expanded(flex: 2, child: DropdownButtonFormField<String>(initialValue: regionFilter, items: ['전체 지역', '서울/경기 협력업체', '전라/경상/충청 협력업체', '신차패키지'].map((value) => DropdownMenuItem(value: value, child: Text(value == '서울/경기 협력업체' ? '수도권' : value == '전라/경상/충청 협력업체' ? '지방' : value, overflow: TextOverflow.ellipsis))).toList(), onChanged: (value) => setState(() => regionFilter = value!)))]),
               const SizedBox(height: 12),
-              Wrap(spacing: 8, runSpacing: 8, children: ['전체', '정비', '사고수리', '차량유리', '오디오·전장', '휠·타이어', '부품·튜닝', '신차패키지', '수도권', '전라/경상/충청'].map((name) => ChoiceChip(
-                label: Text(name), selected: filter == name,
+              Wrap(spacing: 8, runSpacing: 8, children: ['전체', '정비', '사고수리', '오디오·전장', '차량유리', '휠·타이어', '부품·튜닝', '신차패키지', '수도권', '지방'].map((name) => ChoiceChip(
+                label: Text(name), selected: filter == name, showCheckmark: false, selectedColor: brandRed, labelStyle: TextStyle(color: filter == name ? Colors.white : Theme.of(context).colorScheme.onSurface), shape: const StadiumBorder(),
                 onSelected: (_) => setState(() => filter = name))).toList()),
             ],
-            Padding(padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text('등록된 협력업체 ${all.length}곳 · 표시 ${items.length}곳')),
+            const SizedBox(height: 24),
+            const Text('Google 업체 지도', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            const Text('업체별 지도·상담 버튼으로 위치를 확인하거나 문의할 수 있어요.'),
+            const SizedBox(height: 12),
           ],
           if (items.isEmpty) InfoCard(text: all.isEmpty ? widget.title : '검색 조건에 맞는 업체가 없습니다.'),
-          if (isPartners) ..._partnerGroupTiles(items)
+          if (isPartners) ...[
+            Padding(key: mapPanelKey, padding: const EdgeInsets.only(bottom: 16), child: PartnerMap(query: mapQuery)),
+            Row(children: [const Expanded(child: Text('검색 결과')), Text('${items.length}곳', style: const TextStyle(fontWeight: FontWeight.w800))]),
+            ..._partnerGroupTiles(items),
+          ]
           else ...items.map((item) => Card(clipBehavior: Clip.antiAlias, child: ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
             leading: CircleAvatar(backgroundColor: Theme.of(context).colorScheme.primaryContainer,
@@ -987,16 +1241,14 @@ class PartnerDetailPage extends StatelessWidget {
     final mapLink = (partner['map_url'] ?? '').toString();
     final cafeLink = (partner['cafe_url'] ?? '').toString();
     final infoPending = (partner['region'] ?? '').toString().contains('확인 필요') && cafeLink.isEmpty;
+    final externalActions = partnerExternalActions(name);
     final categories = (partner['service_categories'] as List? ?? const []).map((item) => item.toString()).toList();
     final details = <Widget>[
       if (address.isNotEmpty) ListTile(leading: const Icon(Icons.location_on_outlined), title: const Text('주소'), subtitle: Text(address)),
       if (phone.isNotEmpty) ListTile(leading: const Icon(Icons.call_outlined), title: const Text('전화번호'), subtitle: Text(phone)),
       if ((partner['hours'] ?? '').toString().isNotEmpty) ListTile(leading: const Icon(Icons.schedule_outlined), title: const Text('영업시간'), subtitle: Text(partner['hours'].toString())),
     ];
-    final mapUri = Uri.tryParse(mapLink) ?? Uri();
-    final usableMapUri = mapLink.isNotEmpty && mapUri.hasScheme
-        ? mapUri
-        : Uri.https('map.naver.com', '/p/search/$name ${address}'.trim());
+    final usableMapUri = Uri.https('www.google.com', '/maps/search/', {'api': '1', 'query': '$name $address'.trim()});
     return Scaffold(
       appBar: AppBar(title: const Text('업체 정보')),
       body: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 28), children: [
@@ -1017,6 +1269,13 @@ class PartnerDetailPage extends StatelessWidget {
             ],
           ]),
         ),
+        const SizedBox(height: 16),
+        if (externalActions == null) PartnerMap(query: '$name ${address.isEmpty ? partner['region'] ?? '' : address}'),
+        if (externalActions != null) Row(children: [
+          Expanded(child: OutlinedButton(onPressed: () => _launch(context, Uri.parse(externalActions['contact']!)), child: Text(externalActions['label']!))),
+          const SizedBox(width: 12),
+          Expanded(child: FilledButton(onPressed: () => _launch(context, Uri.parse(externalActions['site']!)), child: const Text('사이트이동'))),
+        ]),
         if (categories.isNotEmpty) ...[
           const SizedBox(height: 18),
           Wrap(spacing: 8, runSpacing: 8, children: categories.map((category) => Chip(label: Text(category))).toList()),
@@ -1036,16 +1295,29 @@ class PartnerDetailPage extends StatelessWidget {
           Row(children: [
             if (phone.isNotEmpty) Expanded(child: FilledButton.icon(onPressed: () => _launch(context, Uri(scheme: 'tel', path: phone)), icon: const Icon(Icons.call), label: const Text('전화하기'))),
             if (phone.isNotEmpty && (mapLink.isNotEmpty || address.isNotEmpty)) const SizedBox(width: 10),
-            if (mapLink.isNotEmpty || address.isNotEmpty) Expanded(child: OutlinedButton.icon(onPressed: () => _launch(context, usableMapUri), icon: const Icon(Icons.map_outlined), label: const Text('지도 보기'))),
+            if (mapLink.isNotEmpty || address.isNotEmpty) Expanded(child: OutlinedButton.icon(onPressed: () => _launch(context, usableMapUri), icon: const Icon(Icons.map_outlined), label: const Text('지도보기'))),
           ]),
         if (infoPending)
-          const InfoCard(text: '이 업체는 협력업체 목록에서 확인했지만 지역·연락처·카페 게시글은 아직 확인되지 않았습니다. 확인 전 정보는 표시하지 않습니다.'),
+          const InfoCard(text: '이 업체는 협력업체 목록에서 확인했지만 지역·연락처·카페 게시글은 아직 확인되지 않았습니다. 확인 전 정보는 표시하지 않습니다.')
         else if (phone.isEmpty && mapLink.isEmpty && address.isEmpty)
           const InfoCard(text: '업체 연락처와 위치는 실제 정보를 등록한 뒤 표시됩니다.'),
         if (cafeLink.isNotEmpty) ...[
           const SizedBox(height: 8),
           OutlinedButton.icon(onPressed: () => _launch(context, Uri.tryParse(cafeLink) ?? Uri()), icon: const Icon(Icons.open_in_new), label: const Text('카페에서 더 알아보기')),
         ],
+        const SizedBox(height: 12),
+        if (partner['catalog_only'] == true) const InfoCard(text: '이 지점은 위치 확인만 가능합니다. 서버에 지점 등록 후 예약을 연결합니다.'),
+        if (externalActions == null && partner['catalog_only'] != true) FilledButton.icon(
+          onPressed: () async {
+            final result = await Navigator.of(context).push<bool>(MaterialPageRoute(
+              builder: (_) => PartnerBookingPage(api: api, partner: partner),
+            ));
+            if (result == true && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('업체에 예약 요청을 보냈습니다. MY에서 상태를 확인할 수 있어요.')));
+            }
+          },
+          icon: const Icon(Icons.calendar_month_outlined), label: const Text('예약 요청'),
+        ),
         const SizedBox(height: 24),
         const SectionHeading(title: '진행 중인 혜택', subtitle: '협력업체 프로모션'),
         FutureBuilder<List<Map<String, dynamic>>>(
@@ -1112,7 +1384,7 @@ class _GaragePageState extends State<GaragePage> {
   @override
   void initState() {
     super.initState();
-    vehiclesFuture = widget.api.list('vehicles');
+    vehiclesFuture = widget.signedIn || ApiClient.demoMode ? widget.api.list('vehicles') : Future.value([]);
   }
 
   void reloadVehicles() => setState(() {
@@ -1285,7 +1557,7 @@ class _GaragePageState extends State<GaragePage> {
     final created = await showDialog<bool>(context: context, builder: (dialogContext) => StatefulBuilder(builder: (dialogContext, setDialogState) => AlertDialog(
       title: const Text('차계부 기록 추가'),
       content: SizedBox(width: 420, child: SingleChildScrollView(child: Form(key: formKey, child: Column(mainAxisSize: MainAxisSize.min, children: [
-        DropdownButtonFormField<String>(value: kind, decoration: const InputDecoration(labelText: '기록 종류'), items: const [
+        DropdownButtonFormField<String>(initialValue: kind, decoration: const InputDecoration(labelText: '기록 종류'), items: const [
           DropdownMenuItem(value: 'fuel', child: Text('주유')), DropdownMenuItem(value: 'service', child: Text('정비')),
           DropdownMenuItem(value: 'part', child: Text('소모품')), DropdownMenuItem(value: 'wash', child: Text('세차')),
           DropdownMenuItem(value: 'other', child: Text('기타')),
@@ -1433,7 +1705,7 @@ class _GaragePageState extends State<GaragePage> {
                       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
                       decoration: BoxDecoration(borderRadius: BorderRadius.circular(13), border: Border.all(color: selected ? colors.primary : colors.outlineVariant)),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Text('차량 ${entry.key + 1}', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: selected ? colors.onPrimary.withOpacity(.8) : colors.onSurfaceVariant)),
+                        Text('차량 ${entry.key + 1}', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: selected ? colors.onPrimary.withValues(alpha: .8) : colors.onSurfaceVariant)),
                         const SizedBox(height: 3),
                         Text(name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, height: 1.2, fontWeight: FontWeight.w800, color: selected ? colors.onPrimary : colors.onSurface)),
                       ]),
@@ -1455,7 +1727,6 @@ class _GaragePageState extends State<GaragePage> {
               if (vehicle['model_year'] != null) '${vehicle['model_year']}년형',
               '현재 ${vehicle['current_odometer_km'] == null ? '주행거리 미등록' : '${formatKilometers(vehicle['current_odometer_km'])} km'}',
             ].join(' · '), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-            if (vehicle['sample_data'] == true) const Padding(padding: EdgeInsets.only(top: 5), child: Text('주행거리는 시제품 예시입니다.', style: TextStyle(fontSize: 11))),
           ]))),
           const SizedBox(height: 12),
           FutureBuilder<Map<String, dynamic>>(
@@ -1501,7 +1772,7 @@ class _GaragePageState extends State<GaragePage> {
             ]),
           ],
           const SizedBox(height: 20),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('차계부', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)), TextButton.icon(onPressed: () => addLedgerEntry(vehicleId), icon: const Icon(Icons.add), label: const Text('기록 추가'))]),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('차량 이력', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)), TextButton.icon(onPressed: () => addLedgerEntry(vehicleId), icon: const Icon(Icons.add), label: const Text('기록 추가'))]),
           FutureBuilder<List<Map<String, dynamic>>>(key: ValueKey('ledger-$vehicleId-$ledgerRevision'), future: widget.api.list('ledger?vehicle=$vehicleId'), builder: (context, records) {
             if (records.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
             if (records.hasError) return const InfoCard(text: '차계부를 불러오지 못했습니다.');
@@ -1613,11 +1884,18 @@ class AccountPage extends StatelessWidget {
   final VoidCallback onManageVehicles;
   @override
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(20), children: [
-    const Text('나의 차고', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
+    const Text('MY', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
     const SizedBox(height: 16),
     InfoCard(text: ApiClient.demoMode
         ? '데모 계정으로 체험 중입니다. 차계부와 알림 변경 사항은 앱을 종료하면 초기화됩니다.'
         : signedIn ? '로그인되어 있습니다. 정비 예정일과 목표 주행거리 알림을 관리할 수 있어요.' : '로그인해 차량을 등록하고 기록을 관리하세요.'),
+    const SizedBox(height: 10),
+    MembershipSummaryCard(api: api, signedIn: signedIn),
+    AttendanceCheckinCard(api: api, signedIn: signedIn, onLogin: onLogin),
+    if (signedIn && !ApiClient.demoMode) ...[
+      const SizedBox(height: 12),
+      BookingListSection(api: api),
+    ],
     const SizedBox(height: 20),
     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
       const Text('내 차량', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900)),
@@ -1644,7 +1922,6 @@ class AccountPage extends StatelessWidget {
               Row(children: [Expanded(child: Text(name, style: const TextStyle(fontWeight: FontWeight.w800))), const Icon(Icons.chevron_right)]),
               if (hasFavouredF66Photo(vehicle) || hasMaybachPhoto(vehicle)) VehiclePhoto(vehicle: vehicle, height: 104),
               if (details.isNotEmpty) Text(details, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-              if (vehicle['sample_data'] == true) const Padding(padding: EdgeInsets.only(top: 5), child: Text('시제품 예시 차량', style: TextStyle(fontSize: 11))),
             ]),
           )));
         }).toList());
@@ -1652,7 +1929,7 @@ class AccountPage extends StatelessWidget {
     const SizedBox(height: 12),
     OutlinedButton.icon(onPressed: onManageVehicles, icon: const Icon(Icons.directions_car_outlined), label: const Text('차량 관리 및 차계부 열기')),
     const SizedBox(height: 8),
-    OutlinedButton.icon(onPressed: () => _openCafeNotice(context, iloveMiniWebsiteUrl), icon: const Icon(Icons.open_in_new), label: const Text('네이버 카페 바로가기')),
+    OutlinedButton.icon(onPressed: () => _openCafeNotice(context, naverCafeMobileUrl), icon: const Icon(Icons.open_in_new), label: const Text('네이버 카페 바로가기')),
     const SizedBox(height: 8),
     OutlinedButton.icon(
       onPressed: () => _openCafeNotice(context, partnerInquiryUrl),
@@ -1662,7 +1939,7 @@ class AccountPage extends StatelessWidget {
     const SizedBox(height: 8),
     OutlinedButton.icon(onPressed: () => showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
       title: const Text('이용약관 · 개인정보 안내'),
-      content: const SingleChildScrollView(child: Text('이용약관 (안)\n아이러브미니는 차량 관리, 차계부, 정비 알림, 협력업체 정보 및 커뮤니티 연결 기능을 제공합니다. 이용자는 본인의 차량 및 정비 정보를 정확하게 입력하고 계정 보안을 관리해야 합니다. 업체 정보·가격·혜택은 변경될 수 있으므로 이용 전 업체에 확인해 주세요. 정비 계약 및 작업 결과는 이용자와 해당 업체 사이의 책임입니다.\n\n개인정보 처리 안내 (안)\n서비스 제공 과정에서 계정 식별·로그인 정보, 이용자가 입력한 차량·주행거리·정비 기록·사진·문의 내용, 알림 설정 및 이용 기록을 처리할 수 있습니다. 이용 목적은 회원 확인, 차량 이력 관리, 문의 응대, 선택한 알림 제공, 보안과 서비스 개선입니다. 목적 달성 후 관련 법령상 보존 의무가 있는 경우를 제외하고 파기합니다. 이용자는 본인 정보의 열람·정정·삭제·처리정지를 요청할 수 있습니다.\n\n시제품용 초안입니다. 운영 주체, 실제 데이터 흐름·보관 기간·수탁업체 및 연락처를 정식 출시 전에 확정해 고지해야 합니다.'),
+      content: const SingleChildScrollView(child: Text('이용약관 (안)\n아이러브미니는 차량 관리, 차계부, 정비 알림, 협력업체 정보 및 커뮤니티 연결 기능을 제공합니다. 이용자는 본인의 차량 및 정비 정보를 정확하게 입력하고 계정 보안을 관리해야 합니다. 업체 정보·가격·혜택은 변경될 수 있으므로 이용 전 업체에 확인해 주세요. 정비 계약 및 작업 결과는 이용자와 해당 업체 사이의 책임입니다.\n\n개인정보 처리 안내 (안)\n서비스 제공 과정에서 계정 식별·로그인 정보, 이용자가 입력한 차량·주행거리·정비 기록·사진·문의 내용, 알림 설정 및 이용 기록을 처리할 수 있습니다. 이용 목적은 회원 확인, 차량 이력 관리, 문의 응대, 선택한 알림 제공, 보안과 서비스 개선입니다. 목적 달성 후 관련 법령상 보존 의무가 있는 경우를 제외하고 파기합니다. 이용자는 본인 정보의 열람·정정·삭제·처리정지를 요청할 수 있습니다.\n\n시제품용 초안입니다. 운영 주체, 실제 데이터 흐름·보관 기간·수탁업체 및 연락처를 정식 출시 전에 확정해 고지해야 합니다.')),
       actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('닫기'))],
     )), icon: const Icon(Icons.description_outlined), label: const Text('이용약관 · 개인정보 안내')),
     if (signedIn && !ApiClient.demoMode) SwitchListTile(
@@ -1687,6 +1964,221 @@ class AccountPage extends StatelessWidget {
   ]);
 }
 
+class MembershipSummaryCard extends StatefulWidget {
+  const MembershipSummaryCard({required this.api, required this.signedIn, super.key});
+  final ApiClient api;
+  final bool signedIn;
+  @override
+  State<MembershipSummaryCard> createState() => _MembershipSummaryCardState();
+}
+
+class _MembershipSummaryCardState extends State<MembershipSummaryCard> {
+  late Future<Map<String, dynamic>> _grade;
+  late Future<Map<String, dynamic>> _points;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  @override
+  void didUpdateWidget(covariant MembershipSummaryCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.signedIn != widget.signedIn) _load();
+  }
+
+  void _load() {
+    _grade = widget.signedIn || ApiClient.demoMode
+        ? widget.api.memberGrade()
+        : Future.value({'grade_label': '로그인 후 확인'});
+    _points = widget.signedIn || ApiClient.demoMode
+        ? widget.api.attendanceSummary()
+        : Future.value({'balance_points': 0});
+  }
+
+  void _showGradeGuide() {
+    showDialog<void>(context: context, builder: (context) => AlertDialog(
+      title: const Text('회원 등급 안내'),
+      content: const Text('''일반회원
+기본 가입 회원
+
+미니회원
+아이러브미니 운영진이 승인한 MINI 회원
+
+협력업체
+등록된 협력업체 담당자'''),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('닫기'))],
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Row(children: [
+      const Expanded(child: Text('아이러브미니 멤버십', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900))),
+      TextButton(onPressed: _showGradeGuide, child: const Text('등급 안내')),
+    ]),
+    const SizedBox(height: 5),
+    FutureBuilder<Map<String, dynamic>>(future: _grade, builder: (context, snapshot) {
+      if (snapshot.connectionState == ConnectionState.waiting) return const LinearProgressIndicator();
+      return Row(children: [
+        const Icon(Icons.verified_user_outlined, color: brandRed),
+        const SizedBox(width: 8),
+        const Text('회원 등급', style: TextStyle(fontWeight: FontWeight.w700)),
+        const Spacer(),
+        Text((snapshot.data?['grade_label'] ?? '등급 확인 불가').toString(), style: const TextStyle(color: brandRed, fontWeight: FontWeight.w900)),
+      ]);
+    }),
+    const Divider(height: 22),
+    Row(children: [
+      Expanded(child: FutureBuilder<Map<String, dynamic>>(future: _points, builder: (context, snapshot) {
+        final points = (snapshot.data?['balance_points'] as num?)?.toInt() ?? 0;
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('보유 포인트', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 3),
+          Text('${formatKilometers(points)} P', style: const TextStyle(fontSize: 19, color: brandRed, fontWeight: FontWeight.w900)),
+        ]);
+      })),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('쿠폰', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        const SizedBox(height: 3),
+        const Text('준비 중', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+      ])),
+    ]),
+  ])));
+}
+
+class PartnerBookingPage extends StatefulWidget {
+  const PartnerBookingPage({required this.api, required this.partner, super.key});
+  final ApiClient api;
+  final Map<String, dynamic> partner;
+  @override
+  State<PartnerBookingPage> createState() => _PartnerBookingPageState();
+}
+
+class _PartnerBookingPageState extends State<PartnerBookingPage> {
+  final formKey = GlobalKey<FormState>();
+  final service = TextEditingController();
+  final phone = TextEditingController();
+  final note = TextEditingController();
+  late DateTime selected;
+  bool busy = false;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    selected = DateTime(now.year, now.month, now.day + 1, 10);
+    final cats = (widget.partner['service_categories'] as List? ?? const []).map((e) => e.toString()).toList();
+    service.text = cats.isEmpty ? '정비·점검' : cats.first;
+  }
+
+  Future<void> chooseTime() async {
+    final date = await showDatePicker(context: context, initialDate: selected, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 180)));
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(selected));
+    if (time == null || !mounted) return;
+    setState(() => selected = DateTime(date.year, date.month, date.day, time.hour, time.minute));
+  }
+
+  Future<void> submit() async {
+    if (!formKey.currentState!.validate()) return;
+    setState(() { busy = true; error = null; });
+    try {
+      final payload = <String, dynamic>{
+        'partner': widget.partner['id'], 'scheduled_at': selected.toUtc().toIso8601String(),
+        'service_type': service.text.trim(), 'contact_phone': phone.text.trim(),
+        'customer_note': note.text.trim(),
+      };
+      final vehicles = await widget.api.list('vehicles');
+      if (vehicles.isNotEmpty) payload['vehicle'] = vehicles.first['id'];
+      await widget.api.createPartnerBooking(payload);
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('업체 예약 요청')),
+    body: Form(key: formKey, child: ListView(padding: const EdgeInsets.all(20), children: [
+      Text((widget.partner['name'] ?? '협력업체').toString(), style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 8),
+      const InfoCard(text: '예약 요청을 보내면 업체 담당자가 확인 후 확정하거나 안내를 남깁니다. 예약 확정 전에는 업체와 통화해 주세요.'),
+      const SizedBox(height: 16),
+      TextFormField(controller: service, decoration: const InputDecoration(labelText: '방문 목적'), validator: (v) => v?.trim().isNotEmpty == true ? null : '방문 목적을 입력해 주세요.'),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(onPressed: chooseTime, icon: const Icon(Icons.schedule), label: Text('희망 일시  ${selected.year}-${selected.month.toString().padLeft(2, '0')}-${selected.day.toString().padLeft(2, '0')}  ${selected.hour.toString().padLeft(2, '0')}:${selected.minute.toString().padLeft(2, '0')}')),
+      const SizedBox(height: 12),
+      TextFormField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: '연락처 (선택)', hintText: '업체가 연락할 번호')),
+      const SizedBox(height: 12),
+      TextFormField(controller: note, maxLines: 3, decoration: const InputDecoration(labelText: '요청사항 (선택)')),
+      if (error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(error!, style: const TextStyle(color: Colors.red))),
+      const SizedBox(height: 18),
+      FilledButton(onPressed: busy ? null : submit, child: Text(busy ? '요청 중…' : '예약 요청 보내기')),
+    ])),
+  );
+
+  @override
+  void dispose() { service.dispose(); phone.dispose(); note.dispose(); super.dispose(); }
+}
+
+class BookingListSection extends StatefulWidget {
+  const BookingListSection({required this.api, super.key});
+  final ApiClient api;
+  @override
+  State<BookingListSection> createState() => _BookingListSectionState();
+}
+
+class _BookingListSectionState extends State<BookingListSection> {
+  late Future<List<Map<String, dynamic>>> future;
+  void reload() => future = widget.api.list('bookings');
+  @override
+  void initState() { super.initState(); reload(); }
+
+  Future<void> act(Future<void> Function() action) async {
+    try { await action(); if (mounted) setState(reload); }
+    catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('Exception: ', '')))); }
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<Map<String, dynamic>>>(
+    future: future,
+    builder: (context, snapshot) {
+      if (snapshot.connectionState == ConnectionState.waiting) return const LinearProgressIndicator();
+      if (snapshot.hasError) return const InfoCard(text: '예약 목록을 불러오지 못했습니다.');
+      final rows = (snapshot.data ?? []).where((row) => row['status'] != 'cancelled').toList();
+      return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('업체 예약', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
+        if (rows.isEmpty) const Padding(padding: EdgeInsets.only(top: 10), child: Text('예약 요청이 없습니다.')),
+        ...rows.map((row) {
+          final manager = row['can_manage'] == true;
+          final owner = row['is_customer'] == true;
+          final status = row['status']?.toString() ?? '';
+          final date = DateTime.tryParse(row['scheduled_at']?.toString() ?? '')?.toLocal();
+          final when = date == null ? '' : '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+          return Column(children: [
+            ListTile(contentPadding: EdgeInsets.zero, title: Text((row['partner_name'] ?? '').toString(), style: const TextStyle(fontWeight: FontWeight.w800)),
+              subtitle: Text('$when · ${row['service_type']} · ${row['status_label']}\n${(row['partner_note'] ?? row['customer_note'] ?? '').toString()}'),
+              trailing: owner && (status == 'requested' || status == 'confirmed')
+                ? TextButton(onPressed: () => act(() => widget.api.cancelPartnerBooking(row['id'] as int)), child: const Text('취소')) : null),
+            if (manager && status == 'requested') Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              TextButton(onPressed: () => act(() => widget.api.respondToPartnerBooking(row['id'] as int, status: 'rejected')), child: const Text('거절')),
+              const SizedBox(width: 6),
+              FilledButton(onPressed: () => act(() => widget.api.respondToPartnerBooking(row['id'] as int, status: 'confirmed')), child: const Text('예약 확정')),
+            ]),
+            if (manager && status == 'confirmed') Align(alignment: Alignment.centerRight, child: TextButton.icon(
+              onPressed: () => act(() => widget.api.respondToPartnerBooking(row['id'] as int, status: 'completed')),
+              icon: const Icon(Icons.check_circle_outline), label: const Text('작업 완료 처리'))),
+            const Divider(),
+          ]);
+        }),
+      ])));
+    },
+  );
+}
+
 class PartnerRecordPage extends StatefulWidget {
   const PartnerRecordPage({required this.api, super.key});
   final ApiClient api;
@@ -1709,10 +2201,19 @@ class _PartnerRecordPageState extends State<PartnerRecordPage> {
   String kind = 'service';
   bool busy = false;
   String? error;
+  Map<String, dynamic>? scannedPassport;
 
   Future<void> scanVehicle() async {
     final scanned = await Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => const ScanVehicleQrPage()));
-    if (scanned != null && mounted) setState(() => vehiclePublicId.text = scanned);
+    if (scanned != null && mounted) {
+      setState(() { vehiclePublicId.text = scanned; scannedPassport = null; error = null; });
+      try {
+        final passport = await widget.api.scanVehiclePassport(scanned);
+        if (mounted) setState(() => scannedPassport = passport);
+      } catch (e) {
+        if (mounted) setState(() => error = e.toString().replaceFirst('Exception: ', ''));
+      }
+    }
   }
 
   @override
@@ -1770,13 +2271,17 @@ class _PartnerRecordPageState extends State<PartnerRecordPage> {
           const InfoCard(text: '아이러브미니가 승인한 협력업체 담당자는 차주 승인코드 없이 정비이력을 직접 등록할 수 있습니다. 등록 원본은 수정·삭제되지 않으며, 오류는 원 기록에 연결된 정정이력으로 남깁니다.'),
           const SizedBox(height: 12),
           DropdownButtonFormField<int>(
-            value: partnerId,
+            initialValue: partnerId,
             decoration: const InputDecoration(labelText: '협력업체'),
             items: partners.map((row) => DropdownMenuItem<int>(value: row['id'] as int, child: Text(row['name'].toString()))).toList(),
             onChanged: (value) => setState(() => partnerId = value),
           ),
           TextFormField(controller: vehiclePublicId, decoration: InputDecoration(labelText: '차량 Passport ID *', suffixIcon: IconButton(tooltip: '차량 QR 스캔', onPressed: scanVehicle, icon: const Icon(Icons.qr_code_scanner))), validator: (value) => value?.trim().isNotEmpty == true ? null : '차량 QR을 스캔해 주세요.'),
-          DropdownButtonFormField<String>(value: kind, decoration: const InputDecoration(labelText: '작업 종류'), items: const [
+          if (scannedPassport != null) ...[
+            const SizedBox(height: 8),
+            InfoCard(text: '${(scannedPassport!['vehicle'] as Map)['model_name']} · 기존 차량 이력 ${(scannedPassport!['history'] as List).length}건을 확인했습니다.'),
+          ],
+          DropdownButtonFormField<String>(initialValue: kind, decoration: const InputDecoration(labelText: '작업 종류'), items: const [
             DropdownMenuItem(value: 'service', child: Text('정비')), DropdownMenuItem(value: 'part', child: Text('소모품')),
             DropdownMenuItem(value: 'wash', child: Text('세차')), DropdownMenuItem(value: 'other', child: Text('기타')),
           ], onChanged: (value) => setState(() => kind = value ?? 'service')),

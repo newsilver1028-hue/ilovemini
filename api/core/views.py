@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 
 from django.db import transaction
 from django.conf import settings
+from django.core.cache import cache
 from django.db.models import F, Q, Sum
 from django.utils import timezone
 from rest_framework import permissions, serializers, status, viewsets
@@ -37,6 +38,21 @@ class HealthView(APIView):
         except Exception:
             return Response({"status": "degraded", "service": "ilovemini-api", "database": "unavailable"}, status=503)
         return Response({"status": "ok", "service": "ilovemini-api", "database": "ok"})
+
+
+def _plain_cafe_text(value):
+    return html.unescape(re.sub(r"<[^>]+>", "", str(value or ""))).strip()
+
+
+def _is_ilovemini_cafe_article(item):
+    cafe_name = _plain_cafe_text(item.get("cafename", "")).lower()
+    identity = f"{item.get('cafeurl', '')} {item.get('link', '')}".lower()
+    return (
+        "아이러브미니" in cafe_name
+        or "minilover" in identity
+        or "ilovemini" in identity
+        or "13071593" in identity
+    )
 
 
 class CafeSearchView(APIView):
@@ -71,7 +87,7 @@ class CafeSearchView(APIView):
         rows = []
         for item in payload.get("items", []):
             link = str(item.get("link", ""))
-            if not link.startswith("https://cafe.naver.com/"):
+            if not link.startswith(("https://cafe.naver.com/", "https://m.cafe.naver.com/")) or not _is_ilovemini_cafe_article(item):
                 continue
             rows.append({"title": plain(item.get("title")), "description": plain(item.get("description")),
                          "link": link, "cafe_name": plain(item.get("cafename")),
@@ -79,6 +95,56 @@ class CafeSearchView(APIView):
         # Search API output is returned live; it is not persisted or sent to an AI summarizer.
         return Response({"query": query, "items": rows, "total": payload.get("total", len(rows)),
                          "source": "NAVER API HUB · 공개 카페 검색"})
+
+
+class CafeLatestView(APIView):
+    """Return the newest indexed public ILOVEMINI articles matching a broad MINI query."""
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "cafe_search"
+
+    def get(self, request):
+        cache_key = "ilovemini:cafe-latest:mini:v1"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+        if not settings.NAVER_API_HUB_CLIENT_ID or not settings.NAVER_API_HUB_CLIENT_SECRET:
+            return Response({"detail": "네이버 검색 API 키를 서버 환경설정에 등록해야 합니다."}, status=503)
+
+        # NAVER Cafe Article Search requires a query. Use a broad MINI keyword,
+        # sort newest first, and keep only articles identified as this cafe.
+        params = urlencode({"query": "MINI", "display": 100, "start": 1, "sort": "date", "format": "json"})
+        upstream = Request(
+            "https://naverapihub.apigw.ntruss.com/search/v1/cafearticle?" + params,
+            headers={
+                "X-NCP-APIGW-API-KEY-ID": settings.NAVER_API_HUB_CLIENT_ID,
+                "X-NCP-APIGW-API-KEY": settings.NAVER_API_HUB_CLIENT_SECRET,
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urlopen(upstream, timeout=7) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, ValueError):
+            return Response({"detail": "네이버 카페 최신글을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."}, status=502)
+
+        rows = []
+        for item in payload.get("items", []):
+            link = str(item.get("link", ""))
+            if not link.startswith(("https://cafe.naver.com/", "https://m.cafe.naver.com/")):
+                continue
+            if not _is_ilovemini_cafe_article(item):
+                continue
+            cafe_name = _plain_cafe_text(item.get("cafename"))
+            rows.append({"title": _plain_cafe_text(item.get("title")), "description": _plain_cafe_text(item.get("description")),
+                         "link": link, "cafe_name": cafe_name or "아이러브미니 네이버 카페",
+                         "cafe_url": str(item.get("cafeurl", ""))})
+
+        result = {"query": "MINI", "items": rows[:10], "total": len(rows),
+                  "source": "NAVER API HUB · MINI 검색 최신순 · 아이러브미니 공개글",
+                  "last_build_date": payload.get("lastBuildDate"), "live_search": True}
+        cache.set(cache_key, result, timeout=180)
+        return Response(result)
 
 
 class CafeAnswerView(APIView):

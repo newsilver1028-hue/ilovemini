@@ -2,7 +2,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from core.views import HealthView, CafeSearchView, CafeAnswerView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet
+from core.views import HealthView, CafeSearchView, CafeLatestView, CafeAnswerView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet
 from core.member_views import MemberGradeView
 from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView
 
@@ -20,6 +20,7 @@ urlpatterns = [
     path("api/me/grade/", MemberGradeView.as_view(), name="member_grade"),
     path("api/health/", HealthView.as_view(), name="health"),
     path("api/cafe/search/", CafeSearchView.as_view(), name="cafe_search"),
+    path("api/cafe/latest/", CafeLatestView.as_view(), name="cafe_latest"),
     path("api/cafe/answer/", CafeAnswerView.as_view(), name="cafe_answer"),
     path("api/auth/naver/start/", NaverStartView.as_view(), name="naver_start"),
     path("api/auth/naver/callback/", NaverCallbackView.as_view(), name="naver_callback"),

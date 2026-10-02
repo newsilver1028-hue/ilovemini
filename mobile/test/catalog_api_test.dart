@@ -12,13 +12,45 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
+  test('public partners do not send an expired login token', () async {
+    FlutterSecureStorage.setMockInitialValues({'access_token': 'expired', 'refresh_token': 'expired'});
+    final api = ApiClient(client: MockClient((request) async {
+      expect(request.headers.containsKey('Authorization'), isFalse);
+      return http.Response('[{"id":1}]', 200);
+    }));
+    expect((await api.list('partners')).length, 1);
+    expect(await api.isSignedIn, isTrue);
+  });
+
+  test('latest cafe feed uses the public live endpoint without an expired login token', () async {
+    FlutterSecureStorage.setMockInitialValues({'access_token': 'expired', 'refresh_token': 'expired'});
+    final api = ApiClient(client: MockClient((request) async {
+      expect(request.url.path, endsWith('/api/cafe/latest/'));
+      expect(request.headers.containsKey('Authorization'), isFalse);
+      return http.Response('{"items":[{"title":"MINI 최신글","link":"https://cafe.naver.com/minilover/123"}]}', 200);
+    }));
+    final result = await api.latestCafePosts();
+    expect((result['items'] as List).single['title'], 'MINI 최신글');
+    expect(await api.isSignedIn, isTrue);
+  });
+
+  test('request timeout is bounded and preserves credentials', () async {
+    FlutterSecureStorage.setMockInitialValues({'access_token': 'old'});
+    final api = ApiClient(requestTimeout: const Duration(milliseconds: 1), client: MockClient((request) async {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      return http.Response('[]', 200);
+    }));
+    await expectLater(api.list('partners'), throwsA(isA<TimeoutException>()));
+    expect(await api.isSignedIn, isTrue);
+  });
+
   test('loads every partner page', () async {
     var calls = 0;
     final api = ApiClient(client: MockClient((request) async {
       calls++;
       return http.Response(jsonEncode({
         'results': [{'id': calls}],
-        'next': calls == 1 ? 'http://10.0.2.2:8000/api/partners/?page=2' : null,
+        'next': calls == 1 ? request.url.replace(queryParameters: {'page': '2'}).toString() : null,
       }), 200);
     }));
     expect((await api.list('partners')).map((row) => row['id']), [1, 2]);
@@ -86,10 +118,19 @@ void main() {
     final api = ApiClient(client: MockClient((_) async => http.Response(jsonEncode(rows), 200, headers: {'content-type': 'application/json; charset=utf-8'})));
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: CatalogPage(api: api, path: 'partners', title: '업체'))));
     await tester.pumpAndSettle();
-    expect(find.text('등록된 협력업체 23곳 · 표시 23곳'), findsOneWidget);
-    await tester.drag(find.byType(ListView), const Offset(0, -4000));
+    expect(find.text('23곳'), findsWidgets);
+    await tester.scrollUntilVisible(find.text('정비 전문').first, 200, scrollable: find.byType(Scrollable).first);
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('업체 22'));
+    await Scrollable.ensureVisible(tester.element(find.text('정비 전문').first), alignment: 0.5, duration: Duration.zero);
+    await tester.pumpAndSettle();
+    expect(find.text('정비 전문').first.hitTestable(), findsOneWidget);
+    await tester.tap(find.text('정비 전문').first);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('업체 22'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
+    await Scrollable.ensureVisible(tester.element(find.text('업체 22')), alignment: 0.5, duration: Duration.zero);
+    await tester.pumpAndSettle();
+    expect(find.text('업체 22').hitTestable(), findsOneWidget);
     await tester.tap(find.text('업체 22'));
     await tester.pumpAndSettle();
     expect(find.byType(PartnerDetailPage), findsOneWidget);
@@ -98,7 +139,7 @@ void main() {
     await tester.ensureVisible(find.byType(TextField));
     await tester.enterText(find.byType(TextField), '업체 22');
     await tester.pumpAndSettle();
-    expect(find.text('등록된 협력업체 23곳 · 표시 1곳'), findsOneWidget);
+    expect(find.text('1곳'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

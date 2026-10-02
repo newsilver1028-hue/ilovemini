@@ -37,6 +37,41 @@ class CafeSearchTests(TestCase):
         self.assertEqual(response.data["items"][0]["link"], "https://cafe.naver.com/ilovemini/123")
         self.assertIn("아이러브미니", unquote(request.call_args.args[0].full_url))
 
+    def test_cafe_latest_requires_server_credentials(self):
+        response = APIClient().get("/api/cafe/latest/")
+        self.assertEqual(response.status_code, 503)
+
+    @override_settings(NAVER_API_HUB_CLIENT_ID="test-id", NAVER_API_HUB_CLIENT_SECRET="test-secret")
+    def test_cafe_latest_uses_date_sorted_naver_results_and_keeps_ten_cafe_articles(self):
+        cache.clear()
+        cafe_items = [{
+            "title": f"<b>MINI</b> 최신글 {index}", "description": "회원 게시글 요약",
+            "link": f"https://cafe.naver.com/minilover/{index}", "cafename": "아이러브미니",
+            "cafeurl": "https://cafe.naver.com/minilover",
+        } for index in range(12)]
+        cafe_items.append({
+            "title": "MINI 다른 카페 글", "description": "제외되어야 함",
+            "link": "https://cafe.naver.com/another/999", "cafename": "다른 자동차 카페",
+            "cafeurl": "https://cafe.naver.com/another",
+        })
+
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self): return json.dumps({"total": 1000, "lastBuildDate": "Thu, 1 Oct 2026 08:00:00 +0900", "items": cafe_items}).encode()
+
+        with patch("core.views.urlopen", return_value=FakeResponse()) as upstream:
+            response = APIClient().get("/api/cafe/latest/")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data["items"]), 10)
+        self.assertEqual(response.data["items"][0]["title"], "MINI 최신글 0")
+        self.assertTrue(response.data["live_search"])
+        self.assertEqual(response.data["source"], "NAVER API HUB · MINI 검색 최신순 · 아이러브미니 공개글")
+        params = dict(part.split("=", 1) for part in unquote(upstream.call_args.args[0].full_url.split("?",1)[1]).split("&"))
+        self.assertEqual(params["sort"], "date")
+        self.assertEqual(params["query"], "MINI")
+        self.assertEqual(params["display"], "100")
+
     def test_cafe_answer_requires_server_key(self):
         with override_settings(OPENAI_API_KEY=""):
             response = APIClient().post("/api/cafe/answer/", {"q": "F56 미션"}, format="json")
@@ -549,7 +584,10 @@ class PartnerSyncCommandTests(TestCase):
     def test_sync_creates_and_updates_the_exact_operator_list_idempotently(self):
         Partner.objects.create(name="랩스터터스")
         call_command("sync_ilovemini_partners", verbosity=0)
-        self.assertEqual(Partner.objects.count(), 27)
+        self.assertEqual(Partner.objects.count(), 28)
+        self.assertEqual(Partner.objects.filter(name__startswith="아이모터스랩").count(), 2)
+        self.assertEqual(Partner.objects.get(name="군팩토리").region, "서울 양천구 목동")
+        self.assertEqual(Partner.objects.get(name="카카오파츠 서초").service_categories, ["전장", "오디오·전장"])
         partner = Partner.objects.get(name="랩스타모터스")
         self.assertTrue(partner.is_active)
         self.assertEqual(partner.cafe_url, "https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/286")
@@ -558,13 +596,13 @@ class PartnerSyncCommandTests(TestCase):
         self.assertEqual(package.service_categories, ["신차패키지", "타이어"])
         self.assertEqual(package.cafe_url, "")
         pending = Partner.objects.filter(region="지역 확인 필요", cafe_url="")
-        self.assertEqual(pending.count(), 4)
+        self.assertEqual(pending.count(), 3)
         self.assertEqual(set(pending.values_list("name", flat=True)), {
-            "모터스킨", "렌트리스 얼마면탈까", "수입차부품 프린트랩", "대한민국대표 금호타이어",
+            "렌트리스 얼마면탈까", "수입차부품 프린트랩", "대한민국대표 금호타이어",
         })
 
         call_command("sync_ilovemini_partners", verbosity=0)
-        self.assertEqual(Partner.objects.count(), 27)
+        self.assertEqual(Partner.objects.count(), 28)
 
 
 class HandoverPrivacyTests(TestCase):

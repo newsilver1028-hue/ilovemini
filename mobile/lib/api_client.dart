@@ -4,9 +4,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
-  ApiClient({http.Client? client}) : _client = _SessionClient(
+  ApiClient({http.Client? client, Duration requestTimeout = const Duration(seconds: 90)}) : _client = _SessionClient(
     client ?? http.Client(), const FlutterSecureStorage(),
-    () => sessionExpired.value++,
+    () => sessionExpired.value++, requestTimeout,
   );
   static final sessionExpired = ValueNotifier<int>(0);
   final http.Client _client;
@@ -52,6 +52,67 @@ class ApiClient {
     if (demoMode) return _demoAttendancePayload();
     final token = await _storage.read(key: 'access_token');
     final response = await _client.get(_uri('attendance'), headers: {if (token != null) 'Authorization': 'Bearer $token'});
+    if (response.statusCode != 200) throw Exception(_message(response));
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> memberGrade() async {
+    if (demoMode) return {'grade': 'general', 'grade_label': '일반회원'};
+    final token = await _storage.read(key: 'access_token');
+    if (token == null) throw Exception('로그인이 필요합니다.');
+    final response = await _client.get(_uri('me/grade'), headers: {'Authorization': 'Bearer $token'});
+    if (response.statusCode != 200) throw Exception(_message(response));
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> createPartnerBooking(Map<String, dynamic> data) async {
+    if (demoMode) throw Exception('예약을 서버에 저장하려면 정식 API에 로그인해야 합니다.');
+    final token = await _storage.read(key: 'access_token');
+    if (token == null) throw Exception('로그인 후 예약을 요청할 수 있습니다.');
+    final response = await _client.post(_uri('bookings'), headers: {
+      'Content-Type': 'application/json', 'Authorization': 'Bearer $token',
+    }, body: jsonEncode(data));
+    if (response.statusCode != 201) throw Exception(_message(response));
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<void> cancelPartnerBooking(int bookingId) async {
+    final token = await _storage.read(key: 'access_token');
+    if (token == null) throw Exception('로그인이 필요합니다.');
+    final response = await _client.post(_uri('bookings/$bookingId/cancel'), headers: {
+      'Content-Type': 'application/json', 'Authorization': 'Bearer $token',
+    }, body: jsonEncode({}));
+    if (response.statusCode != 200) throw Exception(_message(response));
+  }
+
+  Future<void> respondToPartnerBooking(int bookingId, {required String status, String note = ''}) async {
+    final token = await _storage.read(key: 'access_token');
+    if (token == null) throw Exception('로그인이 필요합니다.');
+    final response = await _client.post(_uri('bookings/$bookingId/respond'), headers: {
+      'Content-Type': 'application/json', 'Authorization': 'Bearer $token',
+    }, body: jsonEncode({'status': status, 'partner_note': note}));
+    if (response.statusCode != 200) throw Exception(_message(response));
+  }
+
+  Future<Map<String, dynamic>> scanVehiclePassport(String publicId) async {
+    final token = await _storage.read(key: 'access_token');
+    if (token == null) throw Exception('협력업체 로그인 후 사용할 수 있습니다.');
+    final response = await _client.post(_uri('vehicles/scan-passport'), headers: {
+      'Content-Type': 'application/json', 'Authorization': 'Bearer $token',
+    }, body: jsonEncode({'vehicle_public_id': publicId}));
+    if (response.statusCode != 200) throw Exception(_message(response));
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> searchCafePosts(String query) async {
+    final uri = _uri('cafe/search').replace(queryParameters: {'q': query});
+    final response = await _client.get(uri);
+    if (response.statusCode != 200) throw Exception(_message(response));
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> latestCafePosts() async {
+    final response = await _client.get(_uri('cafe/latest'));
     if (response.statusCode != 200) throw Exception(_message(response));
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
@@ -134,7 +195,8 @@ class ApiClient {
           !visited.add(uri.toString())) {
         throw Exception('목록 페이지 주소가 올바르지 않습니다.');
       }
-      final response = await _client.get(uri);
+      final token = await _storage.read(key: 'access_token');
+      final response = await _client.get(uri, headers: {if (token != null) 'Authorization': 'Bearer $token'});
       if (response.statusCode != 200) throw Exception(_message(response));
       final decoded = jsonDecode(response.body);
       if (decoded is List) {
@@ -155,29 +217,29 @@ class ApiClient {
     if (resource == 'ledger') return _forDemoVehicle(_demoLedger, query['vehicle']);
     if (resource == 'reminders') return _forDemoVehicle(_demoReminders, query['vehicle']);
     const partners = [
-      {'id': 1, 'name': '아이모터스랩', 'region': '서울 성수 · 경기 분당', 'service_categories': ['판금·도색', '사고수리'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/347', 'icon': '🚘', 'is_sponsored': false},
-      {'id': 2, 'name': '리본모터스 분당', 'region': '경기 분당', 'service_categories': ['판금·도색', '사고수리'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/399', 'icon': '🛠️', 'is_sponsored': false},
-      {'id': 3, 'name': '랩스타모터스', 'region': '서울/경기', 'service_categories': ['사고수리'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/286', 'icon': '🔧', 'is_sponsored': false},
-      {'id': 4, 'name': '성남 한국자동차유리', 'region': '경기 성남', 'service_categories': ['유리 교환·복원'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/412', 'icon': '🪟', 'is_sponsored': false},
-      {'id': 5, 'name': '글라스히어로즈', 'region': '서울/경기', 'service_categories': ['유리 교환·복원'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/509', 'icon': '🪟', 'is_sponsored': false},
-      {'id': 6, 'name': '용자팩토리', 'region': '서울/경기', 'service_categories': ['전장', '튜닝'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/461', 'icon': '⚡', 'is_sponsored': false},
-      {'id': 7, 'name': '말자동차', 'region': '서울/경기', 'service_categories': ['전장·튜닝'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/478', 'icon': '🚗', 'is_sponsored': false},
-      {'id': 8, 'name': '에스튠 수원', 'region': '경기 수원', 'service_categories': ['튜닝·전장'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/580', 'icon': '🎛️', 'is_sponsored': false},
-      {'id': 9, 'name': '카카오파츠 서초', 'region': '서울 서초', 'service_categories': ['자동차 부품', '튜닝'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/240', 'icon': '⚙️', 'is_sponsored': false},
-      {'id': 10, 'name': '휘스토리 강북', 'region': '서울 강북', 'service_categories': ['휠', '타이어'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/380', 'icon': '🛞', 'is_sponsored': false},
-      {'id': 11, 'name': '군팩토리', 'region': '경기 하남', 'service_categories': ['오디오', '전장', 'MINI 전문'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/660', 'icon': '🔊', 'is_sponsored': false},
-      {'id': 12, 'name': '인천 포텐(휠수리)', 'region': '인천', 'service_categories': ['휠 복원·수리'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/518', 'icon': '🛞', 'is_sponsored': false},
-      {'id': 13, 'name': '티스테이션 종암', 'region': '서울 종암', 'service_categories': ['타이어'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/236', 'icon': '🛞', 'is_sponsored': false},
-      {'id': 14, 'name': '힐링휠복원 남양주', 'region': '경기 남양주', 'service_categories': ['휠 복원'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/540', 'icon': '✨', 'is_sponsored': false},
-      {'id': 15, 'name': '아라바서비스', 'region': '서울/경기', 'service_categories': ['정비', '수입차'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/349', 'icon': '🔩', 'is_sponsored': false},
-      {'id': 16, 'name': '수리아 용인', 'region': '경기 용인', 'service_categories': ['정비'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/642', 'icon': '🧰', 'is_sponsored': false},
-      {'id': 17, 'name': '가람모터스 별내', 'region': '경기 별내', 'service_categories': ['정비', '수입차'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/625', 'icon': '🔧', 'is_sponsored': false},
-      {'id': 18, 'name': '크란츠모터스 구리', 'region': '경기 구리', 'service_categories': ['MINI 정비', '수입차 수리'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/425', 'icon': '🛠️', 'is_sponsored': false},
-      {'id': 19, 'name': '모터스힐 구리', 'region': '경기 구리', 'service_categories': ['정비'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/623', 'icon': '🚙', 'is_sponsored': false},
-      {'id': 20, 'name': 'DH모터스 부천', 'region': '경기 부천', 'service_categories': ['정비'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/557', 'icon': '🔧', 'is_sponsored': false},
-      {'id': 21, 'name': '한국디젤카연구소 논산', 'region': '충남 논산', 'service_categories': ['디젤 정비'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/543', 'icon': '🛠️', 'is_sponsored': false},
-      {'id': 22, 'name': '에이블모터스 부산', 'region': '부산', 'service_categories': ['수입차 정비'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/288', 'icon': '🚘', 'is_sponsored': false},
-      {'id': 23, 'name': '제틀리시 부산', 'region': '부산', 'service_categories': ['정비'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://cafe.naver.com/f-e/cafes/13071593/menus/636', 'icon': '🔩', 'is_sponsored': false},
+      {'id': 1, 'name': '아이모터스랩', 'region': '서울 성수 · 경기 분당', 'service_categories': ['판금·도색', '사고수리'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/347', 'icon': '🚘', 'is_sponsored': false},
+      {'id': 2, 'name': '리본모터스 분당', 'region': '경기 분당', 'service_categories': ['판금·도색', '사고수리'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/399', 'icon': '🛠️', 'is_sponsored': false},
+      {'id': 3, 'name': '랩스타모터스', 'region': '서울/경기', 'service_categories': ['사고수리'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/286', 'icon': '🔧', 'is_sponsored': false},
+      {'id': 4, 'name': '성남 한국자동차유리', 'region': '경기 성남', 'service_categories': ['유리 교환·복원'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/412', 'icon': '🪟', 'is_sponsored': false},
+      {'id': 5, 'name': '글라스히어로즈', 'region': '서울/경기', 'service_categories': ['유리 교환·복원'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/509', 'icon': '🪟', 'is_sponsored': false},
+      {'id': 6, 'name': '용자팩토리', 'region': '서울/경기', 'service_categories': ['전장', '튜닝'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/461', 'icon': '⚡', 'is_sponsored': false},
+      {'id': 7, 'name': '말자동차', 'region': '서울/경기', 'service_categories': ['전장·튜닝'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/478', 'icon': '🚗', 'is_sponsored': false},
+      {'id': 8, 'name': '에스튠 수원', 'region': '경기 수원', 'service_categories': ['튜닝·전장'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/580', 'icon': '🎛️', 'is_sponsored': false},
+      {'id': 9, 'name': '카카오파츠 서초', 'region': '서울 서초', 'service_categories': ['자동차 부품', '튜닝'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/240', 'icon': '⚙️', 'is_sponsored': false},
+      {'id': 10, 'name': '휘스토리 강북', 'region': '서울 강북', 'service_categories': ['휠', '타이어'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/380', 'icon': '🛞', 'is_sponsored': false},
+      {'id': 11, 'name': '군팩토리', 'region': '경기 하남', 'service_categories': ['오디오', '전장', 'MINI 전문'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/660', 'icon': '🔊', 'is_sponsored': false},
+      {'id': 12, 'name': '인천 포텐(휠수리)', 'region': '인천', 'service_categories': ['휠 복원·수리'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/518', 'icon': '🛞', 'is_sponsored': false},
+      {'id': 13, 'name': '티스테이션 종암', 'region': '서울 종암', 'service_categories': ['타이어'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/236', 'icon': '🛞', 'is_sponsored': false},
+      {'id': 14, 'name': '힐링휠복원 남양주', 'region': '경기 남양주', 'service_categories': ['휠 복원'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/540', 'icon': '✨', 'is_sponsored': false},
+      {'id': 15, 'name': '아라바서비스', 'region': '서울/경기', 'service_categories': ['정비', '수입차'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/349', 'icon': '🔩', 'is_sponsored': false},
+      {'id': 16, 'name': '수리아 용인', 'region': '경기 용인', 'service_categories': ['정비'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/642', 'icon': '🧰', 'is_sponsored': false},
+      {'id': 17, 'name': '가람모터스 별내', 'region': '경기 별내', 'service_categories': ['정비', '수입차'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/625', 'icon': '🔧', 'is_sponsored': false},
+      {'id': 18, 'name': '크란츠모터스 구리', 'region': '경기 구리', 'service_categories': ['MINI 정비', '수입차 수리'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/425', 'icon': '🛠️', 'is_sponsored': false},
+      {'id': 19, 'name': '모터스힐 구리', 'region': '경기 구리', 'service_categories': ['정비'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/623', 'icon': '🚙', 'is_sponsored': false},
+      {'id': 20, 'name': 'DH모터스 부천', 'region': '경기 부천', 'service_categories': ['정비'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/557', 'icon': '🔧', 'is_sponsored': false},
+      {'id': 21, 'name': '한국디젤카연구소 논산', 'region': '충남 논산', 'service_categories': ['디젤 정비'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/543', 'icon': '🛠️', 'is_sponsored': false},
+      {'id': 22, 'name': '에이블모터스 부산', 'region': '부산', 'service_categories': ['수입차 정비'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/288', 'icon': '🚘', 'is_sponsored': false},
+      {'id': 23, 'name': '제틀리시 부산', 'region': '부산', 'service_categories': ['정비'], 'description': '아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.', 'cafe_url': 'https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/636', 'icon': '🔩', 'is_sponsored': false},
       {'id': 24, 'name': '모터스킨', 'region': '지역 확인 필요', 'region_group': '신차패키지', 'category': '신차패키지', 'service_categories': ['신차패키지'], 'description': '아이러브미니 협력업체 목록의 신차패키지 분야에 등록된 업체입니다. 지역과 작업 범위는 업체에 확인해 주세요.', 'icon': '🚘', 'is_sponsored': false},
       {'id': 25, 'name': '렌트리스 얼마면탈까', 'region': '지역 확인 필요', 'region_group': '신차패키지', 'category': '신차패키지', 'service_categories': ['신차패키지'], 'description': '아이러브미니 협력업체 목록의 신차패키지 분야에 등록된 업체입니다. 지역과 상담 범위는 업체에 확인해 주세요.', 'icon': '🚘', 'is_sponsored': false},
       {'id': 26, 'name': '수입차부품 프린트랩', 'region': '지역 확인 필요', 'region_group': '신차패키지', 'category': '신차패키지', 'service_categories': ['신차패키지', '수입차 부품'], 'description': '아이러브미니 협력업체 목록의 신차패키지 분야에 등록된 업체입니다. 지역과 취급 품목은 업체에 확인해 주세요.', 'icon': '⚙️', 'is_sponsored': false},
@@ -362,7 +424,8 @@ class ApiClient {
 // A single refresh is shared by concurrent requests. Only a rejected refresh
 // clears credentials; temporary network failures keep the existing session.
 class _SessionClient extends http.BaseClient {
-  _SessionClient(this.inner, this.storage, this.onExpired);
+  _SessionClient(this.inner, this.storage, this.onExpired, this.requestTimeout);
+  final Duration requestTimeout;
   final http.Client inner;
   final FlutterSecureStorage storage;
   final VoidCallback onExpired;
@@ -384,7 +447,7 @@ class _SessionClient extends http.BaseClient {
       ..body = jsonEncode({'refresh': token})
       ..followRedirects = false;
     final response = await inner.send(request).then(http.Response.fromStream)
-        .timeout(const Duration(seconds: 20));
+        .timeout(requestTimeout);
     if (await storage.read(key: 'refresh_token') != token) return false;
     if (response.statusCode == 400 || response.statusCode == 401) {
       await expire(); return false;
@@ -412,7 +475,8 @@ class _SessionClient extends http.BaseClient {
       throw Exception('허용되지 않은 API 주소입니다.');
     }
     final isAuth = request.url.path.contains('/auth/');
-    final token = isAuth ? null : await storage.read(key: 'access_token');
+    final isPublic = {'${base.path}/partners/', '${base.path}/notices/', '${base.path}/offers/', '${base.path}/cafe/search/', '${base.path}/cafe/latest/'}.contains(request.url.path) && request.method == 'GET';
+    final token = isAuth || isPublic ? null : await storage.read(key: 'access_token');
     Future<http.Response> attempt(String? access) async {
       final copy = http.Request(request.method, request.url)
         ..headers.addAll(request.headers)
@@ -421,7 +485,7 @@ class _SessionClient extends http.BaseClient {
       copy.headers.remove('Authorization');
       if (access != null) copy.headers['Authorization'] = 'Bearer $access';
       return await inner.send(copy).then(http.Response.fromStream)
-          .timeout(const Duration(seconds: 20));
+          .timeout(requestTimeout);
     }
     var response = await attempt(token);
     if (!isAuth && token != null && response.statusCode == 401) {
