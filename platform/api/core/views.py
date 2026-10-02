@@ -1,6 +1,7 @@
 import hashlib
 import html
 import json
+import logging
 import re
 import secrets
 from datetime import timedelta
@@ -26,6 +27,25 @@ from .models import (
 from .permissions import OwnerOrStaff, SafeMethodsOrStaff
 from .serializers import VehicleSerializer, LedgerEntrySerializer, ReminderSerializer, NoticeSerializer, PartnerSerializer, OfferSerializer, PartnerBookingSerializer
 from .vehicle_identity import normalize_plate_number
+
+logger = logging.getLogger(__name__)
+
+
+def log_naver_search_failure(operation, exc):
+    """Log upstream failure details without ever logging API credentials."""
+    if isinstance(exc, HTTPError):
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        for credential in (settings.NAVER_API_HUB_CLIENT_ID, settings.NAVER_API_HUB_CLIENT_SECRET):
+            if credential:
+                body = body.replace(credential, "[redacted]")
+        logger.warning("NAVER API HUB %s returned HTTP %s: %s", operation, exc.code, body[:500])
+    elif isinstance(exc, URLError):
+        logger.warning("NAVER API HUB %s connection failed (%s)", operation, type(exc.reason).__name__)
+    else:
+        logger.warning("NAVER API HUB %s failed (%s)", operation, type(exc).__name__)
 
 class HealthView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -63,7 +83,8 @@ class CafeSearchView(APIView):
         try:
             with urlopen(upstream, timeout=7) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, ValueError):
+        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+            log_naver_search_failure("cafe search", exc)
             return Response({"detail": "네이버 카페 검색에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요."}, status=502)
 
         def plain(value):
@@ -103,7 +124,8 @@ class CafeLatestView(APIView):
         try:
             with urlopen(upstream, timeout=7) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, ValueError):
+        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+            log_naver_search_failure("cafe latest", exc)
             return Response({"detail": "카페 최신글을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요."}, status=502)
 
         def plain(value):
