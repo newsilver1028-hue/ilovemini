@@ -1,3 +1,4 @@
+import logging
 import hashlib
 import json
 import secrets
@@ -49,7 +50,25 @@ def get_profile(access_token):
     profile = data.get("response") or {}
     if data.get("resultcode") != "00" or not profile.get("id"):
         raise NaverUnavailable
+    logging.getLogger(__name__).warning(
+        "NAVER_RAW_PROFILE name_key=%s email_key=%s name_value=%s email_value=%s",
+        "name" in profile, "email" in profile, bool(profile.get("name")), bool(profile.get("email")),
+    )
     return profile
+
+
+def sync_identity(identity, profile):
+    changed = []
+    for field in ("name", "email", "nickname", "profile_image", "gender", "birthday", "age", "birthyear", "mobile"):
+        value = str(profile.get(field) or "").strip()
+        limit = identity._meta.get_field(field).max_length
+        value = value[:limit] if limit else value
+        if value and getattr(identity, field) != value:
+            setattr(identity, field, value)
+            changed.append(field)
+    if changed:
+        identity.save(update_fields=changed)
+    sync_profile_email(identity.user, profile)
 
 
 def user_for_profile(profile):
@@ -58,21 +77,15 @@ def user_for_profile(profile):
     try:
         with transaction.atomic():
             identity = NaverIdentity.objects.select_related("user").filter(subject=subject).first()
-            if identity:
-                if profile.get("nickname"):
-                    identity.nickname = str(profile["nickname"])[:80]
-                    identity.save(update_fields=["nickname"])
-                sync_profile_email(identity.user, profile)
-                return identity.user
-            username = "naver_" + digest(subject)[:40]
-            user = User.objects.create_user(username=username, password=None)
-            sync_profile_email(user, profile)
-            user.set_unusable_password()
-            user.save(update_fields=["password"])
-            NaverIdentity.objects.create(user=user, subject=subject, nickname=str(profile.get("nickname", ""))[:80])
-            return user
+            if identity is None:
+                user = User.objects.create_user(username="naver_" + digest(subject)[:40], password=None)
+                identity = NaverIdentity.objects.create(user=user, subject=subject)
+            sync_identity(identity, profile)
+            return identity.user
     except IntegrityError:
-        return NaverIdentity.objects.select_related("user").get(subject=subject).user
+        identity = NaverIdentity.objects.select_related("user").get(subject=subject)
+        sync_identity(identity, profile)
+        return identity.user
 
 
 def jwt_pair(user):

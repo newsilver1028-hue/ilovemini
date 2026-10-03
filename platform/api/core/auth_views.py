@@ -53,12 +53,14 @@ class NaverCallbackView(APIView):
             attempt = NaverOAuthAttempt.objects.select_for_update().get(pk=attempt.pk)
             if attempt.consumed_at or attempt.expires_at <= timezone.now():
                 return Response({"detail": "로그인 요청이 이미 사용되었거나 만료되었습니다."}, status=400)
+            fields = ("id", "name", "email", "nickname", "profile_image", "gender", "birthday", "age", "birthyear", "mobile")
+            attempt.profile_data = {key: str(profile[key])[:2048] for key in fields if profile.get(key)}
             attempt.provider_subject = str(profile["id"])[:64]
             attempt.nickname = str(profile.get("nickname", ""))[:80]
             attempt.ticket_digest = digest(ticket)
             attempt.consumed_at = timezone.now()
             attempt.expires_at = timezone.now() + timedelta(minutes=3)
-            attempt.save(update_fields=["provider_subject", "nickname", "ticket_digest", "consumed_at", "expires_at"])
+            attempt.save(update_fields=["profile_data", "provider_subject", "nickname", "ticket_digest", "consumed_at", "expires_at"])
         return NaverAppRedirect(settings.MOBILE_AUTH_REDIRECT_URI + "?" + urlencode({"ticket": ticket}))
 
 class NaverCompleteView(APIView):
@@ -79,14 +81,20 @@ class NaverCompleteView(APIView):
             ).first()
             if not attempt:
                 return Response({"detail": "로그인 확인값이 만료되었거나 이미 사용되었습니다."}, status=400)
-            user = user_for_profile({"id": attempt.provider_subject, "nickname": attempt.nickname})
+            profile = dict(attempt.profile_data or {})
+            profile["id"] = attempt.provider_subject
+            profile.setdefault("nickname", attempt.nickname)
+            user = user_for_profile(profile)
             now = timezone.now()
+            user.last_login = now
+            user.save(update_fields=["last_login"])
             MemberConsent.objects.update_or_create(user=user, defaults={
                 "terms_accepted_at": now, "privacy_accepted_at": now,
                 "marketing_opt_in": bool(request.data.get("marketing_opt_in", False)),
             })
             attempt.user = user
             attempt.ticket_digest = None
-            attempt.save(update_fields=["user", "ticket_digest"])
+            attempt.profile_data = {}
+            attempt.save(update_fields=["user", "ticket_digest", "profile_data"])
             tokens = jwt_pair(user)
         return Response(tokens)

@@ -1,3 +1,4 @@
+from django.core.exceptions import ObjectDoesNotExist
 from django import forms
 from django.contrib import admin
 from django.urls import path
@@ -284,19 +285,40 @@ def grade_action(code):
     return action
 
 
+class NaverProfileInline(admin.StackedInline):
+    from .models import NaverIdentity
+    model = NaverIdentity
+    verbose_name = "네이버 회원정보"
+    verbose_name_plural = "네이버 회원정보 (네이버가 제공한 항목)"
+    fields = ("name", "email", "nickname", "profile_image", "gender", "birthday", "age", "birthyear", "mobile")
+    readonly_fields = fields
+    extra = 0
+    can_delete = False
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
 User = get_user_model()
 admin.site.unregister(User)
 
 
 @admin.register(User)
 class MemberUserAdmin(UserAdmin):
-    list_display = ("id", "display_nickname", "display_member_name", "email", "ilovemini_grade", "display_workplaces", "is_active", "date_joined", "last_login")
-    search_fields = ("naver_identity__nickname", "email", "username", "first_name", "last_name", "=id")
+    inlines = (NaverProfileInline,)
+    list_display = ("id", "display_nickname", "display_member_name", "email", "display_mobile", "ilovemini_grade", "display_workplaces", "is_active", "date_joined", "last_login")
+    search_fields = ("naver_identity__nickname", "email", "username", "first_name", "last_name", "naver_identity__mobile", "=id")
     list_per_page = 50
     ordering = ("-date_joined", "-id")
     list_filter = ("is_active", "is_staff", "is_superuser", "groups")
     readonly_fields = (*UserAdmin.readonly_fields, "display_nickname", "id", "display_workplaces")
     fieldsets = (("회원 식별 정보", {"fields": ("id", "display_nickname", "display_workplaces")}),) + UserAdmin.fieldsets
+
+    @admin.display(description="휴대전화번호")
+    def display_mobile(self, obj):
+        try:
+            return obj.naver_identity.mobile or "—"
+        except ObjectDoesNotExist:
+            return "—"
 
     @admin.display(description="회원 이름")
     def display_member_name(self, obj):
@@ -326,12 +348,12 @@ class MemberUserAdmin(UserAdmin):
         response["Content-Disposition"] = 'attachment; filename="ilovemini-members.csv"'
         response.write("\ufeff")
         writer = csv.writer(response)
-        writer.writerow(["회원번호", "닉네임", "회원 이름", "이메일", "회원등급", "소속 협력업체", "활성화", "가입일", "최근 로그인"])
+        writer.writerow(["회원번호", "닉네임", "회원 이름", "이메일", "프로필 사진", "성별", "생일", "연령대", "출생연도", "휴대전화번호", "회원등급", "소속 협력업체", "활성화", "가입일", "최근 로그인"])
         def safe(value):
             value = str(value or "")
             return "'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value
         for user in queryset:
-            writer.writerow([user.pk, safe(member_nickname(user)), safe(user.get_full_name()), safe(user.email), GRADES[member_grade(user)], safe(self.display_workplaces(user)), user.is_active, user.date_joined.isoformat(), user.last_login.isoformat() if user.last_login else ""])
+            writer.writerow([user.pk, safe(member_nickname(user)), safe(user.get_full_name()), safe(user.email), *[safe(getattr(getattr(user, "naver_identity", None), key, "")) for key in ("profile_image", "gender", "birthday", "age", "birthyear", "mobile")], GRADES[member_grade(user)], safe(self.display_workplaces(user)), user.is_active, user.date_joined.isoformat(), user.last_login.isoformat() if user.last_login else ""])
         return response
 
     @admin.display(description="회원 등급")
