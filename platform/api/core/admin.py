@@ -281,3 +281,54 @@ class MemberUserAdmin(UserAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return self.has_module_permission(request) and (obj is None or obj.pk != request.user.pk)
+
+
+# Korean labels are limited to administrator presentation.
+_MODEL_LABELS = {
+    Vehicle: "등록 차량", VehicleOwnership: "차량 소유 이력",
+    VehiclePlateHistory: "차량 번호 변경 이력", VehicleTransferCode: "차량 인계 코드",
+    LedgerEntry: "차계부 기록", Reminder: "차량 관리 알림",
+    Notice: "공지사항", Partner: "협력업체", PartnerStaff: "협력업체 담당자",
+    Offer: "제휴 혜택", PushDevice: "알림 수신 기기",
+}
+_FIELD_LABELS = {
+    "id": "번호", "user": "회원 계정", "partner": "소속 협력업체", "vehicle": "차량",
+    "can_verify_records": "QR 차량 조회·인증 기록 등록 허용",
+    "can_manage_bookings": "예약 관리 허용", "is_active": "활성화",
+    "name": "업체명", "branch_label": "지점명", "region": "지역",
+    "service_categories": "서비스 분야", "description": "설명",
+    "address": "주소", "phone": "전화번호", "hours": "영업시간",
+    "cafe_url": "카페 게시글 주소", "map_url": "지도 주소",
+    "is_sponsored": "광고 제휴 업체", "display_order": "표시 순서",
+    "title": "제목", "summary": "요약", "body": "내용", "category": "분류",
+    "original_url": "원문 주소", "is_pinned": "상단 고정",
+    "published_at": "게시 시각", "expires_at": "만료 시각", "is_published": "공개",
+    "starts_at": "시작 시각", "ends_at": "종료 시각",
+    "redemption_instructions": "혜택 이용 방법", "created_at": "등록 시각", "updated_at": "수정 시각",
+    "nickname": "차량 별명", "model_name": "차종", "generation": "세대", "manufacturer": "제조사",
+    "model_year": "연식", "plate_number": "차량 번호", "first_registration_date": "최초 등록일",
+    "vin_hash": "차대번호 해시", "public_id": "차량 고유 ID", "passport_public": "차량 이력 공개",
+    "status": "상태", "current_odometer_km": "현재 주행거리(km)",
+    "started_at": "시작 시각", "ended_at": "종료 시각", "changed_by": "변경한 회원",
+    "verification_method": "확인 방법", "verification_status": "소유 확인 상태", "relationship": "차량 이용 관계",
+    "previous_owner": "이전 차주", "new_owner": "새 차주", "accepted_at": "인계 완료 시각",
+    "invalidated_at": "무효화 시각", "kind": "기록 종류", "entry_date": "기록일",
+    "odometer_km": "주행거리(km)", "amount_krw": "금액(원)", "quantity_liters": "주유량(L)",
+    "source": "기록 출처", "verified_by": "인증 담당자", "verified_at": "인증 시각",
+    "part_number": "부품 번호", "evidence_url": "증빙 주소", "record_hash": "기록 검증 해시",
+    "corrects": "정정 대상", "correction_reason": "정정 사유", "due_date": "예정일",
+    "due_odometer_km": "예정 주행거리(km)", "completed_at": "완료 시각",
+    "notification_sent_at": "알림 발송 시각", "installation_id": "설치 식별자", "platform": "기기 종류",
+}
+for _model, _label in _MODEL_LABELS.items():
+    _model._meta.verbose_name = _label
+    _model._meta.verbose_name_plural = _label
+    for _field in _model._meta.fields:
+        if _field.name in _FIELD_LABELS:
+            _field.verbose_name = _FIELD_LABELS[_field.name]
+PartnerStaff._meta.get_field("can_verify_records").help_text = "담당자가 앱에서 QR로 차량을 조회하고 업체 인증 정비기록을 등록할 수 있습니다."
+PartnerStaff._meta.get_field("can_manage_bookings").help_text = "소속 업체의 예약을 확인하고 처리할 수 있습니다."
+PartnerStaff._meta.get_field("is_active").help_text = "담당자와 소속 업체가 모두 활성화되어야 협력업체 등급으로 인식합니다."
+PartnerAdminForm.base_fields["service_categories"].label = "서비스 분야"
+admin.site.index_title = "회원 등급: 사용자 목록 → 회원 선택 → 동작 → 등급 변경 / 업체 권한: 협력업체 담당자 → 추가"
+
