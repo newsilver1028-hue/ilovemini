@@ -66,7 +66,7 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
 
     def is_inherited(self, obj):
         request = self.context.get("request")
-        if request is None or request.user.is_staff:
+        if request is None or request.user.is_superuser:
             return False
         ownership = obj.vehicle.current_ownership
         return ownership is None or obj.created_at < ownership.started_at

@@ -10,7 +10,7 @@ class OwnerOrStaff(BasePermission):
             return bool(request.user and request.user.is_authenticated)
         return bool(request.user and request.user.is_authenticated)
     def has_object_permission(self, request, view, obj):
-        if request.user.is_staff:
+        if request.user.is_active and request.user.is_superuser:
             return True
         vehicle = obj if hasattr(obj, "owner_id") else getattr(obj, "vehicle", None)
         return bool(vehicle and vehicle.owner_id == request.user.id)

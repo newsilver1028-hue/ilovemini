@@ -22,6 +22,6 @@ class PatchLifecycleTests(TestCase):
         call_command('sync_ilovemini_partners')
         self.assertEqual(Partner.objects.get(name='아이모터스랩 성수점').pk, old_id)
         self.assertNotEqual(Partner.objects.get(name='아이모터스랩 죽전점').pk, old_id)
-        self.assertEqual(Partner.objects.get(name='랩스타모터스').service_categories, [])
+        self.assertEqual(Partner.objects.get(name='랩스타모터스').service_categories, ['정비'])
         call_command('sync_ilovemini_partners')
         self.assertEqual(Partner.objects.count(), 29)

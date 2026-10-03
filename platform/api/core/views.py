@@ -268,7 +268,7 @@ class VehicleViewSet(viewsets.ModelViewSet):
     throttle_scope = "vehicle_transfer"
     def get_queryset(self):
         qs = Vehicle.objects.all()
-        return qs if self.request.user.is_staff else qs.filter(
+        return qs if self.request.user.is_superuser else qs.filter(
             ownerships__user=self.request.user,
             ownerships__ended_at__isnull=True,
         ).distinct()
@@ -391,7 +391,7 @@ class VehicleViewSet(viewsets.ModelViewSet):
         entries = vehicle.ledger_entries.select_related("partner")
         maintenance = entries.filter(kind__in=[LedgerEntry.Kind.SERVICE, LedgerEntry.Kind.PART]).order_by("-entry_date", "-id").first()
         pending_qs = vehicle.reminders.filter(completed_at__isnull=True)
-        if not request.user.is_staff:
+        if not request.user.is_superuser:
             pending_qs = pending_qs.filter(created_at__gte=vehicle.current_ownership.started_at)
         pending = list(pending_qs)
         today = timezone.localdate()
@@ -577,7 +577,7 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
     throttle_scope = "verified_record"
     def get_queryset(self):
         qs = LedgerEntry.objects.select_related("vehicle")
-        if not self.request.user.is_staff:
+        if not self.request.user.is_superuser:
             qs = qs.filter(vehicle__ownerships__user=self.request.user, vehicle__ownerships__ended_at__isnull=True)
         vehicle_id = self.request.query_params.get("vehicle")
         return qs.filter(vehicle_id=vehicle_id) if vehicle_id else qs
@@ -718,7 +718,7 @@ class ReminderViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, OwnerOrStaff]
     def get_queryset(self):
         qs = Reminder.objects.select_related("vehicle")
-        if not self.request.user.is_staff:
+        if not self.request.user.is_superuser:
             qs = qs.filter(vehicle__ownerships__user=self.request.user,
                            vehicle__ownerships__ended_at__isnull=True,
                            created_at__gte=F("vehicle__ownerships__started_at"))
@@ -836,7 +836,7 @@ class PartnerBookingViewSet(viewsets.ModelViewSet):
     def respond(self, request, pk=None):
         booking = self.get_object()
         if not PartnerStaff.objects.filter(user=request.user, partner=booking.partner,
-                is_active=True, can_manage_bookings=True).exists():
+                is_active=True, can_manage_bookings=True, partner__is_active=True).exists():
             return Response({"detail": "이 업체의 예약 관리 권한이 없습니다."}, status=status.HTTP_403_FORBIDDEN)
         outcome = request.data.get("status")
         if booking.status == PartnerBooking.Status.REQUESTED:
