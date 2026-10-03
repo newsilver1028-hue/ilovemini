@@ -290,13 +290,17 @@ admin.site.unregister(User)
 
 @admin.register(User)
 class MemberUserAdmin(UserAdmin):
-    list_display = ("id", "display_nickname", "email", "ilovemini_grade", "display_workplaces", "is_active", "date_joined", "last_login")
+    list_display = ("id", "display_nickname", "display_member_name", "email", "ilovemini_grade", "display_workplaces", "is_active", "date_joined", "last_login")
     search_fields = ("naver_identity__nickname", "email", "username", "first_name", "last_name", "=id")
     list_per_page = 50
     ordering = ("-date_joined", "-id")
     list_filter = ("is_active", "is_staff", "is_superuser", "groups")
     readonly_fields = (*UserAdmin.readonly_fields, "display_nickname", "id", "display_workplaces")
     fieldsets = (("회원 식별 정보", {"fields": ("id", "display_nickname", "display_workplaces")}),) + UserAdmin.fieldsets
+
+    @admin.display(description="회원 이름")
+    def display_member_name(self, obj):
+        return obj.get_full_name() or "이름 미제공"
 
     @admin.display(description="닉네임")
     def display_nickname(self, obj):
@@ -322,12 +326,12 @@ class MemberUserAdmin(UserAdmin):
         response["Content-Disposition"] = 'attachment; filename="ilovemini-members.csv"'
         response.write("\ufeff")
         writer = csv.writer(response)
-        writer.writerow(["회원번호", "닉네임", "이메일", "회원등급", "소속 협력업체", "활성화", "가입일", "최근 로그인"])
+        writer.writerow(["회원번호", "닉네임", "회원 이름", "이메일", "회원등급", "소속 협력업체", "활성화", "가입일", "최근 로그인"])
         def safe(value):
             value = str(value or "")
             return "'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value
         for user in queryset:
-            writer.writerow([user.pk, safe(member_nickname(user)), safe(user.email), GRADES[member_grade(user)], safe(self.display_workplaces(user)), user.is_active, user.date_joined.isoformat(), user.last_login.isoformat() if user.last_login else ""])
+            writer.writerow([user.pk, safe(member_nickname(user)), safe(user.get_full_name()), safe(user.email), GRADES[member_grade(user)], safe(self.display_workplaces(user)), user.is_active, user.date_joined.isoformat(), user.last_login.isoformat() if user.last_login else ""])
         return response
 
     @admin.display(description="회원 등급")

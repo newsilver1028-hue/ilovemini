@@ -13,7 +13,7 @@ def member_nickname(user):
 
 
 def member_label(user):
-    return f"{member_nickname(user)} / {user.email or '이메일 미제공'} / 회원번호 {user.pk}"
+    return f"{member_nickname(user)} / {user.get_full_name() or '이름 미제공'} / {user.email or '이메일 미제공'} / 회원번호 {user.pk}"
 
 
 class MemberAutocompleteView(AutocompleteJsonView):
@@ -48,7 +48,14 @@ class MemberAutocompleteSelect(AutocompleteSelect):
 
 
 def sync_profile_email(user, profile):
-    email = str(profile.get("email") or "").strip()
-    if email and user.email != email:
-        user.email = email
-        user.save(update_fields=["email"])
+    # Retain existing values when NAVER does not return a consented field.
+    changed = []
+    for key, field in (("email", "email"), ("name", "first_name")):
+        value = str(profile.get(key) or "").strip()
+        limit = user._meta.get_field(field).max_length
+        value = value[:limit] if limit else value
+        if value and getattr(user, field) != value:
+            setattr(user, field, value)
+            changed.append(field)
+    if changed:
+        user.save(update_fields=changed)

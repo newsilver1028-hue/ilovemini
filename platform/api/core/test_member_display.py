@@ -57,3 +57,13 @@ class MemberDisplayTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('text/csv', response['Content-Type'])
         self.assertIn('테스트회원', response.content.decode('utf-8-sig'))
+
+    def test_profile_name_and_existing_permissions_retained(self):
+        user = user_for_profile({'id': 'display-member', 'name': '홍길동', 'nickname': '미니회원', 'email': 'mini@example.com'})
+        self.assertEqual(user.pk, self.member.pk)
+        self.assertEqual(user.get_full_name(), '홍길동')
+        self.assertIn('홍길동', member_label(user))
+        user_for_profile({'id': 'display-member'})
+        user.refresh_from_db()
+        self.assertEqual(user.get_full_name(), '홍길동')
+        self.assertEqual(user.email, 'mini@example.com')
