@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.core.management.base import BaseCommand
 
 from core.models import Partner
@@ -9,7 +10,7 @@ PARTNERS = [
     ("아이모터스랩 성수점", "서울 성수동", ["판금·도색", "사고수리"], 347),
     ("아이모터스랩 죽전점", "경기 용인 죽전", ["판금·도색", "사고수리"], 347),
     ("리본모터스 분당", "경기 분당", ["판금·도색", "사고수리"], 399),
-    ("랩스타모터스", "경기 광주", ["사고수리"], 286),
+    ("랩스타모터스", "경기 광주", [], 286),
     ("성남 한국자동차유리", "경기 성남", ["유리 교환·복원"], 412),
     ("글라스히어로즈", "서울/경기", ["유리 교환·복원"], 509),
     ("용자팩토리", "서울/경기", ["전장", "튜닝"], 461),
@@ -60,6 +61,7 @@ ALIASES = {
 class Command(BaseCommand):
     help = "Create or correct the operator-listed ILOVEMINI partner listings."
 
+    @transaction.atomic
     def handle(self, *args, **options):
         created = updated = 0
         for order, (name, region, categories, menu_id) in enumerate(PARTNERS, start=1):
@@ -74,7 +76,6 @@ class Command(BaseCommand):
                 "name": name,
                 "region": region,
                 "service_categories": categories,
-                "description": "아이러브미니 협력업체입니다. 상세 작업 범위와 방문 정보는 카페 게시글에서 확인해 주세요.",
                 "cafe_url": cafe_url,
                 "is_active": True,
                 "display_order": order,
@@ -82,12 +83,14 @@ class Command(BaseCommand):
             addresses = {'인치업매니아 송파점': '', '아이모터스랩 성수점': '서울 성동구 뚝섬로15길 16', '아이모터스랩 죽전점': '경기 용인시 수지구 용구대로 2699', '에스튠 수원': '경기도 수원시 영통구 센트럴파크로127번길 97-2', '군팩토리': '서울 양천구 목동중앙북로 120 1층 (목동 523-8)', '모터스킨': '서울 강서구 화곡로66길 153, 아이엠센터 1층'}
             if name in addresses and addresses[name]:
                 defaults["address"] = addresses[name]
+            if name.startswith("아이모터스랩 "):
+                defaults["branch_label"] = name.split()[-1]
             if name == "인치업매니아 송파점":
                 defaults["branch_label"] = "송파점"
             if name == "랩스타모터스":
                 defaults["address"] = "경기도 광주시 초월읍 현산로 316"
             if partner is None:
-                Partner.objects.create(**defaults)
+                Partner.objects.create(**defaults, description="아이러브미니 협력업체입니다.")
                 created += 1
             else:
                 for field, value in defaults.items():
