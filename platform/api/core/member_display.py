@@ -17,8 +17,24 @@ def member_label(user):
 
 
 class MemberAutocompleteView(AutocompleteJsonView):
-    def serialize_result(self, obj, to_field_name):
-        return {"id": str(getattr(obj, to_field_name)), "text": member_label(obj)}
+    def get(self, request, *args, **kwargs):
+        # Keep this member lookup private and independent of generic FK metadata.
+        from django.contrib.auth import get_user_model
+        from django.core.paginator import Paginator
+        from django.db.models import Q
+        from django.http import JsonResponse
+        from django.core.exceptions import PermissionDenied
+        if not request.user.is_active or not request.user.is_superuser:
+            raise PermissionDenied
+        users = get_user_model().objects.select_related("naver_identity").order_by("-date_joined", "-pk")
+        term = request.GET.get("term", "").strip()[:200]
+        if term:
+            match = Q(username__icontains=term) | Q(email__icontains=term) | Q(first_name__icontains=term) | Q(last_name__icontains=term) | Q(naver_identity__nickname__icontains=term)
+            if term.isdecimal() and len(term) <= 18:
+                match |= Q(pk=int(term))
+            users = users.filter(match)
+        page = Paginator(users, 30).get_page(request.GET.get("page", 1))
+        return JsonResponse({"results": [{"id": str(user.pk), "text": member_label(user)} for user in page], "pagination": {"more": page.has_next()}})
 
 
 class MemberAutocompleteSelect(AutocompleteSelect):

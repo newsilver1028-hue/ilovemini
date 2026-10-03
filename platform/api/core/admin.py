@@ -290,18 +290,45 @@ admin.site.unregister(User)
 
 @admin.register(User)
 class MemberUserAdmin(UserAdmin):
-    list_display = ("id", "display_nickname", "email", "ilovemini_grade", "username", "is_active", "date_joined")
+    list_display = ("id", "display_nickname", "email", "ilovemini_grade", "display_workplaces", "is_active", "date_joined", "last_login")
     search_fields = ("naver_identity__nickname", "email", "username", "first_name", "last_name", "=id")
-    readonly_fields = (*UserAdmin.readonly_fields, "display_nickname", "id")
-    fieldsets = (("회원 식별 정보", {"fields": ("id", "display_nickname")}),) + UserAdmin.fieldsets
+    list_per_page = 50
+    ordering = ("-date_joined", "-id")
+    list_filter = ("is_active", "is_staff", "is_superuser", "groups")
+    readonly_fields = (*UserAdmin.readonly_fields, "display_nickname", "id", "display_workplaces")
+    fieldsets = (("회원 식별 정보", {"fields": ("id", "display_nickname", "display_workplaces")}),) + UserAdmin.fieldsets
 
     @admin.display(description="닉네임")
     def display_nickname(self, obj):
         return member_nickname(obj)
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related("naver_identity")
-    actions = [grade_action(code) for code in GRADES]
+        return super().get_queryset(request).select_related("naver_identity").prefetch_related("partner_memberships__partner", "groups")
+    actions = [grade_action(code) for code in GRADES] + ["export_members_csv"]
+
+    @admin.display(description="소속 협력업체")
+    def display_workplaces(self, obj):
+        names = [staff.partner.name for staff in obj.partner_memberships.all() if staff.is_active and staff.partner.is_active]
+        return " / ".join(names) or "—"
+
+    @admin.action(description="선택한 회원 목록 CSV 다운로드")
+    def export_members_csv(self, request, queryset):
+        import csv
+        from django.http import HttpResponse
+        from django.core.exceptions import PermissionDenied
+        if not self.has_module_permission(request):
+            raise PermissionDenied
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="ilovemini-members.csv"'
+        response.write("\ufeff")
+        writer = csv.writer(response)
+        writer.writerow(["회원번호", "닉네임", "이메일", "회원등급", "소속 협력업체", "활성화", "가입일", "최근 로그인"])
+        def safe(value):
+            value = str(value or "")
+            return "'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value
+        for user in queryset:
+            writer.writerow([user.pk, safe(member_nickname(user)), safe(user.email), GRADES[member_grade(user)], safe(self.display_workplaces(user)), user.is_active, user.date_joined.isoformat(), user.last_login.isoformat() if user.last_login else ""])
+        return response
 
     @admin.display(description="회원 등급")
     def ilovemini_grade(self, obj):
@@ -372,3 +399,6 @@ PartnerStaff._meta.get_field("is_active").help_text = "담당자와 소속 업�
 PartnerAdminForm.base_fields["service_categories"].label = "서비스 분야"
 admin.site.index_title = "회원 등급: 사용자 목록 → 회원 선택 → 동작 → 등급 변경 / 업체 권한: 협력업체 담당자 → 추가"
 
+
+User._meta.verbose_name = "가입 회원"
+User._meta.verbose_name_plural = "가입 회원 목록"

@@ -41,3 +41,19 @@ class MemberDisplayTests(TestCase):
         self.assertEqual(response.status_code, 200)
         field = response.context['adminform'].form.fields['user']
         self.assertEqual(field.label_from_instance(self.member), member_label(self.member))
+
+    def test_empty_lookup_and_pagination(self):
+        response = self.client.get(reverse('admin:core_partnerstaff_member_autocomplete'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(any(row['id'] == str(self.member.pk) for row in response.json()['results']))
+        self.assertIn('pagination', response.json())
+
+    def test_member_table_and_csv(self):
+        url = reverse('admin:auth_user_changelist')
+        response = self.client.get(url)
+        self.assertContains(response, '가입 회원 목록')
+        self.assertContains(response, '소속 협력업체')
+        response = self.client.post(url, {'action': 'export_members_csv', '_selected_action': [str(self.member.pk)]})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('text/csv', response['Content-Type'])
+        self.assertIn('테스트회원', response.content.decode('utf-8-sig'))
