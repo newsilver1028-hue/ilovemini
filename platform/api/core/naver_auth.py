@@ -10,6 +10,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import NaverIdentity
+from .member_display import sync_profile_email
 
 class NaverUnavailable(Exception):
     pass
@@ -61,9 +62,11 @@ def user_for_profile(profile):
                 if profile.get("nickname"):
                     identity.nickname = str(profile["nickname"])[:80]
                     identity.save(update_fields=["nickname"])
+                sync_profile_email(identity.user, profile)
                 return identity.user
             username = "naver_" + digest(subject)[:40]
             user = User.objects.create_user(username=username, password=None)
+            sync_profile_email(user, profile)
             user.set_unusable_password()
             user.save(update_fields=["password"])
             NaverIdentity.objects.create(user=user, subject=subject, nickname=str(profile.get("nickname", ""))[:80])

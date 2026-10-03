@@ -1,5 +1,7 @@
 from django import forms
 from django.contrib import admin
+from django.urls import path
+from .member_display import member_nickname, member_label, MemberAutocompleteView, MemberAutocompleteSelect
 
 from .models import (
     LedgerEntry, Notice, Offer, Partner, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
@@ -196,10 +198,30 @@ class PartnerAdmin(admin.ModelAdmin):
 
 @admin.register(PartnerStaff)
 class PartnerStaffAdmin(admin.ModelAdmin):
-    list_display = ("user", "partner", "can_verify_records", "can_manage_bookings", "is_active", "created_at")
+    autocomplete_fields = ("user",)
+
+    def get_urls(self):
+        return [path("member-autocomplete/", self.admin_site.admin_view(MemberAutocompleteView.as_view(admin_site=self.admin_site)), name="core_partnerstaff_member_autocomplete")] + super().get_urls()
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "user":
+            kwargs["widget"] = MemberAutocompleteSelect(db_field.remote_field, self.admin_site)
+            kwargs["queryset"] = db_field.remote_field.model.objects.select_related("naver_identity")
+            field = super().formfield_for_foreignkey(db_field, request, **kwargs)
+            field.label_from_instance = member_label
+            return field
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    @admin.display(description="회원 계정")
+    def member_account(self, obj):
+        return member_label(obj.user)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("user__naver_identity", "partner")
+    list_display = ("member_account", "partner", "can_verify_records", "can_manage_bookings", "is_active", "created_at")
     list_editable = ("can_verify_records", "can_manage_bookings", "is_active")
     list_filter = ("partner", "can_verify_records", "can_manage_bookings", "is_active")
-    search_fields = ("user__username", "user__email", "partner__name")
+    search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "=user__id", "partner__name")
     readonly_fields = ("created_at",)
 
 
@@ -268,7 +290,17 @@ admin.site.unregister(User)
 
 @admin.register(User)
 class MemberUserAdmin(UserAdmin):
-    list_display = (*UserAdmin.list_display, "ilovemini_grade")
+    list_display = ("id", "display_nickname", "email", "ilovemini_grade", "username", "is_active", "date_joined")
+    search_fields = ("naver_identity__nickname", "email", "username", "first_name", "last_name", "=id")
+    readonly_fields = (*UserAdmin.readonly_fields, "display_nickname", "id")
+    fieldsets = (("회원 식별 정보", {"fields": ("id", "display_nickname")}),) + UserAdmin.fieldsets
+
+    @admin.display(description="닉네임")
+    def display_nickname(self, obj):
+        return member_nickname(obj)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("naver_identity")
     actions = [grade_action(code) for code in GRADES]
 
     @admin.display(description="회원 등급")
