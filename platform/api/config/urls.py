@@ -1,5 +1,5 @@
 from core.season_views import SeasonBannerView
-from core.app_views import AppContentView, MemberPreferenceView, MemberOverviewView, PassportPreviewView, RecordCorrectionView, ResolveCorrectionView
+from core.app_views import AppContentView, ShoppingSearchView, MemberPreferenceView, MemberOverviewView, PassportPreviewView, RecordCorrectionView, ResolveCorrectionView
 from rest_framework_simplejwt.views import TokenRefreshView
 from django.contrib import admin
 from django.urls import include, path
@@ -18,6 +18,7 @@ router.register("offers", OfferViewSet, basename="offer")
 router.register("bookings", PartnerBookingViewSet, basename="booking")
 urlpatterns = [
     path("api/app/content/", AppContentView.as_view(), name="app_content"),
+    path("api/shopping/search/", ShoppingSearchView.as_view(), name="shopping_search"),
     path("api/me/preferences/", MemberPreferenceView.as_view(), name="member_preferences"),
     path("api/me/overview/", MemberOverviewView.as_view(), name="member_overview"),
     path("api/vehicles/preview-passport/", PassportPreviewView.as_view(), name="passport_preview"),

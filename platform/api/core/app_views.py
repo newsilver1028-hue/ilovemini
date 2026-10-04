@@ -1,4 +1,10 @@
-"""Account-scoped app preferences and immutable correction requests."""
+"""Account-scoped app preferences, public content and shopping search."""
+import html
+import json
+import urllib.error
+import urllib.parse
+import urllib.request
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q, F
 from django.utils import timezone
@@ -33,6 +39,58 @@ class AppContentView(APIView):
             'download_url': item.download_url, 'notes': item.notes} for item in AppRelease.objects.filter(is_active=True) if item.download_url.startswith('https://')]
         response = Response({'banners': banners, 'products': products, 'releases': releases})
         response['Cache-Control'] = 'no-store'
+        return response
+
+class ShoppingSearchView(APIView):
+    """Server-side NAVER Shopping proxy; credentials never reach the app."""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    queries = {
+        'mini': '미니쿠퍼 차량용품',
+        'wash': '자동차 세차용품',
+        'interior': '미니쿠퍼 실내 액세서리',
+        'tuning': '미니쿠퍼 튜닝용품',
+    }
+    def get(self, request):
+        category = request.GET.get('category', 'mini')
+        query = self.queries.get(category)
+        if query is None:
+            return Response({'detail': '지원하지 않는 상품 분류입니다.'}, status=400)
+        if not settings.NAVER_SEARCH_CLIENT_ID or not settings.NAVER_SEARCH_CLIENT_SECRET:
+            return Response({'items': [], 'source': 'fallback'})
+        params = urllib.parse.urlencode({'query': query, 'display': 12, 'start': 1, 'sort': 'sim', 'exclude': 'used:rental:cbshop'})
+        upstream = urllib.request.Request(
+            'https://openapi.naver.com/v1/search/shop.json?' + params,
+            headers={
+                'X-Naver-Client-Id': settings.NAVER_SEARCH_CLIENT_ID,
+                'X-Naver-Client-Secret': settings.NAVER_SEARCH_CLIENT_SECRET,
+                'User-Agent': 'ILOVEMINI/1.0',
+            },
+        )
+        try:
+            with urllib.request.urlopen(upstream, timeout=5) as response:
+                payload = json.loads(response.read())
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            return Response({'items': [], 'source': 'fallback'})
+        items = []
+        for row in payload.get('items', []):
+            link, image = str(row.get('link', '')), str(row.get('image', ''))
+            if image.startswith('http://'):
+                image = 'https://' + image.removeprefix('http://')
+            if not link.startswith('https://') or not image.startswith(('https://', 'http://')):
+                continue
+            price = int(row.get('lprice') or 0)
+            items.append({
+                'title': html.unescape(str(row.get('title', '')).replace('<b>', '').replace('</b>', ''))[:160],
+                'description': str(row.get('mallName') or '네이버 쇼핑'),
+                'image_url': image,
+                'action_url': link,
+                'price_krw': price or None,
+                'category': category,
+                'source': 'naver',
+            })
+        response = Response({'items': items, 'source': 'naver'})
+        response['Cache-Control'] = 'public, max-age=300'
         return response
 
 class MemberPreferenceView(APIView):
