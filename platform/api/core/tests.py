@@ -655,7 +655,7 @@ class AdminContentFormTests(TestCase):
 class PartnerSyncCommandTests(TestCase):
     def test_sync_creates_and_updates_the_exact_operator_list_idempotently(self):
         Partner.objects.create(name="랩스터터스")
-        call_command("sync_ilovemini_partners", verbosity=0)
+        call_command("sync_ilovemini_partners", force=True, verbosity=0)
         self.assertEqual(Partner.objects.count(), 29)
         self.assertEqual(Partner.objects.filter(name__startswith="아이모터스랩").count(), 2)
         self.assertEqual(Partner.objects.get(name="군팩토리").region, "서울 양천구 목동")

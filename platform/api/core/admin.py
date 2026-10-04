@@ -428,3 +428,38 @@ admin.site.index_title = "회원 등급: 사용자 목록 → 회원 선택 → 
 
 User._meta.verbose_name = "가입 회원"
 User._meta.verbose_name_plural = "가입 회원 목록"
+
+from .models import SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest
+@admin.register(SeasonBanner)
+class SeasonBannerAdmin(admin.ModelAdmin):
+    list_display = ("title", "is_active", "starts_at", "ends_at", "duration_seconds", "priority")
+    list_filter = ("is_active",)
+    search_fields = ("title", "subtitle")
+@admin.register(AppContent)
+class AppContentAdmin(admin.ModelAdmin):
+    list_display = ("title", "kind", "category", "is_active", "display_order", "starts_at", "ends_at")
+    list_filter = ("kind", "category", "is_active")
+    search_fields = ("title", "description", "compatible_models")
+@admin.register(AppRelease)
+class AppReleaseAdmin(admin.ModelAdmin):
+    list_display = ("platform", "version", "build_number", "is_active")
+@admin.register(MemberPreference)
+class MemberPreferenceAdmin(admin.ModelAdmin):
+    list_display = ("member", "primary_vehicle")
+    list_select_related = ("user__naver_identity", "primary_vehicle")
+    readonly_fields = ("user", "primary_vehicle")
+    @admin.display(description="회원")
+    def member(self, obj): return member_label(obj.user)
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+@admin.register(RecordCorrectionRequest)
+class RecordCorrectionRequestAdmin(admin.ModelAdmin):
+    list_display = ("entry", "member", "reason", "created_at", "resolved_at")
+    list_select_related = ("requested_by__naver_identity", "entry")
+    list_filter = ("resolved_at",)
+    readonly_fields = ("entry", "requested_by", "reason", "created_at", "resolved_entry", "resolved_at")
+    @admin.display(description="요청 회원")
+    def member(self, obj): return member_label(obj.requested_by)
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False

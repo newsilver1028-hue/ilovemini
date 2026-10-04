@@ -64,8 +64,14 @@ ALIASES = {
 class Command(BaseCommand):
     help = "Create or correct the operator-listed ILOVEMINI partner listings."
 
+    def add_arguments(self, parser):
+        parser.add_argument('--force', action='store_true', help='기존 목록을 원본으로 복구합니다.')
+
     @transaction.atomic
     def handle(self, *args, **options):
+        if Partner.objects.exists() and not options.get('force'):
+            self.stdout.write('기존 협력업체 목록 유지: 운영자 변경 사항을 덮어쓰지 않습니다.')
+            return
         created = updated = 0
         for order, (name, region, categories, menu_id) in enumerate(PARTNERS, start=1):
             cafe_url = CAFE_BASE.format(menu_id) if menu_id else ""

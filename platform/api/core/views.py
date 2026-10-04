@@ -22,7 +22,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from .integrity import ledger_record_hash, legacy_ledger_record_hash
 from .models import (
     Vehicle, LedgerEntry, Reminder, Notice, Partner, Offer, PushDevice, VehicleTransferCode,
-    PartnerStaff, VehicleOwnership, VehiclePlateHistory, AttendanceCheckin, PartnerBooking,
+    PartnerStaff, VehicleOwnership, VehiclePlateHistory, AttendanceCheckin, PartnerBooking, RecordCorrectionRequest,
 )
 from .permissions import OwnerOrStaff, SafeMethodsOrStaff
 from .serializers import VehicleSerializer, LedgerEntrySerializer, ReminderSerializer, NoticeSerializer, PartnerSerializer, OfferSerializer, PartnerBookingSerializer
@@ -389,7 +389,7 @@ class VehicleViewSet(viewsets.ModelViewSet):
     def maintenance_summary(self, request, pk=None):
         vehicle = self.get_object()
         entries = vehicle.ledger_entries.select_related("partner")
-        maintenance = entries.filter(kind__in=[LedgerEntry.Kind.SERVICE, LedgerEntry.Kind.PART]).order_by("-entry_date", "-id").first()
+        maintenance = entries.filter(corrections__isnull=True, kind__in=[LedgerEntry.Kind.SERVICE, LedgerEntry.Kind.PART]).order_by("-entry_date", "-id").first()
         pending_qs = vehicle.reminders.filter(completed_at__isnull=True)
         if not request.user.is_superuser:
             pending_qs = pending_qs.filter(created_at__gte=vehicle.current_ownership.started_at)
@@ -659,19 +659,29 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
             ).first()
             if vehicle is None:
                 return Response({"detail": "차량 Passport QR을 확인할 수 없거나 비활성 차량입니다."}, status=status.HTTP_400_BAD_REQUEST)
+            current_ownership = vehicle.current_ownership
+            if current_ownership is None:
+                return Response({"detail": "현재 이용 중인 회원 차량에만 인증기록을 등록할 수 있습니다."}, status=status.HTTP_400_BAD_REQUEST)
             if not vehicle.plate_number or vehicle.plate_number != data.validated_data["plate_number"]:
                 return Response({"detail": "확인한 번호판과 QR 차량이 일치하지 않습니다. 다시 대조해 주세요."}, status=status.HTTP_409_CONFLICT)
-            duplicate = LedgerEntry.objects.filter(
+            correction = data.validated_data.get("corrects")
+            duplicate_query = LedgerEntry.objects.filter(
                 vehicle=vehicle, kind=data.validated_data["kind"],
                 entry_date=data.validated_data["entry_date"], odometer_km=data.validated_data["odometer_km"],
-                description__iexact=data.validated_data["description"].strip(),
-                corrects__isnull=True,
-            ).first()
+                description__iexact=data.validated_data["description"].strip(), corrects=correction,
+            )
+            if correction is not None:
+                duplicate_query = duplicate_query.filter(partner=partner,
+                    amount_krw=data.validated_data["amount_krw"],
+                    correction_reason=data.validated_data.get("correction_reason", "").strip())
+            duplicate = duplicate_query.first()
             if duplicate is not None:
                 return Response({"detail": "같은 차량·날짜·주행거리·작업내용의 기록이 이미 있습니다.",
                                  "duplicate_record_id": duplicate.pk}, status=status.HTTP_409_CONFLICT)
-            correction = data.validated_data.get("corrects")
             if correction is not None:
+                correction = LedgerEntry.objects.select_for_update().get(pk=correction.pk)
+                if correction.corrections.exists():
+                    return Response({"detail": "이미 정정된 원본입니다. 가장 최근 정정 기록을 선택해 주세요."}, status=status.HTTP_409_CONFLICT)
                 correction.refresh_from_db()
                 valid_signature = bool(correction.record_hash) and (
                     ledger_record_hash(correction) == correction.record_hash
@@ -679,6 +689,7 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
                         and legacy_ledger_record_hash(correction) == correction.record_hash)
                 )
                 if (correction.vehicle_id != vehicle.pk
+                        or correction.created_at < current_ownership.started_at
                         or correction.source != LedgerEntry.Source.PARTNER
                         or correction.partner_id != partner.pk
                         or not valid_signature):
@@ -705,6 +716,8 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
             )
             entry.record_hash = ledger_record_hash(entry)
             entry.save(update_fields=["record_hash"])
+            if correction is not None:
+                RecordCorrectionRequest.objects.filter(entry=correction, resolved_at__isnull=True).update(resolved_entry=entry, resolved_at=now)
             if entry.odometer_km is not None and (
                 vehicle.current_odometer_km is None or entry.odometer_km > vehicle.current_odometer_km
             ):

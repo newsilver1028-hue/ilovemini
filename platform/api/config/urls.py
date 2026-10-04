@@ -1,3 +1,5 @@
+from core.season_views import SeasonBannerView
+from core.app_views import AppContentView, MemberPreferenceView, MemberOverviewView, PassportPreviewView, RecordCorrectionView, ResolveCorrectionView
 from rest_framework_simplejwt.views import TokenRefreshView
 from django.contrib import admin
 from django.urls import include, path
@@ -15,6 +17,13 @@ router.register("partners", PartnerViewSet, basename="partner")
 router.register("offers", OfferViewSet, basename="offer")
 router.register("bookings", PartnerBookingViewSet, basename="booking")
 urlpatterns = [
+    path("api/app/content/", AppContentView.as_view(), name="app_content"),
+    path("api/me/preferences/", MemberPreferenceView.as_view(), name="member_preferences"),
+    path("api/me/overview/", MemberOverviewView.as_view(), name="member_overview"),
+    path("api/vehicles/preview-passport/", PassportPreviewView.as_view(), name="passport_preview"),
+    path("api/record-corrections/", RecordCorrectionView.as_view(), name="record_corrections"),
+    path("api/record-corrections/<int:pk>/resolve/", ResolveCorrectionView.as_view(), name="resolve_correction"),
+    path("api/app/season-banner/", SeasonBannerView.as_view(), name="season_banner"),
     path("admin/", admin.site.urls),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/me/grade/", MemberGradeView.as_view(), name="member_grade"),
