@@ -783,6 +783,7 @@ class NoticeViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
 class PartnerViewSet(viewsets.ReadOnlyModelViewSet):
+    throttle_scope = "partner_review" 
     serializer_class = PartnerSerializer
     permission_classes = [SafeMethodsOrStaff]
     queryset = Partner.objects.filter(is_active=True).annotate(review_count=Count("reviews"), average_rating=Avg("reviews__rating"))
