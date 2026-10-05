@@ -73,6 +73,7 @@ REST_FRAMEWORK = {
         "cafe_search": "20/minute",
         "cafe_answer": "10/minute",
         "booking": "20/minute",
+        "partner_review": "10/minute",
     },
 }
 SIMPLE_JWT = {"ACCESS_TOKEN_LIFETIME": timedelta(minutes=30), "REFRESH_TOKEN_LIFETIME": timedelta(days=14)}

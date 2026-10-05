@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Vehicle, VehicleOwnership, LedgerEntry, Reminder, Notice, Partner, Offer, PartnerBooking, PartnerStaff
+from .models import Vehicle, VehicleOwnership, LedgerEntry, Reminder, Notice, Partner, PartnerReview, Offer, PartnerBooking, PartnerStaff
 from .integrity import ledger_record_hash, legacy_ledger_record_hash
 from .vehicle_identity import normalize_plate_number
 
@@ -133,9 +133,24 @@ class NoticeSerializer(serializers.ModelSerializer):
         fields = ["id", "title", "summary", "body", "category", "original_url", "is_pinned", "published_at"]
 
 class PartnerSerializer(serializers.ModelSerializer):
+    review_count = serializers.IntegerField(read_only=True)
+    average_rating = serializers.FloatField(read_only=True)
     class Meta:
         model = Partner
-        fields = ["id", "name", "branch_label", "region", "service_categories", "description", "address", "phone", "hours", "cafe_url", "map_url", "is_sponsored"]
+        fields = ["id", "name", "branch_label", "region", "service_categories", "description", "business_info", "storefront_photo_url", "representative_name", "representative_title", "representative_experience_years", "representative_photo_url", "address", "phone", "hours", "cafe_url", "map_url", "is_sponsored", "review_count", "average_rating"]
+
+
+class PartnerReviewSerializer(serializers.ModelSerializer):
+    reviewer_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PartnerReview
+        fields = ["id", "rating", "comment", "reviewer_name", "created_at", "updated_at"]
+        read_only_fields = ["id", "reviewer_name", "created_at", "updated_at"]
+
+    def get_reviewer_name(self, obj):
+        identity = getattr(obj.user, "naver_identity", None)
+        return identity.nickname.strip() if identity and identity.nickname.strip() else "아이러브미니 회원"
 
 class OfferSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source="partner.name", read_only=True)

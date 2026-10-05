@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 import uuid
@@ -237,6 +237,12 @@ class Partner(models.Model):
     hours = models.CharField(max_length=160, blank=True)
     cafe_url = models.URLField(blank=True)
     map_url = models.URLField(blank=True)
+    storefront_photo_url = models.URLField(max_length=2048, blank=True)
+    business_info = models.TextField(blank=True)
+    representative_name = models.CharField(max_length=100, blank=True)
+    representative_title = models.CharField(max_length=100, blank=True)
+    representative_experience_years = models.PositiveSmallIntegerField(null=True, blank=True)
+    representative_photo_url = models.URLField(max_length=2048, blank=True)
     is_sponsored = models.BooleanField(default=False)
     is_active = models.BooleanField(default=False)
     display_order = models.PositiveSmallIntegerField(default=100)
@@ -247,6 +253,22 @@ class Partner(models.Model):
 
     def __str__(self):
         return f"{self.name} · {self.branch_label}" if self.branch_label else self.name
+
+
+class PartnerReview(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="reviews")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="partner_reviews")
+    rating = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    comment = models.CharField(max_length=1000, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [models.UniqueConstraint(fields=["partner", "user"], name="unique_partner_review_user")]
+
+    def __str__(self):
+        return f"{self.partner} · {self.rating}/5"
 
 class PartnerStaff(models.Model):
     partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="staff_members")

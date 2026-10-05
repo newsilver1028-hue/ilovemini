@@ -5,7 +5,7 @@ from django.urls import path
 from .member_display import member_nickname, member_label, MemberAutocompleteView, MemberAutocompleteSelect
 
 from .models import (
-    LedgerEntry, Notice, Offer, Partner, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
+    LedgerEntry, Notice, Offer, Partner, PartnerReview, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
     VehicleOwnership, VehicleTransferCode,
 )
 
@@ -191,10 +191,19 @@ class PartnerAdmin(admin.ModelAdmin):
     save_on_top = True
     inlines = (OfferInline,)
     fieldsets = (
-        ("업체 소개", {"fields": ("name", "branch_label", "region", "service_categories", "description")}),
+        ("업체 소개", {"fields": ("name", "branch_label", "region", "service_categories", "description", "business_info", "storefront_photo_url")}),
+        ("대표 정비사", {"fields": ("representative_name", "representative_title", "representative_experience_years", "representative_photo_url")}),
         ("연락처 및 연결", {"fields": ("address", "phone", "hours", "cafe_url", "map_url")}),
         ("앱 노출 설정", {"fields": ("is_active", "is_sponsored", "display_order")}),
     )
+
+
+@admin.register(PartnerReview)
+class PartnerReviewAdmin(admin.ModelAdmin):
+    list_display = ("partner", "user", "rating", "created_at", "updated_at")
+    list_filter = ("rating", "created_at")
+    search_fields = ("partner__name", "partner__branch_label", "comment", "user__naver_identity__nickname")
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(PartnerStaff)

@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 
 from django.db import transaction
 from django.conf import settings
-from django.db.models import F, Q, Sum
+from django.db.models import Avg, Count, F, Q, Sum
 from django.utils import timezone
 from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -22,10 +22,10 @@ from rest_framework.throttling import ScopedRateThrottle
 from .integrity import ledger_record_hash, legacy_ledger_record_hash
 from .models import (
     Vehicle, LedgerEntry, Reminder, Notice, Partner, Offer, PushDevice, VehicleTransferCode,
-    PartnerStaff, VehicleOwnership, VehiclePlateHistory, AttendanceCheckin, PartnerBooking, RecordCorrectionRequest,
+    PartnerStaff, PartnerReview, VehicleOwnership, VehiclePlateHistory, AttendanceCheckin, PartnerBooking, RecordCorrectionRequest,
 )
 from .permissions import OwnerOrStaff, SafeMethodsOrStaff
-from .serializers import VehicleSerializer, LedgerEntrySerializer, ReminderSerializer, NoticeSerializer, PartnerSerializer, OfferSerializer, PartnerBookingSerializer
+from .serializers import VehicleSerializer, LedgerEntrySerializer, ReminderSerializer, NoticeSerializer, PartnerSerializer, PartnerReviewSerializer, OfferSerializer, PartnerBookingSerializer
 from .vehicle_identity import normalize_plate_number
 
 logger = logging.getLogger(__name__)
@@ -785,7 +785,33 @@ class NoticeViewSet(viewsets.ReadOnlyModelViewSet):
 class PartnerViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PartnerSerializer
     permission_classes = [SafeMethodsOrStaff]
-    queryset = Partner.objects.filter(is_active=True)
+    queryset = Partner.objects.filter(is_active=True).annotate(review_count=Count("reviews"), average_rating=Avg("reviews__rating"))
+
+    def get_permissions(self):
+        if getattr(self, "action", None) == "reviews":
+            return [permissions.IsAuthenticated()] if self.request.method == "POST" else [permissions.AllowAny()]
+        return super().get_permissions()
+
+    @action(detail=True, methods=["get", "post"], url_path="reviews", throttle_classes=[ScopedRateThrottle], throttle_scope="partner_review")
+    def reviews(self, request, pk=None):
+        partner = self.get_object()
+        if request.method == "GET":
+            rows = PartnerReview.objects.filter(partner=partner).select_related("user", "user__naver_identity")
+            return Response(PartnerReviewSerializer(rows, many=True).data)
+        serializer = PartnerReviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        review, _ = PartnerReview.objects.update_or_create(
+            partner=partner, user=request.user,
+            defaults={"rating": serializer.validated_data["rating"], "comment": serializer.validated_data.get("comment", "")},
+        )
+        return Response(PartnerReviewSerializer(review).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="service-history", permission_classes=[permissions.AllowAny])
+    def service_history(self, request, pk=None):
+        partner = self.get_object()
+        rows = LedgerEntry.objects.filter(partner=partner, source=LedgerEntry.Source.PARTNER, verified_at__isnull=False)
+        grouped = rows.values("kind").annotate(count=Count("id")).order_by("kind")
+        return Response({"total": rows.count(), "by_kind": list(grouped)})
 
     @action(detail=False, methods=["get"], url_path="my-workplaces", permission_classes=[permissions.IsAuthenticated])
     def my_workplaces(self, request):
