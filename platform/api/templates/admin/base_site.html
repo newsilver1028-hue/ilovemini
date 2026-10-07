@@ -1,0 +1,6 @@
+{% extends "admin/base.html" %}
+{% load static i18n %}
+{% block title %}{{ title }} · ILOVEMINI 관리자{% endblock %}
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/admin.css' %}">{% endblock %}
+{% block branding %}<div class="mini-brand"><a href="{% url 'admin:index' %}"><span class="mini-mark">MINI</span><span>ILOVEMINI<small>운영 관리자</small></span></a></div>{% endblock %}
+{% block nav-global %}{% endblock %}

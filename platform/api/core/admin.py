@@ -489,7 +489,7 @@ PartnerStaff._meta.get_field("can_verify_records").help_text = "담당자가 앱
 PartnerStaff._meta.get_field("can_manage_bookings").help_text = "소속 업체의 예약을 확인하고 처리할 수 있습니다."
 PartnerStaff._meta.get_field("is_active").help_text = "담당자와 소속 업체가 모두 활성화되어야 협력업체 등급으로 인식합니다."
 PartnerAdminForm.base_fields["service_categories"].label = "서비스 분야"
-admin.site.index_title = "회원 등급: 사용자 목록 → 회원 선택 → 동작 → 등급 변경 / 업체 권한: 협력업체 담당자 → 추가"
+admin.site.index_title = "운영 대시보드"
 
 
 User._meta.verbose_name = "가입 회원"
