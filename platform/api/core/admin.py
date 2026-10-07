@@ -1,11 +1,12 @@
 from django.core.exceptions import ObjectDoesNotExist
+from django.utils.html import format_html
 from django import forms
 from django.contrib import admin
 from django.urls import path
 from .member_display import member_nickname, member_label, MemberAutocompleteView, MemberAutocompleteSelect
 
 from .models import (
-    LedgerEntry, Notice, Offer, Partner, PartnerReview, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
+    LedgerEntry, Notice, Offer, Partner, PartnerImage, PartnerReview, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
     VehicleOwnership, VehicleTransferCode,
 )
 
@@ -181,6 +182,62 @@ class NoticeAdmin(admin.ModelAdmin):
     )
 
 
+class PartnerImageAdminForm(forms.ModelForm):
+    upload = forms.FileField(label="소개 이미지 첨부", required=False,
+        help_text="PNG, JPEG, WebP 파일을 선택하세요. 최대 5MB. 기존 이미지를 바꾸려면 새 파일을 선택하세요.",
+        widget=forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/webp"}))
+
+    class Meta:
+        model = PartnerImage
+        fields = ("partner", "caption", "display_order")
+
+    def clean(self):
+        cleaned = super().clean()
+        upload = cleaned.get("upload")
+        if upload:
+            if upload.size > 5 * 1024 * 1024:
+                self.add_error("upload", "이미지는 5MB 이하로 첨부해 주세요.")
+                return cleaned
+            data = upload.read()
+            mime = ""
+            if data.startswith(b"\x89PNG\r\n\x1a\n"):
+                mime = "image/png"
+            elif data.startswith(b"\xff\xd8\xff"):
+                mime = "image/jpeg"
+            elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+                mime = "image/webp"
+            if not mime:
+                self.add_error("upload", "PNG, JPEG, WebP 이미지 파일만 첨부할 수 있습니다.")
+            else:
+                self.instance.image_data = data
+                self.instance.content_type = mime
+        elif not self.instance.pk:
+            self.add_error("upload", "소개 이미지 파일을 첨부해 주세요.")
+        return cleaned
+
+
+class PartnerImageInline(admin.TabularInline):
+    model = PartnerImage
+    form = PartnerImageAdminForm
+    fields = ("preview", "upload", "caption", "display_order")
+    readonly_fields = ("preview",)
+    extra = 0
+
+    @admin.display(description="현재 이미지")
+    def preview(self, obj):
+        if not obj.pk:
+            return "저장 후 표시됩니다."
+        return format_html('<img src="/api/partners/{}/images/{}/" style="max-width:180px;max-height:120px" alt="업체 소개 이미지">', obj.partner_id, obj.pk)
+
+
+@admin.register(PartnerImage)
+class PartnerImageAdmin(admin.ModelAdmin):
+    form = PartnerImageAdminForm
+    list_display = ("partner", "caption", "display_order")
+    list_filter = ("partner",)
+    fields = ("partner", "upload", "caption", "display_order")
+
+
 @admin.register(Partner)
 class PartnerAdmin(admin.ModelAdmin):
     form = PartnerAdminForm
@@ -189,7 +246,7 @@ class PartnerAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "is_sponsored", "region")
     search_fields = ("name", "branch_label", "region", "description", "address")
     save_on_top = True
-    inlines = (OfferInline,)
+    inlines = (OfferInline, PartnerImageInline)
     fieldsets = (
         ("업체 소개", {"fields": ("name", "branch_label", "region", "service_categories", "description", "business_info", "storefront_photo_url")}),
         ("대표 정비사", {"fields": ("representative_name", "representative_title", "representative_experience_years", "representative_photo_url")}),
@@ -400,7 +457,7 @@ _FIELD_LABELS = {
     "name": "업체명", "branch_label": "지점명", "region": "지역",
     "service_categories": "서비스 분야", "description": "설명",
     "address": "주소", "phone": "전화번호", "hours": "영업시간",
-    "cafe_url": "카페 게시글 주소", "map_url": "지도 주소",
+    "cafe_url": "업체별 카페 게시판 주소", "map_url": "지도 주소",
     "is_sponsored": "광고 제휴 업체", "display_order": "표시 순서",
     "title": "제목", "summary": "요약", "body": "내용", "category": "분류",
     "original_url": "원문 주소", "is_pinned": "상단 고정",

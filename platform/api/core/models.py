@@ -255,6 +255,22 @@ class Partner(models.Model):
         return f"{self.name} · {self.branch_label}" if self.branch_label else self.name
 
 
+class PartnerImage(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="introduction_images")
+    caption = models.CharField("이미지 설명", max_length=160, blank=True)
+    image_data = models.BinaryField(editable=False)
+    content_type = models.CharField(max_length=32, editable=False)
+    display_order = models.PositiveSmallIntegerField("표시 순서", default=0)
+
+    class Meta:
+        ordering = ["display_order", "pk"]
+        verbose_name = "업체 소개 이미지"
+        verbose_name_plural = "업체 소개 이미지"
+
+    def __str__(self):
+        return self.caption or f"{self.partner} 소개 이미지"
+
+
 class PartnerReview(models.Model):
     partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="reviews")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="partner_reviews")

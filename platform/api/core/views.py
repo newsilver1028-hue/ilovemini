@@ -9,6 +9,8 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
+from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.conf import settings
 from django.db.models import Avg, Count, F, Q, Sum
@@ -783,10 +785,19 @@ class NoticeViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
 class PartnerViewSet(viewsets.ReadOnlyModelViewSet):
-    throttle_scope = "partner_review" 
+    throttle_scope = "partner_review"
     serializer_class = PartnerSerializer
     permission_classes = [SafeMethodsOrStaff]
-    queryset = Partner.objects.filter(is_active=True).annotate(review_count=Count("reviews"), average_rating=Avg("reviews__rating"))
+    queryset = Partner.objects.filter(is_active=True).prefetch_related("introduction_images").annotate(review_count=Count("reviews"), average_rating=Avg("reviews__rating"))
+
+    @action(detail=True, methods=["get"], url_path=r"images/(?P<image_id>[^/.]+)")
+    def introduction_image(self, request, pk=None, image_id=None):
+        partner = self.get_object()
+        image = get_object_or_404(partner.introduction_images, pk=image_id)
+        response = HttpResponse(bytes(image.image_data), content_type=image.content_type)
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "public, max-age=300"
+        return response
 
     def get_permissions(self):
         if getattr(self, "action", None) == "reviews":

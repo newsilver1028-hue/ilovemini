@@ -133,11 +133,18 @@ class NoticeSerializer(serializers.ModelSerializer):
         fields = ["id", "title", "summary", "body", "category", "original_url", "is_pinned", "published_at"]
 
 class PartnerSerializer(serializers.ModelSerializer):
+    introduction_images = serializers.SerializerMethodField()
+
+    def get_introduction_images(self, obj):
+        request = self.context.get("request")
+        return [{"url": request.build_absolute_uri(f"/api/partners/{obj.pk}/images/{image.pk}/") if request else f"/api/partners/{obj.pk}/images/{image.pk}/",
+                 "caption": image.caption} for image in obj.introduction_images.all()]
+
     review_count = serializers.IntegerField(read_only=True)
     average_rating = serializers.FloatField(read_only=True)
     class Meta:
         model = Partner
-        fields = ["id", "name", "branch_label", "region", "service_categories", "description", "business_info", "storefront_photo_url", "representative_name", "representative_title", "representative_experience_years", "representative_photo_url", "address", "phone", "hours", "cafe_url", "map_url", "is_sponsored", "review_count", "average_rating"]
+        fields = ["id", "name", "branch_label", "region", "service_categories", "description", "business_info", "storefront_photo_url", "introduction_images", "representative_name", "representative_title", "representative_experience_years", "representative_photo_url", "address", "phone", "hours", "cafe_url", "map_url", "is_sponsored", "review_count", "average_rating"]
 
 
 class PartnerReviewSerializer(serializers.ModelSerializer):
