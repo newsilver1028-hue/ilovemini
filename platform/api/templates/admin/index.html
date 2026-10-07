@@ -1,15 +1,112 @@
 {% extends "admin/index.html" %}
 {% load i18n admin_groups %}
+
+{% block content_title %}{% endblock %}
+
 {% block content %}
-<div class="mini-welcome"><span class="mini-eyebrow">ILOVEMINI ADMIN</span><h2>무엇을 관리할까요?</h2><p>업무별로 묶인 메뉴에서 필요한 항목을 선택하세요.</p></div>
-<div class="mini-category-grid">
-{% for group in app_list|admin_groups %}
-<section class="mini-category"><header><h2>{{ group.title }}</h2><p>{{ group.description }}</p></header><ul>
-{% for model in group.models %}
-<li><a class="mini-menu-link" href="{{ model.admin_url }}">{% if model.object_name == 'PartnerReview' %}업체 리뷰{% else %}{{ model.name }}{% endif %}<span aria-hidden="true">›</span></a>{% if model.add_url %}<a class="mini-menu-add" href="{{ model.add_url }}" aria-label="{{ model.name }} 추가">추가</a>{% endif %}</li>
-{% endfor %}
-</ul></section>
-{% empty %}<p>사용할 수 있는 관리 메뉴가 없습니다.</p>{% endfor %}
+<div id="content-main">
+<main class="mini-dashboard" aria-labelledby="mini-dashboard-title">
+  <header class="mini-dashboard-hero">
+    <div class="mini-dashboard-hero-copy">
+      <span class="mini-dashboard-kicker"><span aria-hidden="true"></span> ILOVEMINI 운영 센터</span>
+      <h1 id="mini-dashboard-title">관리 업무를 빠르게 찾아보세요</h1>
+      <p>업체, 콘텐츠, 회원, 차량 메뉴를 업무별로 모았습니다.</p>
+    </div>
+    <div class="mini-dashboard-hero-mark" aria-hidden="true">MINI</div>
+  </header>
+
+  <section class="mini-menu-finder" aria-label="관리 메뉴 찾기">
+    <label class="mini-menu-search">
+      <span class="mini-search-icon" aria-hidden="true">⌕</span>
+      <input id="mini-admin-search" type="search" autocomplete="off" placeholder="관리 메뉴 검색 (예: 업체 사진, 회원, 공지)" aria-label="관리 메뉴 검색">
+      <kbd>/</kbd>
+    </label>
+    <p id="mini-admin-search-status" class="mini-search-status" aria-live="polite">메뉴 이름을 검색하거나 아래 업무별 메뉴를 선택하세요.</p>
+  </section>
+
+  <nav class="mini-category-nav" aria-label="업무별 바로가기">
+    {% for group in app_list|admin_groups %}
+      <a href="#admin-{{ forloop.counter }}"><span aria-hidden="true">{{ forloop.counter|stringformat:"02d" }}</span>{{ group.title }}</a>
+    {% endfor %}
+  </nav>
+
+  <div class="mini-category-grid" id="mini-admin-groups">
+    {% for group in app_list|admin_groups %}
+      <section class="mini-category" id="admin-{{ forloop.counter }}" aria-labelledby="heading-{{ forloop.counter }}">
+        <header class="mini-category-heading">
+          <span class="mini-category-index" aria-hidden="true">{{ forloop.counter|stringformat:"02d" }}</span>
+          <div>
+            <h2 id="heading-{{ forloop.counter }}">{{ group.title }}</h2>
+            <p>{{ group.description }}</p>
+          </div>
+          <span class="mini-category-count">{{ group.models|length }}개</span>
+        </header>
+        <ul class="mini-menu-list">
+          {% for model in group.models %}
+            <li class="mini-menu-item">
+              <a class="mini-menu-link" href="{{ model.admin_url }}">
+                <span>{% if model.object_name == 'PartnerReview' %}업체 리뷰{% else %}{{ model.name }}{% endif %}</span>
+                <span class="mini-menu-arrow" aria-hidden="true">›</span>
+              </a>
+              {% if model.add_url %}<a class="mini-menu-add" href="{{ model.add_url }}" aria-label="{{ model.name }} 새로 등록">새로 등록</a>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% empty %}
+      <p class="mini-empty-state">사용할 수 있는 관리 메뉴가 없습니다.</p>
+    {% endfor %}
+  </div>
+  <p id="mini-admin-empty" class="mini-empty-state" hidden>검색 결과가 없습니다. 다른 단어로 찾아보세요.</p>
+</main>
+
+<script>
+  (() => {
+    const input = document.getElementById('mini-admin-search');
+    const sections = [...document.querySelectorAll('.mini-category')];
+    const status = document.getElementById('mini-admin-search-status');
+    const empty = document.getElementById('mini-admin-empty');
+    const nav = document.querySelector('.mini-category-nav');
+    if (!input) return;
+
+    const filterMenus = () => {
+      const query = input.value.trim().toLocaleLowerCase();
+      let visibleCount = 0;
+      sections.forEach((section) => {
+        const items = [...section.querySelectorAll('.mini-menu-item')];
+        let sectionCount = 0;
+        items.forEach((item) => {
+          const matches = !query || item.innerText.toLocaleLowerCase().includes(query);
+          item.hidden = !matches;
+          if (matches) sectionCount += 1;
+        });
+        section.hidden = sectionCount === 0;
+        visibleCount += sectionCount;
+      });
+      const searching = query.length > 0;
+      nav.hidden = searching;
+      empty.hidden = !searching || visibleCount > 0;
+      status.textContent = searching
+        ? `${visibleCount}개 메뉴를 찾았습니다.`
+        : '메뉴 이름을 검색하거나 아래 업무별 메뉴를 선택하세요.';
+    };
+
+    input.addEventListener('input', filterMenus);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+        event.preventDefault();
+        input.focus();
+      }
+      if (event.key === 'Escape' && document.activeElement === input) {
+        input.value = '';
+        filterMenus();
+        input.blur();
+      }
+    });
+  })();
+</script>
+</main>
 </div>
 {% endblock %}
+
 {% block sidebar %}{% endblock %}
