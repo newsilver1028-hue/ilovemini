@@ -31,6 +31,14 @@ class NoticeAdminForm(forms.ModelForm):
 
 
 class PartnerAdminForm(forms.ModelForm):
+    description = forms.CharField(label="업체 소개 글", required=False,
+        help_text="앱의 업체 상세 → 사진 아래 ‘업체 소개’에 표시됩니다. 소개 문구를 자유롭게 작성하세요.",
+        widget=forms.Textarea(attrs={"rows": 6, "cols": 70, "placeholder": "매장의 특징, 전문 서비스, 고객에게 전하고 싶은 내용을 작성하세요."}))
+    business_info = forms.CharField(label="매장 상세 안내", required=False,
+        help_text="앱의 업체 상세 → ‘업체 정보’에 표시됩니다. 방문·주차·이용 안내 등을 작성하세요.",
+        widget=forms.Textarea(attrs={"rows": 5, "cols": 70}))
+    storefront_photo_url = forms.URLField(label="대표 사진 주소 (선택)", required=False,
+        help_text="사진 파일 첨부는 아래 ‘매장 사진’에서 가능합니다. 주소가 있는 대표 사진만 이곳에 입력하세요.")
     service_categories = forms.CharField(
         required=False,
         help_text="여러 항목은 쉼표로 구분해 입력하세요. 예: 정비, 튜닝, 부품",
@@ -221,7 +229,9 @@ class PartnerImageInline(admin.TabularInline):
     form = PartnerImageAdminForm
     fields = ("preview", "upload", "caption", "display_order")
     readonly_fields = ("preview",)
-    extra = 0
+    extra = 1
+    verbose_name = "매장 사진"
+    verbose_name_plural = "매장 사진 · 파일 첨부 및 교체"
 
     @admin.display(description="현재 이미지")
     def preview(self, obj):
@@ -246,9 +256,12 @@ class PartnerAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "is_sponsored", "region")
     search_fields = ("name", "branch_label", "region", "description", "address")
     save_on_top = True
-    inlines = (OfferInline, PartnerImageInline)
+    inlines = (PartnerImageInline, OfferInline)
     fieldsets = (
-        ("업체 소개", {"fields": ("name", "branch_label", "region", "service_categories", "description", "business_info", "storefront_photo_url")}),
+        ("업체 기본 정보", {"fields": ("name", "branch_label", "region", "service_categories")}),
+        ("업체 소개 글", {"description": "앱의 사진 아래 소개 문구를 수정하는 곳입니다.", "fields": ("description",)}),
+        ("매장 상세 안내", {"description": "앱의 업체 정보에 표시할 방문 및 이용 안내입니다.", "fields": ("business_info",)}),
+        ("대표 사진 주소", {"description": "파일 사진은 아래 매장 사진에서 첨부하세요. 이 항목은 외부 이미지 주소가 있을 때만 사용합니다.", "fields": ("storefront_photo_url",)}),
         ("대표 정비사", {"fields": ("representative_name", "representative_title", "representative_experience_years", "representative_photo_url")}),
         ("연락처 및 연결", {"fields": ("address", "phone", "hours", "cafe_url", "map_url")}),
         ("앱 노출 설정", {"fields": ("is_active", "is_sponsored", "display_order")}),
