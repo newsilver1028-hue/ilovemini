@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 def member_nickname(user):
     try:
-        nickname = user.naver_identity.nickname
+        identity = user.naver_identity
+        nickname = identity.cafe_nickname or identity.nickname
     except ObjectDoesNotExist:
         nickname = ""
 

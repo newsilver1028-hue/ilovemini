@@ -157,7 +157,9 @@ class PartnerReviewSerializer(serializers.ModelSerializer):
 
     def get_reviewer_name(self, obj):
         identity = getattr(obj.user, "naver_identity", None)
-        return identity.nickname.strip() if identity and identity.nickname.strip() else "아이러브미니 회원"
+        if identity:
+            return identity.cafe_nickname.strip() or identity.nickname.strip() or "아이러브미니 회원"
+        return "아이러브미니 회원"
 
 class OfferSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source="partner.name", read_only=True)

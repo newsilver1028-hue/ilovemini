@@ -344,6 +344,7 @@ class NaverIdentity(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="naver_identity")
     subject = models.CharField(max_length=64, unique=True)
     nickname = models.CharField(max_length=80, blank=True)
+    cafe_nickname = models.CharField("네이버 카페 닉네임", max_length=40, blank=True)
     name = models.CharField("회원 이름", max_length=150, blank=True)
     email = models.EmailField("연락처 이메일 주소", blank=True)
     profile_image = models.URLField("프로필 사진", max_length=2048, blank=True)

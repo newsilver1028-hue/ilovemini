@@ -118,12 +118,25 @@ class MemberOverviewView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
         user = request.user; grade = member_grade(user); vehicles = active_vehicles(user)
+        identity = getattr(user, 'naver_identity', None)
         bookings = PartnerBooking.objects.filter(customer=user)
         verified = LedgerEntry.objects.filter(source='partner', vehicle__in=vehicles, vehicle__ownerships__user=user,
             vehicle__ownerships__ended_at__isnull=True, created_at__gte=F('vehicle__ownerships__started_at')).distinct().count()
-        return Response({'member_id': user.pk, 'nickname': member_nickname(user), 'email': user.email, 'grade': grade,
+        return Response({'member_id': user.pk, 'nickname': member_nickname(user),
+            'cafe_nickname': identity.cafe_nickname if identity else '',
+            'email': user.email, 'grade': grade,
             'grade_label': GRADES[grade], 'vehicle_count': vehicles.count(), 'booking_count': bookings.count(),
             'active_booking_count': bookings.filter(status__in=['requested','confirmed']).count(), 'verified_record_count': verified})
+
+    def patch(self, request):
+        identity = getattr(request.user, 'naver_identity', None)
+        if identity is None:
+            return Response({'detail': '네이버 로그인 회원만 닉네임을 설정할 수 있습니다.'}, status=400)
+        nickname = serializers.CharField(max_length=40, allow_blank=False, trim_whitespace=True).run_validation(
+            request.data.get('cafe_nickname'))
+        identity.cafe_nickname = nickname
+        identity.save(update_fields=['cafe_nickname'])
+        return Response({'cafe_nickname': identity.cafe_nickname})
 
 class PassportPreviewView(APIView):
     permission_classes = [IsAuthenticated]
