@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 12814)
-Total output lines: 912
-
 import hashlib
 import html
 import json
@@ -436,7 +433,67 @@ class VehicleViewSet(viewsets.ModelViewSet):
         alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
         now = timezone.now()
         with transaction.atomic():
-            vehicle = Vehicle.objects.select_fo…814 tokens truncated…n Response({"detail": "회원 계정에서 인계 코드를 확인해 주세요."}, status=status.HTTP_403_FORBIDDEN)
+            vehicle = Vehicle.objects.select_for_update().get(pk=vehicle.pk)
+            if vehicle.owner_id != request.user.id:
+                return Response({"detail": "차량 소유자가 변경되었습니다. 다시 확인해 주세요."}, status=status.HTTP_409_CONFLICT)
+            VehicleTransferCode.objects.filter(
+                vehicle=vehicle, accepted_at__isnull=True, invalidated_at__isnull=True,
+            ).update(invalidated_at=now)
+            while True:
+                code = "".join(secrets.choice(alphabet) for _ in range(10))
+                digest = hashlib.sha256(code.encode("ascii")).hexdigest()
+                if not VehicleTransferCode.objects.filter(code_digest=digest).exists():
+                    break
+            transfer = VehicleTransferCode.objects.create(
+                vehicle=vehicle,
+                previous_owner=request.user,
+                code_digest=digest,
+                expires_at=now + timedelta(hours=24),
+            )
+
+        return Response({
+            "code": code,
+            "expires_at": transfer.expires_at,
+            "model_name": vehicle.model_name,
+            "plate_number": vehicle.plate_number,
+            "ledger_count": vehicle.ledger_entries.count(),
+            "verified_record_count": vehicle.ledger_entries.filter(source=LedgerEntry.Source.PARTNER).count(),
+            "correction_count": vehicle.ledger_entries.filter(corrects__isnull=False).count(),
+            "reminder_count": vehicle.reminders.count(),
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="cancel-transfer", throttle_classes=[ScopedRateThrottle])
+    def cancel_transfer(self, request, pk=None):
+        if request.user.is_staff:
+            return Response({"detail": "운영자 계정으로는 차량 인계를 취소할 수 없습니다."}, status=status.HTTP_403_FORBIDDEN)
+        vehicle = self.get_object()
+        if vehicle.owner_id != request.user.id:
+            return Response({"detail": "내 차량의 인계만 취소할 수 있습니다."}, status=status.HTTP_403_FORBIDDEN)
+        with transaction.atomic():
+            vehicle = Vehicle.objects.select_for_update().get(pk=vehicle.pk)
+            if vehicle.owner_id != request.user.id:
+                return Response({"detail": "차량 소유자가 변경되었습니다. 다시 확인해 주세요."}, status=status.HTTP_409_CONFLICT)
+            cancelled = VehicleTransferCode.objects.filter(
+                vehicle=vehicle,
+                accepted_at__isnull=True,
+                invalidated_at__isnull=True,
+            ).update(invalidated_at=timezone.now())
+        return Response({"cancelled": cancelled})
+
+    def _find_transfer(self, code):
+        digest = hashlib.sha256(code.strip().upper().encode("utf-8")).hexdigest()
+        transfers = VehicleTransferCode.objects.select_related("vehicle")
+        return transfers.filter(
+            code_digest=digest,
+            accepted_at__isnull=True,
+            invalidated_at__isnull=True,
+            expires_at__gt=timezone.now(),
+        ).first()
+
+    @action(detail=False, methods=["post"], url_path="preview-transfer", throttle_classes=[ScopedRateThrottle])
+    def preview_transfer(self, request):
+        if request.user.is_staff:
+            return Response({"detail": "회원 계정에서 인계 코드를 확인해 주세요."}, status=status.HTTP_403_FORBIDDEN)
         data = self.TransferCodeInput(data=request.data)
         data.is_valid(raise_exception=True)
         transfer = self._find_transfer(data.validated_data["code"])
