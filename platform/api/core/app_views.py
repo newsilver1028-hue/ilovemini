@@ -174,6 +174,18 @@ class RecordCorrectionView(APIView):
         if ownership is None or entry.created_at < ownership.started_at: raise PermissionDenied('이전 소유자의 기록은 정정을 요청할 수 없습니다.')
         if entry.corrections.exists(): raise serializers.ValidationError('이미 정정된 원본입니다. 가장 최근 정정 기록을 선택해 주세요.')
         item, created = RecordCorrectionRequest.objects.get_or_create(entry=entry, requested_by=request.user, resolved_at__isnull=True, defaults={'reason': reason})
+        if created:
+            def notify_partner_staff():
+                try:
+                    from .push import send_record_correction_notification
+                    send_record_correction_notification(item)
+                except Exception:
+                    # Keep a committed correction request even if push setup is unavailable.
+                    import logging
+                    logging.getLogger(__name__).exception(
+                        'Failed to send correction request push (request_id=%s)', item.pk,
+                    )
+            transaction.on_commit(notify_partner_staff)
         return Response(correction_payload(item), status=201 if created else 200)
 
 class ResolveCorrectionView(APIView):

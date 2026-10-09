@@ -5,7 +5,7 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
-from .models import AppContent, AppRelease, SeasonBanner, Vehicle, VehicleOwnership, Partner, PartnerStaff, NaverIdentity, LedgerEntry, RecordCorrectionRequest
+from .models import AppContent, AppRelease, SeasonBanner, Vehicle, VehicleOwnership, Partner, PartnerStaff, NaverIdentity, LedgerEntry, RecordCorrectionRequest, PushDevice
 from .integrity import ledger_record_hash
 
 User = get_user_model()
@@ -131,6 +131,31 @@ class PrivateAppFlowTests(TestCase):
         client=APIClient(); client.force_authenticate(self.other)
         self.assertEqual(client.post('/api/record-corrections/', payload, format='json').status_code, 404)
         self.assertEqual(client.get('/api/record-corrections/').data, [])
+
+    def test_new_correction_request_pushes_partner_record_staff_once(self):
+        from unittest.mock import patch
+        row = self.record()
+        PushDevice.objects.create(user=self.staff, installation_id='staff-token', platform=PushDevice.Platform.IOS)
+        payload = {'entry_id': row.pk, 'reason': '금액과 주행거리를 확인해 주세요'}
+        with patch('core.push._ensure_firebase', return_value=True), \
+             patch('core.push.messaging.send_each_for_multicast') as send, \
+             self.captureOnCommitCallbacks(execute=True):
+            send.return_value.success_count = 1
+            response = self.client.post('/api/record-corrections/', payload, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(send.call_count, 1)
+        message = send.call_args.args[0]
+        self.assertEqual(message.tokens, ['staff-token'])
+        self.assertEqual(message.data['type'], 'record_correction')
+        self.assertEqual(message.data['request_id'], str(response.data['id']))
+        self.assertIn('금액과 주행거리를 확인해 주세요', message.notification.body)
+
+        with patch('core.push._ensure_firebase', return_value=True), \
+             patch('core.push.messaging.send_each_for_multicast') as duplicate_send, \
+             self.captureOnCommitCallbacks(execute=True):
+            duplicate = self.client.post('/api/record-corrections/', payload, format='json')
+        self.assertEqual(duplicate.status_code, 200)
+        duplicate_send.assert_not_called()
 
     def test_linked_correction_preserves_original_and_resolves_request(self):
         row = self.record(); old_hash=row.record_hash

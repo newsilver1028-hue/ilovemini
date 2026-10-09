@@ -1,8 +1,11 @@
 import json
+import logging
 from firebase_admin import credentials, messaging
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from .models import PartnerStaff
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_firebase():
@@ -113,3 +116,46 @@ def send_booking_cancel_notification(booking):
         tokens=devices,
     )
     return messaging.send_each_for_multicast(message).success_count
+
+
+def send_record_correction_notification(correction_request):
+    """Notify staff who can verify records when a member requests a correction."""
+    if not _ensure_firebase():
+        return 0
+    entry = correction_request.entry
+    partner = entry.partner
+    if partner is None or not partner.is_active:
+        return 0
+    staff_ids = PartnerStaff.objects.filter(
+        partner=partner, is_active=True, can_verify_records=True,
+    ).values_list("user_id", flat=True)
+    tokens = list(
+        get_user_model().objects.filter(pk__in=staff_ids)
+        .values_list("push_devices__installation_id", flat=True)
+    )
+    tokens = list(dict.fromkeys(token for token in tokens if token))
+    if not tokens:
+        return 0
+
+    vehicle = entry.vehicle
+    vehicle_name = vehicle.nickname or vehicle.model_name
+    record_name = entry.description or entry.get_kind_display()
+    message = messaging.MulticastMessage(
+        notification=messaging.Notification(
+            title=f"정비 기록 정정 요청 · {partner.name}",
+            body=f"{vehicle_name} · {record_name}: {correction_request.reason}",
+        ),
+        data={
+            "type": "record_correction",
+            "request_id": str(correction_request.pk),
+            "entry_id": str(entry.pk),
+            "partner_id": str(partner.pk),
+        },
+        tokens=tokens,
+    )
+    try:
+        return messaging.send_each_for_multicast(message).success_count
+    except Exception:
+        # A push provider outage must not undo the member's saved request.
+        logger.exception("Failed to send record correction push (request_id=%s)", correction_request.pk)
+        return 0
