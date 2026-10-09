@@ -25,7 +25,9 @@
 | `NAVER_API_HUB_CLIENT_SECRET` | 카페글 검색용 NAVER API HUB Client Secret |
 | `OPENAI_API_KEY` | MINI 박사 Q&A의 질문별 웹 검색·AI 답변용 비밀키. Render 환경변수에만 저장하고 사이트/앱에는 넣지 않습니다. |
 | `OPENAI_SEARCH_MODEL` | Responses API 웹 검색 지원 모델. 기본값은 `gpt-5.5`입니다. |
-| `FCM_ENABLED` | Firebase 푸시를 연결하기 전에는 `0` |
+| `FCM_ENABLED` | Firebase 푸시를 쓸 때 `1` |
+| `FCM_CREDENTIALS_JSON` | Firebase 서비스 계정 JSON 전체를 담는 Render 비밀 환경변수. 키 내용을 저장소나 앱에 넣지 않습니다. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | `FCM_CREDENTIALS_JSON` 대신 Secret File을 쓸 때의 파일 경로 |
 
 `DATABASE_URL`의 암호를 포함한 전체 주소를 Key와 Value 두 칸에 나누지 말고, Key=`DATABASE_URL`, Value=전체 URL 한 줄로 저장합니다. 저장 후 Deploy를 실행합니다. 컨테이너 시작 시 DB migration과 정적 파일 수집을 실행하고 Gunicorn으로 서버를 띄웁니다. Health Check Path는 `/api/health/`로 지정합니다.
 
@@ -58,3 +60,4 @@ Android 설치 파일이 필요한 경우 `appbundle` 대신 `apk`를 사용합�
 - iOS/Android Firebase·Apple/Google 스토어 설정과 실기기 푸시 검증
 - 업체 예약 접수 담당 계정·전화번호 정확성, 취소·노쇼 안내 정책
 - 실제 네이버 API HUB 키의 Search/Cafe Article 권한과 운영 쿼터
+- FCM 전송을 쓰려면 Render의 `ilovemini` API Web Service에 `FCM_ENABLED=1`과 서비스 계정 인증 정보(`FCM_CREDENTIALS_JSON` 또는 Secret File 경로)를 설정해야 합니다. Firebase Console의 Cloud Messaging에 APNs 인증 키도 등록되어 있어야 하며, 실제 기기에서 앱 알림 권한을 허용한 후 테스트합니다.

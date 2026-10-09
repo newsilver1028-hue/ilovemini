@@ -189,7 +189,7 @@ class PushDevice(models.Model):
         ANDROID = "android", "Android"
         IOS = "ios", "iOS"
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="push_devices")
-    installation_id = models.CharField(max_length=128, unique=True)
+    installation_id = models.CharField(max_length=2048, unique=True)
     platform = models.CharField(max_length=12, choices=Platform.choices)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

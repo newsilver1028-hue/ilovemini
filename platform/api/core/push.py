@@ -1,4 +1,5 @@
-from firebase_admin import messaging
+import json
+from firebase_admin import credentials, messaging
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from .models import PartnerStaff
@@ -11,7 +12,9 @@ def _ensure_firebase():
     except ValueError:
         if not getattr(settings, "FCM_ENABLED", False):
             return False
-        firebase_admin.initialize_app()
+        credentials_json = getattr(settings, "FCM_CREDENTIALS_JSON", "").strip()
+        credential = credentials.Certificate(json.loads(credentials_json)) if credentials_json else None
+        firebase_admin.initialize_app(credential)
     return getattr(settings, "FCM_ENABLED", False)
 
 
@@ -37,7 +40,7 @@ def send_reminder_notification(reminder, trigger):
             body=body,
         ),
         data={"type": "reminder", "reminder_id": str(reminder.pk), "trigger": trigger},
-        fids=[device.installation_id for device in devices],
+        tokens=[device.installation_id for device in devices],
     )
     result = messaging.send_each_for_multicast(message)
     invalid_tokens = []
@@ -68,7 +71,7 @@ def send_booking_notification(booking):
             body=f"{booking.partner.region + ' · ' if booking.partner.region else ''}{booking.scheduled_at:%m월 %d일 %H:%M} · {booking.service_type}",
         ),
         data={"type": "partner_booking", "booking_id": str(booking.pk)},
-        fids=devices,
+        tokens=devices,
     )
     return messaging.send_each_for_multicast(message).success_count
 
@@ -86,7 +89,7 @@ def send_booking_status_notification(booking):
             body=f"{booking.scheduled_at:%m월 %d일 %H:%M} · {status_text}",
         ),
         data={"type": "partner_booking_status", "booking_id": str(booking.pk), "status": booking.status},
-        fids=[device.installation_id for device in devices],
+        tokens=[device.installation_id for device in devices],
     )
     return messaging.send_each_for_multicast(message).success_count
 
@@ -107,6 +110,6 @@ def send_booking_cancel_notification(booking):
             body=f"{booking.partner.region + ' · ' if booking.partner.region else ''}{booking.scheduled_at:%m월 %d일 %H:%M} · {booking.service_type}",
         ),
         data={"type": "partner_booking_status", "booking_id": str(booking.pk), "status": booking.status},
-        fids=devices,
+        tokens=devices,
     )
     return messaging.send_each_for_multicast(message).success_count

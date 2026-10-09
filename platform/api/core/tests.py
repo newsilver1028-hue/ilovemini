@@ -554,9 +554,10 @@ class ApiAccessTests(TestCase):
         self.assertEqual(len(response.data), 0)
 
     def test_push_token_is_registered_to_signed_in_member(self):
-        response = self.client.post("/api/push/devices/", {"installation_id": "firebase-installation-id", "platform": "ios"}, format="json")
+        token = "fcm-registration-token-" + ("x" * 300)
+        response = self.client.post("/api/push/devices/", {"installation_id": token, "platform": "ios"}, format="json")
         self.assertEqual(response.status_code, 200)
-        device = PushDevice.objects.get(installation_id="firebase-installation-id")
+        device = PushDevice.objects.get(installation_id=token)
         self.assertEqual(device.user, self.member)
         self.assertEqual(device.platform, PushDevice.Platform.IOS)
 
