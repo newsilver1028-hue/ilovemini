@@ -172,6 +172,42 @@ class PrivateAppFlowTests(TestCase):
         self.assertEqual(self.worker.post('/api/ledger/partner-verified/', self.payload(row, amount_krw=130000), format='json').status_code, 409)
         self.assertEqual(self.worker.post('/api/ledger/partner-verified/', self.payload(corrected, amount_krw=130000), format='json').status_code, 201)
 
+    def test_correction_request_can_be_completed_without_qr_payload(self):
+        original = self.record()
+        self.client.post('/api/record-corrections/', {'entry_id': original.pk, 'reason': '금액과 주행거리 정정'}, format='json')
+        request = RecordCorrectionRequest.objects.get(entry=original)
+        response = self.worker.post(f'/api/record-corrections/{request.pk}/complete/', {
+            'kind': original.kind,
+            'entry_date': str(original.entry_date),
+            'odometer_km': 10100,
+            'amount_krw': 90000,
+            'description': '오일 교환',
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        correction = LedgerEntry.objects.get(pk=response.data['resolved_entry_id'])
+        self.assertEqual(correction.corrects_id, original.pk)
+        self.assertEqual(correction.vehicle_id, original.vehicle_id)
+        self.assertEqual(correction.partner_id, original.partner_id)
+        self.assertEqual(correction.amount_krw, 90000)
+        self.assertEqual(correction.record_hash, ledger_record_hash(correction))
+        request.refresh_from_db()
+        self.assertIsNotNone(request.resolved_at)
+        original.refresh_from_db()
+        self.assertEqual(original.amount_krw, 100000)
+
+    def test_correction_completion_requires_active_staff_permission(self):
+        original = self.record()
+        self.client.post('/api/record-corrections/', {'entry_id': original.pk, 'reason': '금액 정정'}, format='json')
+        request = RecordCorrectionRequest.objects.get(entry=original)
+        self.permission.can_verify_records = False
+        self.permission.save(update_fields=['can_verify_records'])
+        response = self.worker.post(f'/api/record-corrections/{request.pk}/complete/', {
+            'kind': original.kind, 'entry_date': str(original.entry_date), 'odometer_km': 10000,
+            'amount_krw': 90000, 'description': original.description,
+        }, format='json')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(LedgerEntry.objects.count(), 1)
+
     def test_pending_requests_only_issuer_workplace(self):
         row=self.record(); self.client.post('/api/record-corrections/', {'entry_id': row.pk, 'reason': '확인'}, format='json')
         self.assertEqual(len(self.worker.get('/api/record-corrections/?workplace=1').data), 1)

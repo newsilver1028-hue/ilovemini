@@ -16,6 +16,7 @@ from rest_framework.views import APIView
 from .member_display import member_nickname
 from .member_roles import GRADES, member_grade
 from .models import AppContent, AppRelease, MemberPreference, RecordCorrectionRequest, Vehicle, PartnerStaff, LedgerEntry, PartnerBooking
+from .integrity import ledger_record_hash, legacy_ledger_record_hash
 
 def active_vehicles(user):
     return Vehicle.objects.filter(status='active', ownerships__user=user, ownerships__ended_at__isnull=True).distinct()
@@ -202,3 +203,84 @@ class ResolveCorrectionView(APIView):
         if item.resolved_at and item.resolved_entry_id != entry_id: raise serializers.ValidationError('이미 처리된 요청입니다.')
         item.resolved_entry=correction;item.resolved_at=item.resolved_at or timezone.now();item.save(update_fields=['resolved_entry','resolved_at'])
         return Response(correction_payload(item))
+
+class CompleteCorrectionView(APIView):
+    """Create an append-only correction from a member request without rescanning the vehicle QR."""
+    permission_classes = [IsAuthenticated]
+
+    class Input(serializers.Serializer):
+        kind = serializers.ChoiceField(choices=LedgerEntry.Kind.choices)
+        entry_date = serializers.DateField()
+        odometer_km = serializers.IntegerField(min_value=0)
+        amount_krw = serializers.IntegerField(min_value=0)
+        description = serializers.CharField(max_length=160, allow_blank=False)
+        part_number = serializers.CharField(max_length=120, required=False, allow_blank=True)
+        evidence_url = serializers.URLField(required=False, allow_blank=True)
+
+        def validate_evidence_url(self, value):
+            if value and not value.lower().startswith('https://'):
+                raise serializers.ValidationError('증빙 링크는 HTTPS 주소만 등록할 수 있습니다.')
+            return value
+
+    @transaction.atomic
+    def post(self, request, pk):
+        item = RecordCorrectionRequest.objects.select_for_update().select_related(
+            'entry__vehicle', 'entry__partner', 'requested_by'
+        ).filter(
+            pk=pk,
+            entry__partner_id__in=verification_partners(request.user),
+            entry__vehicle__status='active',
+            entry__vehicle__ownerships__ended_at__isnull=True,
+            entry__vehicle__ownerships__user_id=F('requested_by_id'),
+            entry__partner__is_active=True,
+        ).first()
+        if item is None:
+            raise NotFound('소속 업체의 정정 요청을 찾을 수 없습니다.')
+        if item.resolved_at is not None:
+            return Response({'detail': '이미 처리된 요청입니다.'}, status=409)
+
+        original = LedgerEntry.objects.select_for_update().select_related('vehicle').get(pk=item.entry_id)
+        vehicle = Vehicle.objects.select_for_update().get(pk=original.vehicle_id)
+        ownership = vehicle.current_ownership
+        valid_signature = bool(original.record_hash) and (
+            ledger_record_hash(original) == original.record_hash
+            or (original.source == LedgerEntry.Source.PARTNER
+                and legacy_ledger_record_hash(original) == original.record_hash)
+        )
+        if (ownership is None or ownership.user_id != item.requested_by_id
+                or original.source != LedgerEntry.Source.PARTNER
+                or original.partner_id not in verification_partners(request.user)
+                or original.created_at < ownership.started_at or not valid_signature):
+            raise PermissionDenied('현재 소유자의 정상적인 업체 인증기록만 정정할 수 있습니다.')
+        if original.corrections.exists():
+            return Response({'detail': '이미 정정된 원본입니다. 가장 최근 정정 기록을 선택해 주세요.'}, status=409)
+
+        data = self.Input(data=request.data)
+        data.is_valid(raise_exception=True)
+        now = timezone.now()
+        values = data.validated_data
+        correction = LedgerEntry.objects.create(
+            vehicle=vehicle,
+            kind=values['kind'],
+            entry_date=values['entry_date'],
+            odometer_km=values['odometer_km'],
+            amount_krw=values['amount_krw'],
+            description=values['description'].strip(),
+            source=LedgerEntry.Source.PARTNER,
+            partner=original.partner,
+            verified_by=request.user,
+            verified_at=now,
+            part_number=values.get('part_number', '').strip(),
+            evidence_url=values.get('evidence_url', ''),
+            corrects=original,
+            correction_reason=item.reason,
+        )
+        correction.record_hash = ledger_record_hash(correction)
+        correction.save(update_fields=['record_hash'])
+        item.resolved_entry = correction
+        item.resolved_at = now
+        item.save(update_fields=['resolved_entry', 'resolved_at'])
+        if vehicle.current_odometer_km is None or correction.odometer_km > vehicle.current_odometer_km:
+            vehicle.current_odometer_km = correction.odometer_km
+            vehicle.save(update_fields=['current_odometer_km'])
+        return Response(correction_payload(item), status=201)

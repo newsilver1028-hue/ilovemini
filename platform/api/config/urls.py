@@ -1,5 +1,5 @@
 from core.season_views import SeasonBannerView
-from core.app_views import AppContentView, ShoppingSearchView, MemberPreferenceView, MemberOverviewView, PassportPreviewView, RecordCorrectionView, ResolveCorrectionView
+from core.app_views import AppContentView, ShoppingSearchView, MemberPreferenceView, MemberOverviewView, PassportPreviewView, RecordCorrectionView, ResolveCorrectionView, CompleteCorrectionView
 from rest_framework_simplejwt.views import TokenRefreshView
 from django.contrib import admin
 from django.urls import include, path
@@ -24,6 +24,7 @@ urlpatterns = [
     path("api/vehicles/preview-passport/", PassportPreviewView.as_view(), name="passport_preview"),
     path("api/record-corrections/", RecordCorrectionView.as_view(), name="record_corrections"),
     path("api/record-corrections/<int:pk>/resolve/", ResolveCorrectionView.as_view(), name="resolve_correction"),
+    path("api/record-corrections/<int:pk>/complete/", CompleteCorrectionView.as_view(), name="complete_correction"),
     path("api/app/season-banner/", SeasonBannerView.as_view(), name="season_banner"),
     path("admin/", admin.site.urls),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
