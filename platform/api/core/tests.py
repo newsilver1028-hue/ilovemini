@@ -268,6 +268,29 @@ class ApiAccessTests(TestCase):
         booking.refresh_from_db()
         self.assertEqual(booking.status, PartnerBooking.Status.COMPLETED)
 
+    def test_confirmed_booking_cancellation_sends_push_to_partner_staff_after_commit(self):
+        partner = Partner.objects.create(name="취소 알림 업체", region="서울", is_active=True)
+        staff_user = User.objects.create_user(username="cancel-push-staff", password="Long-test-password-789")
+        PartnerStaff.objects.create(user=staff_user, partner=partner, can_manage_bookings=True, is_active=True)
+        PushDevice.objects.create(user=staff_user, installation_id="cancel-push-token", platform=PushDevice.Platform.IOS)
+        booking = PartnerBooking.objects.create(
+            customer=self.member, partner=partner,
+            scheduled_at=timezone.now() + timedelta(days=1), service_type="확정 정비",
+            status=PartnerBooking.Status.CONFIRMED,
+        )
+        with patch("core.push._ensure_firebase", return_value=True), \
+             patch("core.push.messaging.send_each_for_multicast") as send, \
+             self.captureOnCommitCallbacks(execute=True):
+            send.return_value.success_count = 1
+            response = self.client.post(f"/api/bookings/{booking.pk}/cancel/", {}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], PartnerBooking.Status.CANCELLED)
+        self.assertEqual(send.call_count, 1)
+        message = send.call_args.args[0]
+        self.assertEqual(message.tokens, ["cancel-push-token"])
+        self.assertEqual(message.data["type"], "partner_booking_status")
+        self.assertEqual(message.data["status"], PartnerBooking.Status.CANCELLED)
+
     def test_passport_scan_requires_assigned_active_service_staff(self):
         public_data = {"vehicle_public_id": str(self.mine.public_id), "plate_number": "12가3456"}
         denied = self.client.post("/api/vehicles/scan-passport/", public_data, format="json")

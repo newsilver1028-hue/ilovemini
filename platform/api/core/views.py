@@ -860,12 +860,13 @@ class PartnerBookingViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         booking = serializer.save(customer=self.request.user)
-        try:
-            from .push import send_booking_notification
-            send_booking_notification(booking)
-        except Exception:
-            # Booking persistence must not fail when push delivery is unavailable.
-            pass
+        def notify_partner():
+            try:
+                from .push import send_booking_notification
+                send_booking_notification(booking)
+            except Exception:
+                logger.exception("Failed to send booking request notification (booking_id=%s)", booking.pk)
+        transaction.on_commit(notify_partner)
 
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel_booking(self, request, pk=None):
@@ -876,11 +877,15 @@ class PartnerBookingViewSet(viewsets.ModelViewSet):
             return Response({"detail": "현재 상태에서는 취소할 수 없습니다."}, status=status.HTTP_409_CONFLICT)
         booking.status = PartnerBooking.Status.CANCELLED
         booking.save(update_fields=["status", "updated_at"])
-        try:
-            from .push import send_booking_cancel_notification
-            send_booking_cancel_notification(booking)
-        except Exception:
-            pass
+        def notify_partner_cancelled():
+            try:
+                from .push import send_booking_cancel_notification
+                sent = send_booking_cancel_notification(booking)
+                if sent == 0:
+                    logger.warning("Booking cancellation push was not delivered (booking_id=%s)", booking.pk)
+            except Exception:
+                logger.exception("Failed to send booking cancellation notification (booking_id=%s)", booking.pk)
+        transaction.on_commit(notify_partner_cancelled)
         return Response(self.get_serializer(booking).data)
 
     @action(detail=True, methods=["post"], url_path="respond")
@@ -904,9 +909,11 @@ class PartnerBookingViewSet(viewsets.ModelViewSet):
         booking.status = outcome
         booking.partner_note = note
         booking.save(update_fields=["status", "partner_note", "updated_at"])
-        try:
-            from .push import send_booking_status_notification
-            send_booking_status_notification(booking)
-        except Exception:
-            pass
+        def notify_customer_status():
+            try:
+                from .push import send_booking_status_notification
+                send_booking_status_notification(booking)
+            except Exception:
+                logger.exception("Failed to send booking status notification (booking_id=%s)", booking.pk)
+        transaction.on_commit(notify_customer_status)
         return Response(self.get_serializer(booking).data)
