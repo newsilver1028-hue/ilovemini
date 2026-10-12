@@ -2,12 +2,16 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.utils.html import format_html
 from django import forms
 from django.contrib import admin
+from django.contrib.auth.models import Group
+from django.db.models import IntegerField, OuterRef, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
 from django.urls import path
 from .member_display import member_nickname, member_label, MemberAutocompleteView, MemberAutocompleteSelect
 
 from .models import (
     LedgerEntry, Notice, Offer, Partner, PartnerImage, PartnerReview, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
-    VehicleOwnership, VehicleTransferCode,
+    VehicleOwnership, VehicleTransferCode, AttendanceCheckin, PointTransaction, PointRedemptionRequest,
+    SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest,
 )
 
 
@@ -166,6 +170,60 @@ class ReminderAdmin(admin.ModelAdmin):
     search_fields = ("title", "vehicle__model_name", "vehicle__nickname")
     date_hierarchy = "created_at"
     readonly_fields = ("created_at", "notification_sent_at")
+
+
+@admin.register(AttendanceCheckin)
+class AttendanceCheckinAdmin(admin.ModelAdmin):
+    list_display = ("checkin_date", "member", "points_awarded", "created_at")
+    list_filter = ("checkin_date",)
+    search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname")
+    list_select_related = ("user__naver_identity",)
+    readonly_fields = tuple(field.name for field in AttendanceCheckin._meta.fields)
+    date_hierarchy = "checkin_date"
+
+    @admin.display(description="회원")
+    def member(self, obj):
+        return member_label(obj.user)
+
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False
+
+
+@admin.register(PointTransaction)
+class PointTransactionAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "member", "transaction_type", "points_delta", "available_at", "partner", "ledger_entry", "memo")
+    list_filter = ("transaction_type", "created_at", "available_at", "partner")
+    search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "memo", "idempotency_key")
+    list_select_related = ("user__naver_identity", "partner", "ledger_entry")
+    readonly_fields = tuple(field.name for field in PointTransaction._meta.fields)
+    date_hierarchy = "created_at"
+
+    @admin.display(description="회원")
+    def member(self, obj):
+        return member_label(obj.user)
+
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False
+
+
+@admin.register(PointRedemptionRequest)
+class PointRedemptionRequestAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "member_label", "partner", "payment_amount_krw", "points_requested", "status", "expires_at", "responded_at", "completed_at")
+    list_filter = ("status", "created_at", "partner")
+    search_fields = ("member__username", "member__email", "member__naver_identity__nickname", "member__naver_identity__cafe_nickname", "partner__name", "partner__branch_label")
+    list_select_related = ("member__naver_identity", "partner", "transaction")
+    readonly_fields = tuple(field.name for field in PointRedemptionRequest._meta.fields)
+    date_hierarchy = "created_at"
+
+    @admin.display(description="회원")
+    def member_label(self, obj):
+        return member_label(obj.member)
+
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False
 
 
 class OfferInline(admin.TabularInline):
@@ -384,7 +442,7 @@ admin.site.unregister(User)
 @admin.register(User)
 class MemberUserAdmin(UserAdmin):
     inlines = (NaverProfileInline,)
-    list_display = ("id", "display_nickname", "display_member_name", "email", "display_mobile", "ilovemini_grade", "display_workplaces", "is_active", "date_joined", "last_login")
+    list_display = ("id", "display_nickname", "display_member_name", "email", "display_mobile", "ilovemini_grade", "display_points_balance", "display_workplaces", "is_active", "date_joined", "last_login")
     search_fields = ("naver_identity__nickname", "email", "username", "first_name", "last_name", "naver_identity__mobile", "=id")
     list_per_page = 50
     ordering = ("-date_joined", "-id")
@@ -408,13 +466,20 @@ class MemberUserAdmin(UserAdmin):
         return member_nickname(obj)
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related("naver_identity").prefetch_related("partner_memberships__partner", "groups")
+        point_total = PointTransaction.objects.filter(user_id=OuterRef("pk")).order_by().values("user_id").annotate(total=Sum("points_delta")).values("total")[:1]
+        return (super().get_queryset(request).select_related("naver_identity")
+                .prefetch_related("partner_memberships__partner", "groups")
+                .annotate(_point_balance=Coalesce(Subquery(point_total, output_field=IntegerField()), Value(0))))
     actions = [grade_action(code) for code in GRADES] + ["export_members_csv"]
 
     @admin.display(description="소속 협력업체")
     def display_workplaces(self, obj):
         names = [staff.partner.name for staff in obj.partner_memberships.all() if staff.is_active and staff.partner.is_active]
         return " / ".join(names) or "—"
+
+    @admin.display(description="포인트 잔액", ordering="_point_balance")
+    def display_points_balance(self, obj):
+        return f"{obj._point_balance:,}P"
 
     @admin.action(description="선택한 회원 목록 CSV 다운로드")
     def export_members_csv(self, request, queryset):
@@ -460,8 +525,14 @@ _MODEL_LABELS = {
     Vehicle: "등록 차량", VehicleOwnership: "차량 소유 이력",
     VehiclePlateHistory: "차량 번호 변경 이력", VehicleTransferCode: "차량 인계 코드",
     LedgerEntry: "차계부 기록", Reminder: "차량 관리 알림",
+    AttendanceCheckin: "출석 기록", PointTransaction: "포인트 거래 내역",
+    PointRedemptionRequest: "포인트 사용 승인 요청",
     Notice: "공지사항", Partner: "협력업체", PartnerStaff: "협력업체 담당자",
     Offer: "제휴 혜택", PushDevice: "알림 수신 기기",
+    PartnerImage: "업체 소개 사진", PartnerReview: "업체 리뷰",
+    SeasonBanner: "앱 시작 시즌 배너", AppContent: "앱 콘텐츠",
+    AppRelease: "앱 업데이트 안내", MemberPreference: "회원 앱 설정",
+    RecordCorrectionRequest: "정비 기록 정정 요청",
 }
 _FIELD_LABELS = {
     "id": "번호", "user": "회원 계정", "partner": "소속 협력업체", "vehicle": "차량",
@@ -491,6 +562,32 @@ _FIELD_LABELS = {
     "corrects": "정정 대상", "correction_reason": "정정 사유", "due_date": "예정일",
     "due_odometer_km": "예정 주행거리(km)", "completed_at": "완료 시각",
     "notification_sent_at": "알림 발송 시각", "installation_id": "설치 식별자", "platform": "기기 종류",
+    "asset_key": "내장 이미지", "subtitle": "부제목", "image_url": "이미지 주소",
+    "is_active": "사용", "starts_at": "시작 시각", "ends_at": "종료 시각",
+    "duration_seconds": "표시 시간(초)", "priority": "우선순위", "manufacturer": "제조사",
+    "first_registration_date": "최초 등록일", "passport_public": "차량 이력 공개",
+    "code_digest": "인계 코드 해시", "expires_at": "만료 시각", "consumed_at": "사용 시각",
+    "image_data": "이미지 데이터", "content_type": "파일 형식", "file_name": "파일 이름",
+    "updated_at": "수정 시각", "caption": "이미지 설명", "display_order": "표시 순서",
+    "rating": "평점", "comment": "리뷰 내용", "representative_name": "대표자 이름",
+    "representative_title": "대표자 직함", "representative_experience_years": "정비 경력(년)",
+    "representative_photo_url": "대표자 사진 주소", "storefront_photo_url": "매장 대표 사진 주소",
+    "business_info": "매장 상세 안내", "is_sponsored": "광고 제휴 업체", "hours": "영업시간",
+    "customer": "예약 회원", "requested_at": "예약 요청 시각", "scheduled_at": "예약 희망 시각",
+    "service_type": "요청 정비 항목", "customer_note": "회원 요청 사항", "contact_phone": "연락처",
+    "partner_note": "업체 답변", "marketing_opt_in": "마케팅 수신 동의",
+    "terms_accepted_at": "이용약관 동의 시각", "privacy_accepted_at": "개인정보 동의 시각",
+    "subject": "네이버 회원 식별값", "cafe_nickname": "네이버 카페 닉네임",
+    "profile_data": "프로필 정보", "provider_subject": "네이버 회원 식별값",
+    "nickname": "닉네임", "profile_image": "프로필 사진", "gender": "성별",
+    "birthday": "생일", "age": "연령대", "birthyear": "출생연도", "mobile": "휴대전화번호",
+    "points_awarded": "적립 포인트", "streak_days": "연속 출석 일수",
+    "checkin_date": "출석일",
+    "transaction_type": "거래 종류", "points_delta": "포인트 변동", "available_at": "사용 가능 시각",
+    "memo": "처리 내용", "idempotency_key": "중복 방지 키", "ledger_entry": "정비 기록",
+    "payment_amount_krw": "결제 금액(원)", "points_requested": "사용 요청 포인트",
+    "responded_at": "회원 응답 시각", "completed_at": "사용 완료 시각",
+    "transaction": "포인트 거래", "member": "회원", "primary_vehicle": "대표 차량",
 }
 for _model, _label in _MODEL_LABELS.items():
     _model._meta.verbose_name = _label
@@ -507,8 +604,9 @@ admin.site.index_title = "운영 대시보드"
 
 User._meta.verbose_name = "가입 회원"
 User._meta.verbose_name_plural = "가입 회원 목록"
+User._meta.get_field("id").verbose_name = "회원 번호"
+Group._meta.get_field("id").verbose_name = "번호"
 
-from .models import SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest
 @admin.register(SeasonBanner)
 class SeasonBannerAdmin(admin.ModelAdmin):
     list_display = ("title", "is_active", "starts_at", "ends_at", "duration_seconds", "priority")

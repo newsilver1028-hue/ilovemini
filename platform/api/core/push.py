@@ -159,3 +159,62 @@ def send_record_correction_notification(correction_request):
         # A push provider outage must not undo the member's saved request.
         logger.exception("Failed to send record correction push (request_id=%s)", correction_request.pk)
         return 0
+
+
+def send_point_redemption_request_notification(point_request):
+    """Notify the member that a partner is waiting for point-use approval."""
+    if not _ensure_firebase():
+        return 0
+    devices = list(point_request.member.push_devices.all())
+    if not devices:
+        return 0
+    partner_name = point_request.partner.name
+    if point_request.partner.branch_label:
+        partner_name += f" · {point_request.partner.branch_label}"
+    message = messaging.MulticastMessage(
+        notification=messaging.Notification(
+            title="포인트 사용 승인 요청",
+            body=f"{partner_name}에서 {point_request.points_requested:,}P 사용을 요청했어요.",
+        ),
+        data={"type": "point_redemption", "request_id": str(point_request.pk)},
+        tokens=[device.installation_id for device in devices],
+    )
+    try:
+        return messaging.send_each_for_multicast(message).success_count
+    except Exception:
+        logger.exception("Failed to send point redemption request push (request_id=%s)", point_request.pk)
+        return 0
+
+
+def send_point_redemption_status_notification(point_request):
+    """Notify partner staff when the member approves or rejects point use."""
+    if not _ensure_firebase():
+        return 0
+    staff_ids = PartnerStaff.objects.filter(
+        partner=point_request.partner, is_active=True, can_verify_records=True,
+    ).values_list("user_id", flat=True)
+    tokens = list(
+        get_user_model().objects.filter(pk__in=staff_ids)
+        .values_list("push_devices__installation_id", flat=True)
+    )
+    tokens = list(dict.fromkeys(token for token in tokens if token))
+    if not tokens:
+        return 0
+    approved = point_request.status == "completed"
+    message = messaging.MulticastMessage(
+        notification=messaging.Notification(
+            title="포인트 사용 승인 완료" if approved else "포인트 사용 요청 거절",
+            body=f"{point_request.points_requested:,}P 요청을 회원이 {'승인했어요' if approved else '거절했어요'}.",
+        ),
+        data={
+            "type": "point_redemption_status",
+            "request_id": str(point_request.pk),
+            "status": point_request.status,
+        },
+        tokens=tokens,
+    )
+    try:
+        return messaging.send_each_for_multicast(message).success_count
+    except Exception:
+        logger.exception("Failed to send point redemption status push (request_id=%s)", point_request.pk)
+        return 0

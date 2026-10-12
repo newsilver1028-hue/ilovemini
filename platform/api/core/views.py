@@ -11,6 +11,7 @@ from urllib.error import HTTPError, URLError
 
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from django.db import transaction
 from django.conf import settings
 from django.db.models import Avg, Count, F, Q, Sum
@@ -23,8 +24,9 @@ from rest_framework.throttling import ScopedRateThrottle
 
 from .integrity import ledger_record_hash, legacy_ledger_record_hash
 from .models import (
-    Vehicle, LedgerEntry, Reminder, Notice, Partner, Offer, PushDevice, VehicleTransferCode,
+    Vehicle, LedgerEntry, LedgerEvidence, Reminder, Notice, Partner, Offer, PushDevice, VehicleTransferCode,
     PartnerStaff, PartnerReview, VehicleOwnership, VehiclePlateHistory, AttendanceCheckin, PartnerBooking, RecordCorrectionRequest,
+    PointTransaction, PointRedemptionRequest,
 )
 from .permissions import OwnerOrStaff, SafeMethodsOrStaff
 from .serializers import VehicleSerializer, LedgerEntrySerializer, ReminderSerializer, NoticeSerializer, PartnerSerializer, PartnerReviewSerializer, OfferSerializer, PartnerBookingSerializer
@@ -216,23 +218,15 @@ class CafeAnswerView(APIView):
 def _attendance_payload(user, today):
     rows = list(AttendanceCheckin.objects.filter(user=user).order_by("-checkin_date")[:31])
     today_row = next((row for row in rows if row.checkin_date == today), None)
-    anchor = today if today_row else today - timedelta(days=1)
-    streak = 0
-    expected = anchor
-    for row in rows:
-        if row.checkin_date > expected:
-            continue
-        if row.checkin_date != expected:
-            break
-        streak += 1
-        expected -= timedelta(days=1)
-    balance = AttendanceCheckin.objects.filter(user=user).aggregate(total=Sum("points_awarded"))["total"] or 0
+    now = timezone.now()
+    balance = PointTransaction.objects.filter(user=user).aggregate(total=Sum("points_delta"))["total"] or 0
+    available = PointTransaction.objects.filter(user=user, available_at__lte=now).aggregate(total=Sum("points_delta"))["total"] or 0
     return {
         "balance_points": balance,
+        "available_points": available,
         "checked_in_today": today_row is not None,
         "today_points": today_row.points_awarded if today_row else 0,
-        "streak_days": streak,
-        "next_bonus_in_days": 7 - (streak % 7) if streak else 7,
+        "streak_days": 0,
         "checkins": [{"date": row.checkin_date.isoformat(), "points": row.points_awarded, "streak_days": row.streak_days} for row in rows[:30]],
     }
 
@@ -255,14 +249,172 @@ class AttendanceView(APIView):
                 payload = _attendance_payload(request.user, today)
                 payload.update({"earned_points": 0, "message": "오늘은 이미 출석했어요."})
                 return Response(payload, status=status.HTTP_200_OK)
-            yesterday = today - timedelta(days=1)
-            previous = AttendanceCheckin.objects.filter(user=request.user, checkin_date=yesterday).first()
-            streak = previous.streak_days + 1 if previous else 1
-            award = 1000 + (3000 if streak % 7 == 0 else 0)
-            AttendanceCheckin.objects.create(user=request.user, checkin_date=today, points_awarded=award, streak_days=streak)
+            award = 100
+            now = timezone.now()
+            AttendanceCheckin.objects.create(user=request.user, checkin_date=today, points_awarded=award, streak_days=1)
+            PointTransaction.objects.create(
+                user=request.user,
+                transaction_type=PointTransaction.Type.ATTENDANCE,
+                points_delta=award,
+                available_at=now,
+                memo=f"출석 적립 ({today})",
+                idempotency_key=f"attendance:{request.user.pk}:{today.isoformat()}",
+            )
         payload = _attendance_payload(request.user, today)
         payload.update({"earned_points": award, "message": f"출석 완료! {award}P를 적립했어요."})
         return Response(payload, status=status.HTTP_201_CREATED)
+
+
+class PartnerPointRedemptionView(APIView):
+    """Create a checkout request after staff scan the member's existing vehicle QR."""
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "booking"
+
+    class Input(serializers.Serializer):
+        vehicle_public_id = serializers.UUIDField()
+        partner = serializers.PrimaryKeyRelatedField(queryset=Partner.objects.all())
+        payment_amount_krw = serializers.IntegerField(min_value=1)
+        points_requested = serializers.IntegerField(min_value=1)
+
+    def post(self, request):
+        data = self.Input(data=request.data)
+        data.is_valid(raise_exception=True)
+        values = data.validated_data
+        partner = values["partner"]
+        if not PartnerStaff.objects.filter(
+            user=request.user, partner=partner, is_active=True,
+            can_verify_records=True, partner__is_active=True,
+        ).exists():
+            return Response({"detail": "포인트 사용 요청 권한이 없는 협력업체입니다."}, status=status.HTTP_403_FORBIDDEN)
+        now = timezone.now()
+        with transaction.atomic():
+            vehicle = Vehicle.objects.select_for_update().filter(
+                public_id=values["vehicle_public_id"], status="active",
+            ).first()
+            ownership = vehicle.current_ownership if vehicle else None
+            if ownership is None:
+                return Response({"detail": "현재 등록된 회원 차량 QR을 확인해 주세요."}, status=status.HTTP_400_BAD_REQUEST)
+            member = type(ownership.user).objects.select_for_update().get(pk=ownership.user_id)
+            if values["points_requested"] > values["payment_amount_krw"]:
+                return Response({"detail": "사용 포인트는 결제 금액을 넘을 수 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+            active_request = PointRedemptionRequest.objects.filter(
+                member=member, status=PointRedemptionRequest.Status.PENDING, expires_at__gt=now,
+            ).first()
+            if active_request:
+                return Response({"detail": "이 회원에게 처리 중인 포인트 사용 요청이 있습니다."}, status=status.HTTP_409_CONFLICT)
+            available = _available_point_balance(member, now)
+            if values["points_requested"] > available:
+                return Response({"detail": f"사용 가능한 포인트는 {available:,}P입니다."}, status=status.HTTP_400_BAD_REQUEST)
+            PointRedemptionRequest.objects.filter(
+                member=member, status=PointRedemptionRequest.Status.PENDING, expires_at__lte=now,
+            ).update(status=PointRedemptionRequest.Status.EXPIRED, responded_at=now)
+            point_request = PointRedemptionRequest.objects.create(
+                member=member, partner=partner,
+                payment_amount_krw=values["payment_amount_krw"],
+                points_requested=values["points_requested"],
+                expires_at=now + timedelta(minutes=3),
+            )
+            def notify_member():
+                from .push import send_point_redemption_request_notification
+                send_point_redemption_request_notification(point_request)
+            transaction.on_commit(notify_member)
+        return Response(_redemption_payload(point_request, available), status=status.HTTP_201_CREATED)
+
+    def get(self, request):
+        request_id = request.query_params.get("id")
+        if not request_id:
+            return Response({"detail": "요청 번호가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+        point_request = PointRedemptionRequest.objects.select_related("partner", "member").filter(pk=request_id).first()
+        if point_request is None:
+            return Response({"detail": "포인트 사용 요청을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+        if not PartnerStaff.objects.filter(
+            user=request.user, partner=point_request.partner, is_active=True,
+            can_verify_records=True, partner__is_active=True,
+        ).exists():
+            return Response({"detail": "이 요청을 확인할 권한이 없습니다."}, status=status.HTTP_403_FORBIDDEN)
+        return Response(_redemption_payload(point_request, _available_point_balance(point_request.member, timezone.now())))
+
+
+def _available_point_balance(user, now):
+    return PointTransaction.objects.filter(user=user, available_at__lte=now).aggregate(total=Sum("points_delta"))["total"] or 0
+
+
+def _redemption_payload(point_request, available_points):
+    return {
+        "id": point_request.pk,
+        "status": point_request.status,
+        "status_label": point_request.get_status_display(),
+        "partner": point_request.partner.name + (f" · {point_request.partner.branch_label}" if point_request.partner.branch_label else ""),
+        "payment_amount_krw": point_request.payment_amount_krw,
+        "points_requested": point_request.points_requested,
+        "available_points": available_points,
+        "expires_at": point_request.expires_at.isoformat(),
+        "completed_at": point_request.completed_at.isoformat() if point_request.completed_at else None,
+    }
+
+
+class MemberPointRedemptionView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "booking"
+
+    def get(self, request):
+        now = timezone.now()
+        PointRedemptionRequest.objects.filter(
+            member=request.user, status=PointRedemptionRequest.Status.PENDING, expires_at__lte=now,
+        ).update(status=PointRedemptionRequest.Status.EXPIRED, responded_at=now)
+        point_request = PointRedemptionRequest.objects.select_related("partner").filter(
+            member=request.user, status=PointRedemptionRequest.Status.PENDING, expires_at__gt=now,
+        ).order_by("created_at").first()
+        if point_request is None:
+            return Response({"request": None})
+        return Response({"request": _redemption_payload(point_request, _available_point_balance(request.user, now))})
+
+    def post(self, request, pk):
+        approve = serializers.BooleanField().run_validation(request.data.get("approve"))
+        now = timezone.now()
+        with transaction.atomic():
+            member = type(request.user).objects.select_for_update().get(pk=request.user.pk)
+            point_request = PointRedemptionRequest.objects.select_for_update().select_related("partner").filter(
+                pk=pk, member=member,
+            ).first()
+            if point_request is None:
+                return Response({"detail": "포인트 사용 요청을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+            if point_request.status != PointRedemptionRequest.Status.PENDING or point_request.expires_at <= now:
+                if point_request.status == PointRedemptionRequest.Status.PENDING:
+                    point_request.status = PointRedemptionRequest.Status.EXPIRED
+                    point_request.responded_at = now
+                    point_request.save(update_fields=["status", "responded_at"])
+                return Response({"detail": "포인트 사용 요청이 만료되었거나 이미 처리되었습니다."}, status=status.HTTP_409_CONFLICT)
+            if approve:
+                available = _available_point_balance(member, now)
+                if point_request.points_requested > available:
+                    point_request.status = PointRedemptionRequest.Status.REJECTED
+                    point_request.responded_at = now
+                    point_request.save(update_fields=["status", "responded_at"])
+                    return Response({"detail": "사용 가능한 포인트가 부족합니다."}, status=status.HTTP_409_CONFLICT)
+                redemption = PointTransaction.objects.create(
+                    user=member,
+                    partner=point_request.partner,
+                    transaction_type=PointTransaction.Type.REDEMPTION,
+                    points_delta=-point_request.points_requested,
+                    available_at=now,
+                    memo=f"{point_request.partner.name} 결제 사용",
+                    idempotency_key=f"redemption:{point_request.pk}",
+                )
+                point_request.transaction = redemption
+                point_request.status = PointRedemptionRequest.Status.COMPLETED
+                point_request.completed_at = now
+            else:
+                point_request.status = PointRedemptionRequest.Status.REJECTED
+            point_request.responded_at = now
+            point_request.save(update_fields=["transaction", "status", "completed_at", "responded_at"])
+            def notify_partner():
+                from .push import send_point_redemption_status_notification
+                send_point_redemption_status_notification(point_request)
+            transaction.on_commit(notify_partner)
+        return Response(_redemption_payload(point_request, _available_point_balance(member, now)))
 
 class VehicleViewSet(viewsets.ModelViewSet):
     serializer_class = VehicleSerializer
@@ -640,6 +792,24 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="partner-verified", throttle_classes=[ScopedRateThrottle])
     def create_partner_verified(self, request):
+        evidence_image = request.FILES.get("evidence_image")
+        if evidence_image is not None:
+            if evidence_image.size > 8 * 1024 * 1024:
+                return Response({"detail": "사진은 8MB 이하로 첨부해 주세요."}, status=status.HTTP_400_BAD_REQUEST)
+            image_data = evidence_image.read()
+            image_types = (
+                ("image/jpeg", image_data.startswith(b"\xff\xd8\xff")),
+                ("image/png", image_data.startswith(b"\x89PNG\r\n\x1a\n")),
+                ("image/webp", image_data.startswith(b"RIFF") and image_data[8:12] == b"WEBP"),
+            )
+            content_type = next((kind for kind, valid in image_types if valid), None)
+            if content_type is None:
+                return Response({"detail": "JPEG, PNG, WebP 사진만 첨부할 수 있습니다."}, status=status.HTTP_400_BAD_REQUEST)
+            if not evidence_image.name or len(evidence_image.name) > 180:
+                evidence_image.name = "service-evidence.jpg"
+        else:
+            image_data = None
+            content_type = None
         data = self.VerifiedRecordInput(data=request.data)
         data.is_valid(raise_exception=True)
         partner = data.validated_data["partner"]
@@ -716,8 +886,51 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
                 corrects=correction,
                 correction_reason=data.validated_data.get("correction_reason", "").strip(),
             )
+            if image_data is not None:
+                LedgerEvidence.objects.create(
+                    entry=entry,
+                    image_data=image_data,
+                    content_type=content_type,
+                    file_name=evidence_image.name,
+                )
+                entry.evidence_url = request.build_absolute_uri(
+                    reverse("ledger-evidence", kwargs={"pk": entry.pk})
+                )
             entry.record_hash = ledger_record_hash(entry)
-            entry.save(update_fields=["record_hash"])
+            entry.save(update_fields=["record_hash", "evidence_url"])
+            member = type(current_ownership.user).objects.select_for_update().get(
+                pk=current_ownership.user_id
+            )
+            points_earned = entry.amount_krw // 100
+            if correction is None and points_earned > 0:
+                PointTransaction.objects.create(
+                    user=member,
+                    partner=partner,
+                    ledger_entry=entry,
+                    transaction_type=PointTransaction.Type.SERVICE_EARN,
+                    points_delta=points_earned,
+                    available_at=now + timedelta(days=1),
+                    memo="정비 결제 금액 1% 적립",
+                    idempotency_key=f"ledger:{entry.pk}:service-reward",
+                )
+            elif correction is not None:
+                prior_reward_exists = PointTransaction.objects.filter(
+                    ledger_entry=correction,
+                    transaction_type__in=[PointTransaction.Type.SERVICE_EARN, PointTransaction.Type.ADJUSTMENT],
+                ).exists()
+                if prior_reward_exists:
+                    points_delta = points_earned - (correction.amount_krw // 100)
+                    if points_delta:
+                        PointTransaction.objects.create(
+                            user=member,
+                            partner=partner,
+                            ledger_entry=entry,
+                            transaction_type=PointTransaction.Type.ADJUSTMENT,
+                            points_delta=points_delta,
+                            available_at=now + timedelta(days=1) if points_delta > 0 else now,
+                            memo="정비 기록 정정에 따른 적립 포인트 조정",
+                            idempotency_key=f"ledger:{entry.pk}:service-reward-correction",
+                        )
             if correction is not None:
                 RecordCorrectionRequest.objects.filter(entry=correction, resolved_at__isnull=True).update(resolved_entry=entry, resolved_at=now)
             if entry.odometer_km is not None and (
@@ -727,6 +940,15 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
                 vehicle.save(update_fields=["current_odometer_km"])
 
         return Response(self.get_serializer(entry).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"], url_path="evidence")
+    def evidence(self, request, pk=None):
+        entry = self.get_object()
+        attachment = get_object_or_404(LedgerEvidence, entry=entry)
+        response = HttpResponse(bytes(attachment.image_data), content_type=attachment.content_type)
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, no-store"
+        return response
 
 class ReminderViewSet(viewsets.ModelViewSet):
     serializer_class = ReminderSerializer

@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from .models import AppContent, AppRelease, SeasonBanner, Vehicle, VehicleOwnership, Partner, PartnerStaff, NaverIdentity, LedgerEntry, RecordCorrectionRequest, PushDevice
 from .integrity import ledger_record_hash
+from . import push  # Ensure patch targets resolve before notification tests run.
 
 User = get_user_model()
 

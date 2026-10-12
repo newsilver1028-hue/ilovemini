@@ -140,9 +140,11 @@ class VehicleTransferCode(models.Model):
 class LedgerEntry(models.Model):
     class Kind(models.TextChoices):
         FUEL = "fuel", "주유"
-        SERVICE = "service", "정비"
-        PART = "part", "소모품"
+        SERVICE = "service", "정비·소모품"
+        PART = "part", "정비·소모품"
         WASH = "wash", "세차"
+        BODYWORK = "bodywork", "판금·도색·보험처리"
+        WHEEL_TIRE = "wheel_tire", "휠·타이어"
         OTHER = "other", "기타"
     class Source(models.TextChoices):
         OWNER = "owner", "차주 입력"
@@ -167,6 +169,18 @@ class LedgerEntry(models.Model):
 
     class Meta:
         ordering = ["-entry_date", "-id"]
+
+
+class LedgerEvidence(models.Model):
+    entry = models.OneToOneField(LedgerEntry, on_delete=models.PROTECT, related_name="evidence_image")
+    image_data = models.BinaryField(editable=False)
+    content_type = models.CharField(max_length=32, editable=False)
+    file_name = models.CharField(max_length=180, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "정비기록 첨부 사진"
+        verbose_name_plural = "정비기록 첨부 사진"
 
 class Reminder(models.Model):
     vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name="reminders")
@@ -215,7 +229,7 @@ class Notice(models.Model):
 class AttendanceCheckin(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="attendance_checkins")
     checkin_date = models.DateField()
-    points_awarded = models.PositiveIntegerField(default=1000)
+    points_awarded = models.PositiveIntegerField(default=100)
     streak_days = models.PositiveSmallIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -225,6 +239,63 @@ class AttendanceCheckin(models.Model):
 
     def __str__(self):
         return f"{self.user_id} · {self.checkin_date} · {self.points_awarded}P"
+
+
+class PointTransaction(models.Model):
+    class Type(models.TextChoices):
+        ATTENDANCE = "attendance", "출석 적립"
+        SERVICE_EARN = "service_earn", "정비 결제 적립"
+        REDEMPTION = "redemption", "포인트 사용"
+        REFUND = "refund", "사용 취소·환급"
+        ADJUSTMENT = "adjustment", "운영자 조정"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name="회원", on_delete=models.PROTECT, related_name="point_transactions")
+    partner = models.ForeignKey("Partner", verbose_name="협력업체", on_delete=models.PROTECT, null=True, blank=True, related_name="point_transactions")
+    ledger_entry = models.ForeignKey("LedgerEntry", verbose_name="정비 기록", on_delete=models.PROTECT, null=True, blank=True, related_name="point_transactions")
+    transaction_type = models.CharField("거래 종류", max_length=20, choices=Type.choices)
+    points_delta = models.IntegerField("포인트 변동", help_text="적립은 양수, 사용은 음수로 기록합니다.")
+    available_at = models.DateTimeField("사용 가능 시각", default=timezone.now)
+    memo = models.CharField("처리 내용", max_length=240, blank=True)
+    idempotency_key = models.CharField("중복 방지 키", max_length=100, unique=True, default=uuid.uuid4)
+    created_at = models.DateTimeField("거래 시각", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "포인트 거래 내역"
+        verbose_name_plural = "포인트 거래 내역"
+        ordering = ["-created_at", "-pk"]
+
+    def __str__(self):
+        sign = "+" if self.points_delta > 0 else ""
+        return f"회원 {self.user_id} · {sign}{self.points_delta}P"
+
+
+class PointRedemptionRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "승인 대기"
+        APPROVED = "approved", "회원 승인"
+        COMPLETED = "completed", "사용 완료"
+        REJECTED = "rejected", "회원 거절"
+        EXPIRED = "expired", "시간 만료"
+        CANCELLED = "cancelled", "업체 취소"
+
+    member = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name="회원", on_delete=models.PROTECT, related_name="point_redemption_requests")
+    partner = models.ForeignKey("Partner", verbose_name="협력업체", on_delete=models.PROTECT, related_name="point_redemption_requests")
+    payment_amount_krw = models.PositiveIntegerField("결제 금액(원)")
+    points_requested = models.PositiveIntegerField("사용 요청 포인트")
+    status = models.CharField("처리 상태", max_length=16, choices=Status.choices, default=Status.PENDING)
+    expires_at = models.DateTimeField("요청 만료 시각")
+    responded_at = models.DateTimeField("회원 응답 시각", null=True, blank=True)
+    completed_at = models.DateTimeField("사용 완료 시각", null=True, blank=True)
+    transaction = models.ForeignKey(PointTransaction, verbose_name="포인트 거래", on_delete=models.PROTECT, null=True, blank=True, related_name="redemption_requests")
+    created_at = models.DateTimeField("요청 시각", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "포인트 사용 승인 요청"
+        verbose_name_plural = "포인트 사용 승인 요청"
+        ordering = ["-created_at", "-pk"]
+
+    def __str__(self):
+        return f"{self.partner} · 회원 {self.member_id} · {self.points_requested}P"
 
 class Partner(models.Model):
     name = models.CharField(max_length=120)

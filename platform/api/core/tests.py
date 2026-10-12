@@ -1,4 +1,5 @@
 from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.test import override_settings
@@ -10,7 +11,8 @@ from unittest.mock import patch
 import json
 from urllib.parse import unquote
 from .admin import NoticeAdminForm, OfferAdminForm, PartnerAdminForm
-from .models import LedgerEntry, Reminder, Vehicle, VehicleOwnership, VehiclePlateHistory, Partner, PartnerStaff, Notice, PushDevice, AttendanceCheckin, PartnerBooking
+from .models import LedgerEntry, Reminder, Vehicle, VehicleOwnership, VehiclePlateHistory, Partner, PartnerStaff, Notice, PushDevice, AttendanceCheckin, PartnerBooking, PointTransaction
+from . import push  # Ensure patch targets resolve before notification tests run.
 
 User = get_user_model()
 
@@ -107,20 +109,48 @@ class AttendanceCheckinTests(TestCase):
             second = self.client.post("/api/attendance/", {}, format="json")
             summary = self.client.get("/api/attendance/")
         self.assertEqual(first.status_code, 201)
-        self.assertEqual(first.data["earned_points"], 1000)
+        self.assertEqual(first.data["earned_points"], 100)
         self.assertEqual(second.status_code, 200)
         self.assertEqual(second.data["earned_points"], 0)
-        self.assertEqual(summary.data["balance_points"], 1000)
+        self.assertEqual(summary.data["balance_points"], 100)
+        self.assertEqual(summary.data["available_points"], 100)
         self.assertEqual(AttendanceCheckin.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(PointTransaction.objects.filter(user=self.user).count(), 1)
 
-    def test_seventh_consecutive_checkin_awards_streak_bonus(self):
+    def test_daily_attendance_awards_only_one_hundred_points_without_streak_bonus(self):
         start = date(2026, 9, 21)
         for offset in range(7):
             with patch("core.views.timezone.localdate", return_value=start + timedelta(days=offset)):
                 response = self.client.post("/api/attendance/", {}, format="json")
-        self.assertEqual(response.data["earned_points"], 4000)
-        self.assertEqual(response.data["streak_days"], 7)
-        self.assertEqual(response.data["balance_points"], 10000)
+        self.assertEqual(response.data["earned_points"], 100)
+        self.assertEqual(response.data["streak_days"], 0)
+        self.assertEqual(response.data["balance_points"], 700)
+
+
+class PointAdminVisibilityTests(TestCase):
+    def test_admin_has_korean_read_only_point_transaction_and_redemption_pages(self):
+        admin_user = User.objects.create_superuser(username="points-admin", email="admin@example.com", password="Long-test-password-789")
+        self.client.force_login(admin_user)
+        transaction_response = self.client.get("/admin/core/pointtransaction/")
+        redemption_response = self.client.get("/admin/core/pointredemptionrequest/")
+        index_response = self.client.get("/admin/")
+        self.assertEqual(transaction_response.status_code, 200)
+        self.assertContains(transaction_response, "포인트 거래 내역")
+        self.assertEqual(redemption_response.status_code, 200)
+        self.assertContains(redemption_response, "포인트 사용 승인 요청")
+        self.assertEqual(index_response.status_code, 200)
+        self.assertContains(index_response, "출석 1회 100P")
+        self.assertContains(index_response, "적립 다음 날 사용 가능")
+
+    def test_member_list_includes_point_balance(self):
+        admin_user = User.objects.create_superuser(username="points-admin", email="admin@example.com", password="Long-test-password-789")
+        member = User.objects.create_user(username="points-member", password="Long-test-password-789")
+        PointTransaction.objects.create(user=member, transaction_type=PointTransaction.Type.ATTENDANCE, points_delta=100, memo="출석 적립")
+        PointTransaction.objects.create(user=member, transaction_type=PointTransaction.Type.SERVICE_EARN, points_delta=500, memo="정비 적립")
+        self.client.force_login(admin_user)
+        response = self.client.get("/admin/auth/user/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "600P")
 
 class ApiAccessTests(TestCase):
     def setUp(self):
@@ -438,6 +468,10 @@ class ApiAccessTests(TestCase):
         self.assertTrue(entry.record_hash)
         self.assertEqual(entry.partner, partner)
         self.assertEqual(entry.verified_by, partner_user)
+        reward = PointTransaction.objects.get(ledger_entry=entry)
+        self.assertEqual(reward.points_delta, 2500)
+        self.assertEqual(reward.user, self.member)
+        self.assertGreaterEqual(reward.available_at, timezone.now() + timedelta(hours=23))
         LedgerEntry.objects.filter(pk=entry.pk).update(description="임의 변경")
         tampered = self.client.get(f"/api/ledger/{entry.pk}/")
         self.assertEqual(tampered.status_code, 200)
@@ -452,6 +486,57 @@ class ApiAccessTests(TestCase):
         self.assertEqual(blocked_delete.status_code, 409)
         blocked_vehicle_delete = self.client.delete(f"/api/vehicles/{self.mine.pk}/")
         self.assertEqual(blocked_vehicle_delete.status_code, 409)
+
+    def test_partner_verified_record_accepts_photo_and_only_vehicle_owner_can_read_it(self):
+        partner_user = User.objects.create_user(username="photo-shop", password="Long-test-password-789")
+        partner = Partner.objects.create(name="사진 업체", is_active=True)
+        PartnerStaff.objects.create(partner=partner, user=partner_user, can_verify_records=True, is_active=True)
+        partner_client = APIClient()
+        partner_client.force_authenticate(partner_user)
+        photo = SimpleUploadedFile(
+            "receipt.png",
+            b"\x89PNG\r\n\x1a\nsmall-test-image",
+            content_type="image/png",
+        )
+        created = partner_client.post("/api/ledger/partner-verified/", {
+            "vehicle_public_id": str(self.mine.public_id),
+            "plate_number": "12가3456",
+            "partner": partner.pk,
+            "kind": "wheel_tire",
+            "entry_date": timezone.localdate().isoformat(),
+            "odometer_km": 43000,
+            "amount_krw": 150000,
+            "description": "휠 타이어 교체",
+            "evidence_image": photo,
+        }, format="multipart")
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertIn(f"/api/ledger/{created.data['id']}/evidence/", created.data["evidence_url"])
+        owner_response = self.client.get(f"/api/ledger/{created.data['id']}/evidence/")
+        self.assertEqual(owner_response.status_code, 200)
+        self.assertEqual(owner_response["Content-Type"], "image/png")
+        self.assertEqual(owner_response.content, b"\x89PNG\r\n\x1a\nsmall-test-image")
+        another_member = APIClient()
+        another_member.force_authenticate(self.other)
+        self.assertEqual(another_member.get(f"/api/ledger/{created.data['id']}/evidence/").status_code, 404)
+
+    def test_partner_verified_record_rejects_non_image_upload(self):
+        partner_user = User.objects.create_user(username="bad-photo-shop", password="Long-test-password-789")
+        partner = Partner.objects.create(name="형식 확인 업체", is_active=True)
+        PartnerStaff.objects.create(partner=partner, user=partner_user, can_verify_records=True, is_active=True)
+        partner_client = APIClient()
+        partner_client.force_authenticate(partner_user)
+        response = partner_client.post("/api/ledger/partner-verified/", {
+            "vehicle_public_id": str(self.mine.public_id),
+            "plate_number": "12가3456",
+            "partner": partner.pk,
+            "kind": "bodywork",
+            "entry_date": timezone.localdate().isoformat(),
+            "odometer_km": 43000,
+            "amount_krw": 0,
+            "description": "판금 도색",
+            "evidence_image": SimpleUploadedFile("bad.png", b"not an image", content_type="image/png"),
+        }, format="multipart")
+        self.assertEqual(response.status_code, 400)
 
     def test_partner_cannot_accidentally_duplicate_same_vehicle_service(self):
         partner_user = User.objects.create_user(username="duplicate-shop", password="Long-test-password-789")
@@ -560,6 +645,74 @@ class ApiAccessTests(TestCase):
             "odometer_km": 43000, "description": "무권한 기록",
         }, format="json")
         self.assertEqual(response.status_code, 403)
+
+    def test_member_approves_partner_point_redemption_and_balance_is_deducted_once(self):
+        partner_user = User.objects.create_user(
+            username="point-redemption-shop", password="Long-test-password-789"
+        )
+        partner = Partner.objects.create(name="포인트 사용 업체", is_active=True)
+        PartnerStaff.objects.create(
+            partner=partner, user=partner_user, can_verify_records=True, is_active=True
+        )
+        PointTransaction.objects.create(
+            user=self.member,
+            transaction_type=PointTransaction.Type.ATTENDANCE,
+            points_delta=1000,
+            available_at=timezone.now(),
+            memo="테스트 사용 가능 포인트",
+            idempotency_key="point-redemption-test-fund",
+        )
+        partner_client = APIClient()
+        partner_client.force_authenticate(partner_user)
+        with patch("core.push.send_point_redemption_request_notification") as member_push, \
+             self.captureOnCommitCallbacks(execute=True):
+            created = partner_client.post("/api/points/redemptions/", {
+                "vehicle_public_id": str(self.mine.public_id),
+                "partner": partner.pk,
+                "payment_amount_krw": 50000,
+                "points_requested": 400,
+            }, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(created.data["status"], "pending")
+        member_push.assert_called_once()
+
+        pending = self.client.get("/api/points/redemptions/pending/")
+        self.assertEqual(pending.status_code, 200)
+        self.assertEqual(pending.data["request"]["id"], created.data["id"])
+        with patch("core.push.send_point_redemption_status_notification") as partner_push, \
+             self.captureOnCommitCallbacks(execute=True):
+            approved = self.client.post(
+                f"/api/points/redemptions/{created.data['id']}/respond/",
+                {"approve": True}, format="json",
+            )
+        self.assertEqual(approved.status_code, 200, approved.data)
+        self.assertEqual(approved.data["status"], "completed")
+        self.assertEqual(approved.data["available_points"], 600)
+        partner_push.assert_called_once()
+        self.assertEqual(
+            PointTransaction.objects.filter(
+                user=self.member,
+                transaction_type=PointTransaction.Type.REDEMPTION,
+            ).count(),
+            1,
+        )
+        reused = self.client.post(
+            f"/api/points/redemptions/{created.data['id']}/respond/",
+            {"approve": True}, format="json",
+        )
+        self.assertEqual(reused.status_code, 409)
+        self.assertEqual(
+            PointTransaction.objects.filter(
+                user=self.member,
+                transaction_type=PointTransaction.Type.REDEMPTION,
+            ).count(),
+            1,
+        )
+        merchant_status = partner_client.get(
+            f"/api/points/redemptions/?id={created.data['id']}"
+        )
+        self.assertEqual(merchant_status.status_code, 200)
+        self.assertEqual(merchant_status.data["status"], "completed")
 
     def test_only_active_partners_are_public(self):
         Partner.objects.create(name="확인된 업체", is_active=True)

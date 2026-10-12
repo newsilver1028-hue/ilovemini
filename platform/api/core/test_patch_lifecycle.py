@@ -19,7 +19,7 @@ class PatchLifecycleTests(TestCase):
     def test_sync_preserves_shop_identity_and_separates_branches(self):
         old = Partner.objects.create(name='아이모터스랩', cafe_url='https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/347')
         old_id = old.pk
-        call_command('sync_ilovemini_partners')
+        call_command('sync_ilovemini_partners', force=True)
         self.assertEqual(Partner.objects.get(name='아이모터스랩 성수점').pk, old_id)
         self.assertNotEqual(Partner.objects.get(name='아이모터스랩 죽전점').pk, old_id)
         self.assertEqual(Partner.objects.get(name='랩스타모터스').service_categories, ['정비'])
