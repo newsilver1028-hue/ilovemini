@@ -4,7 +4,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from core.views import HealthView, CafeSearchView, CafeLatestView, CafeAnswerView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet, PartnerPointRedemptionView, MemberPointRedemptionView
+from core.views import HealthView, CafeSearchView, CafeLatestView, CafeAnswerView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet, PartnerPointRedemptionView, PartnerPointBalanceView, MemberPointRedemptionView
 from core.member_views import MemberGradeView
 from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView
 
@@ -38,6 +38,7 @@ urlpatterns = [
     path("api/auth/naver/complete/", NaverCompleteView.as_view(), name="naver_complete"),
     path("api/push/devices/", PushDeviceView.as_view(), name="push_devices"),
     path("api/attendance/", AttendanceView.as_view(), name="attendance"),
+    path("api/points/balance/", PartnerPointBalanceView.as_view(), name="partner_point_balance"),
     path("api/points/redemptions/", PartnerPointRedemptionView.as_view(), name="partner_point_redemptions"),
     path("api/points/redemptions/pending/", MemberPointRedemptionView.as_view(), name="member_pending_point_redemption"),
     path("api/points/redemptions/<int:pk>/respond/", MemberPointRedemptionView.as_view(), name="member_respond_point_redemption"),

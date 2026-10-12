@@ -265,11 +265,40 @@ class AttendanceView(APIView):
         return Response(payload, status=status.HTTP_201_CREATED)
 
 
+class PartnerPointBalanceView(APIView):
+    """Return only the usable point balance for a vehicle QR to its assigned partner."""
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "point_redemption"
+
+    class Input(serializers.Serializer):
+        vehicle_public_id = serializers.UUIDField()
+        partner = serializers.PrimaryKeyRelatedField(queryset=Partner.objects.filter(is_active=True))
+
+    def get(self, request):
+        data = self.Input(data=request.query_params)
+        data.is_valid(raise_exception=True)
+        vehicle_public_id = data.validated_data["vehicle_public_id"]
+        partner = data.validated_data["partner"]
+        if not PartnerStaff.objects.filter(
+            user=request.user, partner=partner, is_active=True,
+            can_verify_records=True, partner__is_active=True,
+        ).exists():
+            return Response({"detail": "포인트 조회 권한이 없는 협력업체입니다."}, status=status.HTTP_403_FORBIDDEN)
+        vehicle = Vehicle.objects.filter(public_id=vehicle_public_id, status="active").first()
+        ownership = vehicle.current_ownership if vehicle else None
+        if ownership is None:
+            return Response({"detail": "현재 등록된 회원 차량 QR을 확인해 주세요."}, status=status.HTTP_404_NOT_FOUND)
+        now = timezone.now()
+        available = _available_point_balance(ownership.user, now)
+        return Response({"available_points": max(available, 0), "plate_number": vehicle.plate_number})
+
+
 class PartnerPointRedemptionView(APIView):
     """Create a checkout request after staff scan the member's existing vehicle QR."""
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "booking"
+    throttle_scope = "point_redemption"
 
     class Input(serializers.Serializer):
         vehicle_public_id = serializers.UUIDField()
@@ -357,7 +386,7 @@ def _redemption_payload(point_request, available_points):
 class MemberPointRedemptionView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "booking"
+    throttle_scope = "point_redemption"
 
     def get(self, request):
         now = timezone.now()
@@ -477,8 +506,8 @@ class VehicleViewSet(viewsets.ModelViewSet):
         vehicle = Vehicle.objects.filter(public_id=data.validated_data["vehicle_public_id"], status="active").first()
         if vehicle is None:
             return Response({"detail": "차량 Passport QR을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
-        if not vehicle.plate_number:
-            return Response({"detail": "차주가 차량 번호를 등록해야 업체 인증기록을 남길 수 있습니다."}, status=status.HTTP_409_CONFLICT)
+        if not vehicle.plate_number and data.validated_data["plate_number"]:
+            return Response({"detail": "차량에 등록된 번호판과 스캔 정보가 다릅니다."}, status=status.HTTP_409_CONFLICT)
         if vehicle.plate_number != data.validated_data["plate_number"]:
             return Response({"detail": "입력한 번호판과 스캔한 QR 차량이 일치하지 않습니다."}, status=status.HTTP_409_CONFLICT)
         history = vehicle.ledger_entries.select_related("partner").order_by("-entry_date", "-id")[:100]
@@ -772,6 +801,7 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
         part_number = serializers.CharField(max_length=120, required=False, allow_blank=True)
         evidence_url = serializers.URLField(required=False, allow_blank=True)
         corrects = serializers.PrimaryKeyRelatedField(queryset=LedgerEntry.objects.all(), required=False, allow_null=True)
+        point_redemption_id = serializers.IntegerField(min_value=1, required=False)
         correction_reason = serializers.CharField(max_length=240, required=False, allow_blank=True)
 
         def validate_plate_number(self, value):
@@ -786,6 +816,8 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
             return value
 
         def validate(self, attrs):
+            if attrs.get("point_redemption_id") and attrs.get("corrects"):
+                raise serializers.ValidationError({"point_redemption_id": "포인트 결제는 새 정비기록에만 연결할 수 있습니다."})
             if attrs.get("corrects") and not attrs.get("correction_reason", "").strip():
                 raise serializers.ValidationError({"correction_reason": "정정 사유를 입력해 주세요."})
             return attrs
@@ -837,6 +869,25 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
             if not vehicle.plate_number or vehicle.plate_number != data.validated_data["plate_number"]:
                 return Response({"detail": "확인한 번호판과 QR 차량이 일치하지 않습니다. 다시 대조해 주세요."}, status=status.HTTP_409_CONFLICT)
             correction = data.validated_data.get("corrects")
+            point_redemption_id = data.validated_data.get("point_redemption_id")
+            point_redemption = None
+            if point_redemption_id is not None:
+                point_redemption = PointRedemptionRequest.objects.select_for_update().filter(
+                    pk=point_redemption_id, member=current_ownership.user, partner=partner,
+                    status=PointRedemptionRequest.Status.COMPLETED,
+                ).first()
+                if point_redemption is None or point_redemption.transaction is None:
+                    return Response({"detail": "승인 완료된 포인트 사용 내역을 확인할 수 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+                if point_redemption.transaction.ledger_entry_id is not None:
+                    return Response({"detail": "이미 정비기록에 연결된 포인트 사용 내역입니다."}, status=status.HTTP_409_CONFLICT)
+                if point_redemption.payment_amount_krw != data.validated_data["amount_krw"]:
+                    return Response({"detail": "정비 금액이 포인트 승인 요청 금액과 일치하지 않습니다."}, status=status.HTTP_409_CONFLICT)
+            elif PointRedemptionRequest.objects.filter(
+                member=current_ownership.user, partner=partner,
+                status=PointRedemptionRequest.Status.COMPLETED, transaction__ledger_entry__isnull=True,
+                payment_amount_krw=data.validated_data["amount_krw"],
+            ).exists():
+                return Response({"detail": "승인된 포인트 사용 건을 선택해 정비기록과 연결해 주세요."}, status=status.HTTP_409_CONFLICT)
             duplicate_query = LedgerEntry.objects.filter(
                 vehicle=vehicle, kind=data.validated_data["kind"],
                 entry_date=data.validated_data["entry_date"], odometer_km=data.validated_data["odometer_km"],
@@ -901,7 +952,19 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
             member = type(current_ownership.user).objects.select_for_update().get(
                 pk=current_ownership.user_id
             )
-            points_earned = entry.amount_krw // 100
+            if point_redemption is not None:
+                points_used = point_redemption.points_requested
+            elif correction is not None:
+                points_used = PointRedemptionRequest.objects.filter(
+                    transaction__ledger_entry=correction,
+                ).values_list("points_requested", flat=True).first() or 0
+            else:
+                points_used = 0
+            net_payment_amount = max(entry.amount_krw - points_used, 0)
+            points_earned = net_payment_amount // 100
+            if point_redemption is not None:
+                point_redemption.transaction.ledger_entry = entry
+                point_redemption.transaction.save(update_fields=["ledger_entry"])
             if correction is None and points_earned > 0:
                 PointTransaction.objects.create(
                     user=member,
@@ -910,7 +973,7 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
                     transaction_type=PointTransaction.Type.SERVICE_EARN,
                     points_delta=points_earned,
                     available_at=now + timedelta(days=1),
-                    memo="정비 결제 금액 1% 적립",
+                    memo=f"포인트 차감 후 결제액 {net_payment_amount:,}원 기준 1% 적립",
                     idempotency_key=f"ledger:{entry.pk}:service-reward",
                 )
             elif correction is not None:
@@ -919,7 +982,11 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
                     transaction_type__in=[PointTransaction.Type.SERVICE_EARN, PointTransaction.Type.ADJUSTMENT],
                 ).exists()
                 if prior_reward_exists:
-                    points_delta = points_earned - (correction.amount_krw // 100)
+                    correction_redemption = PointRedemptionRequest.objects.filter(
+                        transaction__ledger_entry=correction,
+                    ).values_list("points_requested", flat=True).first() or 0
+                    previous_net_payment = max(correction.amount_krw - correction_redemption, 0)
+                    points_delta = points_earned - (previous_net_payment // 100)
                     if points_delta:
                         PointTransaction.objects.create(
                             user=member,

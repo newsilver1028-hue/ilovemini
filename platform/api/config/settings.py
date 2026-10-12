@@ -73,6 +73,7 @@ REST_FRAMEWORK = {
         "cafe_search": "20/minute",
         "cafe_answer": "10/minute",
         "booking": "20/minute",
+        "point_redemption": "120/minute",
         "partner_review": "10/minute",
     },
 }

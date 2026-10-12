@@ -714,6 +714,36 @@ class ApiAccessTests(TestCase):
         self.assertEqual(merchant_status.status_code, 200)
         self.assertEqual(merchant_status.data["status"], "completed")
 
+        verified_record = partner_client.post("/api/ledger/partner-verified/", {
+            "vehicle_public_id": str(self.mine.public_id), "plate_number": self.mine.plate_number,
+            "partner": partner.pk, "kind": "service", "odometer_km": 42000,
+            "amount_krw": 50000, "description": "포인트 사용 후 정비", "point_redemption_id": created.data["id"],
+        }, format="json")
+        self.assertEqual(verified_record.status_code, 201, verified_record.data)
+        reward = PointTransaction.objects.get(ledger_entry_id=verified_record.data["id"], transaction_type=PointTransaction.Type.SERVICE_EARN)
+        self.assertEqual(reward.points_delta, 496)
+        self.assertIn("포인트 차감 후 결제액 49,600원", reward.memo)
+
+    def test_partner_point_balance_is_available_after_qr_scan_only_to_assigned_shop(self):
+        partner_user = User.objects.create_user(username="point-balance-shop", password="Long-test-password-789")
+        partner = Partner.objects.create(name="포인트 조회 업체", is_active=True)
+        PartnerStaff.objects.create(partner=partner, user=partner_user, can_verify_records=True, is_active=True)
+        PointTransaction.objects.create(user=self.member, transaction_type=PointTransaction.Type.ATTENDANCE,
+            points_delta=1000, available_at=timezone.now(), memo="즉시 사용", idempotency_key="balance-ready")
+        PointTransaction.objects.create(user=self.member, transaction_type=PointTransaction.Type.SERVICE_EARN,
+            points_delta=2000, available_at=timezone.now() + timedelta(days=1), memo="익일 사용", idempotency_key="balance-future")
+        partner_client = APIClient(); partner_client.force_authenticate(partner_user)
+        response = partner_client.get("/api/points/balance/", {
+            "vehicle_public_id": str(self.mine.public_id), "partner": partner.pk,
+        })
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["available_points"], 1000)
+        outsider = APIClient(); outsider.force_authenticate(self.other)
+        denied = outsider.get("/api/points/balance/", {
+            "vehicle_public_id": str(self.mine.public_id), "partner": partner.pk,
+        })
+        self.assertEqual(denied.status_code, 403)
+
     def test_only_active_partners_are_public(self):
         Partner.objects.create(name="확인된 업체", is_active=True)
         Partner.objects.create(name="비공개 업체", is_active=False)
