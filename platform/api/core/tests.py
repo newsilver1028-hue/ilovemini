@@ -736,9 +736,10 @@ class ApiAccessTests(TestCase):
         self.assertEqual(verified_record.status_code, 201, verified_record.data)
         self.assertEqual(verified_record.data["amount_krw"], 49600)
         self.assertEqual(LedgerEntry.objects.get(pk=verified_record.data["id"]).amount_krw, 49600)
-        reward = PointTransaction.objects.get(ledger_entry_id=verified_record.data["id"], transaction_type=PointTransaction.Type.SERVICE_EARN)
-        self.assertEqual(reward.points_delta, 496)
-        self.assertIn("포인트 차감 후 결제액 49,600원", reward.memo)
+        self.assertFalse(PointTransaction.objects.filter(
+            ledger_entry_id=verified_record.data["id"],
+            transaction_type=PointTransaction.Type.SERVICE_EARN,
+        ).exists())
 
     def test_partner_point_balance_is_available_after_qr_scan_only_to_assigned_shop(self):
         partner_user = User.objects.create_user(username="point-balance-shop", password="Long-test-password-789")

@@ -975,7 +975,7 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
             if point_redemption is not None:
                 point_redemption.transaction.ledger_entry = entry
                 point_redemption.transaction.save(update_fields=["ledger_entry"])
-            if correction is None and points_earned > 0:
+            if correction is None and point_redemption is None and points_earned > 0:
                 PointTransaction.objects.create(
                     user=member,
                     partner=partner,
