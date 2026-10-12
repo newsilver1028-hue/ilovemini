@@ -377,6 +377,7 @@ def _redemption_payload(point_request, available_points):
         "partner": point_request.partner.name + (f" · {point_request.partner.branch_label}" if point_request.partner.branch_label else ""),
         "payment_amount_krw": point_request.payment_amount_krw,
         "points_requested": point_request.points_requested,
+        "actual_payment_krw": max(point_request.payment_amount_krw - point_request.points_requested, 0),
         "available_points": available_points,
         "expires_at": point_request.expires_at.isoformat(),
         "completed_at": point_request.completed_at.isoformat() if point_request.completed_at else None,
@@ -920,12 +921,22 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
                         {"detail": "같은 차량·협력업체의 정상 인증기록만 정정할 수 있습니다."},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
+            if point_redemption is not None:
+                points_used = point_redemption.points_requested
+            elif correction is not None:
+                linked_redemption = PointRedemptionRequest.objects.filter(
+                    transaction__ledger_entry=correction,
+                ).first()
+                points_used = linked_redemption.points_requested if linked_redemption else 0
+            else:
+                points_used = 0
+            actual_payment_amount = max(data.validated_data["amount_krw"] - points_used, 0)
             entry = LedgerEntry.objects.create(
                 vehicle=vehicle,
                 kind=data.validated_data["kind"],
                 entry_date=data.validated_data["entry_date"],
                 odometer_km=data.validated_data["odometer_km"],
-                amount_krw=data.validated_data["amount_krw"],
+                amount_krw=actual_payment_amount,
                 description=data.validated_data["description"],
                 quantity_liters=data.validated_data.get("quantity_liters"),
                 source=LedgerEntry.Source.PARTNER,
@@ -952,16 +963,7 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
             member = type(current_ownership.user).objects.select_for_update().get(
                 pk=current_ownership.user_id
             )
-            if point_redemption is not None:
-                points_used = point_redemption.points_requested
-            elif correction is not None:
-                points_used = PointRedemptionRequest.objects.filter(
-                    transaction__ledger_entry=correction,
-                ).values_list("points_requested", flat=True).first() or 0
-            else:
-                points_used = 0
-            net_payment_amount = max(entry.amount_krw - points_used, 0)
-            points_earned = net_payment_amount // 100
+            points_earned = entry.amount_krw // 100
             if point_redemption is not None:
                 point_redemption.transaction.ledger_entry = entry
                 point_redemption.transaction.save(update_fields=["ledger_entry"])
@@ -973,7 +975,7 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
                     transaction_type=PointTransaction.Type.SERVICE_EARN,
                     points_delta=points_earned,
                     available_at=now + timedelta(days=1),
-                    memo=f"포인트 차감 후 결제액 {net_payment_amount:,}원 기준 1% 적립",
+                    memo=f"포인트 차감 후 결제액 {entry.amount_krw:,}원 기준 1% 적립",
                     idempotency_key=f"ledger:{entry.pk}:service-reward",
                 )
             elif correction is not None:
@@ -982,10 +984,13 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
                     transaction_type__in=[PointTransaction.Type.SERVICE_EARN, PointTransaction.Type.ADJUSTMENT],
                 ).exists()
                 if prior_reward_exists:
-                    correction_redemption = PointRedemptionRequest.objects.filter(
+                    linked_redemption = PointRedemptionRequest.objects.filter(
                         transaction__ledger_entry=correction,
-                    ).values_list("points_requested", flat=True).first() or 0
-                    previous_net_payment = max(correction.amount_krw - correction_redemption, 0)
+                    ).first()
+                    previous_net_payment = correction.amount_krw
+                    if linked_redemption and correction.amount_krw == linked_redemption.payment_amount_krw:
+                        # Older records stored the gross amount; normalize those when calculating a correction.
+                        previous_net_payment = max(correction.amount_krw - linked_redemption.points_requested, 0)
                     points_delta = points_earned - (previous_net_payment // 100)
                     if points_delta:
                         PointTransaction.objects.create(

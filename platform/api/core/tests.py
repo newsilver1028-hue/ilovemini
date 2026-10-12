@@ -674,6 +674,7 @@ class ApiAccessTests(TestCase):
             }, format="json")
         self.assertEqual(created.status_code, 201, created.data)
         self.assertEqual(created.data["status"], "pending")
+        self.assertEqual(created.data["actual_payment_krw"], 49600)
         member_push.assert_called_once()
 
         pending = self.client.get("/api/points/redemptions/pending/")
@@ -720,6 +721,8 @@ class ApiAccessTests(TestCase):
             "amount_krw": 50000, "description": "포인트 사용 후 정비", "point_redemption_id": created.data["id"],
         }, format="json")
         self.assertEqual(verified_record.status_code, 201, verified_record.data)
+        self.assertEqual(verified_record.data["amount_krw"], 49600)
+        self.assertEqual(LedgerEntry.objects.get(pk=verified_record.data["id"]).amount_krw, 49600)
         reward = PointTransaction.objects.get(ledger_entry_id=verified_record.data["id"], transaction_type=PointTransaction.Type.SERVICE_EARN)
         self.assertEqual(reward.points_delta, 496)
         self.assertIn("포인트 차감 후 결제액 49,600원", reward.memo)
