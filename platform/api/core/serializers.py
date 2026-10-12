@@ -54,13 +54,14 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
     trust_label = serializers.SerializerMethodField()
     integrity_valid = serializers.SerializerMethodField()
     is_corrected = serializers.SerializerMethodField()
+    evidence_images = serializers.SerializerMethodField()
 
     class Meta:
         model = LedgerEntry
         fields = [
             "id", "vehicle", "kind", "entry_date", "odometer_km", "amount_krw", "description",
             "quantity_liters", "source", "partner_name", "verified_at", "part_number", "evidence_url",
-            "corrects", "correction_reason", "is_corrected", "trust_label", "integrity_valid", "created_at",
+            "corrects", "correction_reason", "is_corrected", "trust_label", "integrity_valid", "created_at", "evidence_images",
         ]
         read_only_fields = ["id", "source", "partner_name", "verified_at", "corrects", "correction_reason", "is_corrected", "trust_label", "integrity_valid", "created_at"]
 
@@ -78,10 +79,16 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
         if inherited:
             # Free text, parts text and source documents have not been reviewed
             # for personal data. Expose only structured facts after a handover.
-            data.update(description=instance.get_kind_display(), evidence_url="",
+            data.update(description=instance.get_kind_display(), evidence_url="", evidence_images=[],
                         correction_reason="", part_number="", amount_krw=None,
                         quantity_liters=None)
         return data
+
+    def get_evidence_images(self, obj):
+        return [
+            {"id": image.pk, "file_name": image.file_name}
+            for image in obj.evidence_images.all().order_by("id")
+        ]
 
     def get_is_corrected(self, obj):
         return obj.corrections.exists()

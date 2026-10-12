@@ -145,6 +145,7 @@ class LedgerEntry(models.Model):
         WASH = "wash", "세차"
         BODYWORK = "bodywork", "판금·도색·보험처리"
         WHEEL_TIRE = "wheel_tire", "휠·타이어"
+        ELECTRICAL = "electrical", "전장류"
         OTHER = "other", "기타"
     class Source(models.TextChoices):
         OWNER = "owner", "차주 입력"
@@ -172,7 +173,7 @@ class LedgerEntry(models.Model):
 
 
 class LedgerEvidence(models.Model):
-    entry = models.OneToOneField(LedgerEntry, on_delete=models.PROTECT, related_name="evidence_image")
+    entry = models.ForeignKey(LedgerEntry, on_delete=models.PROTECT, related_name="evidence_images")
     image_data = models.BinaryField(editable=False)
     content_type = models.CharField(max_length=32, editable=False)
     file_name = models.CharField(max_length=180, blank=True)

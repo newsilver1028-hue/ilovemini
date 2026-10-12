@@ -498,23 +498,36 @@ class ApiAccessTests(TestCase):
             b"\x89PNG\r\n\x1a\nsmall-test-image",
             content_type="image/png",
         )
+        work_photo = SimpleUploadedFile(
+            "work.png",
+            b"\x89PNG\r\n\x1a\nwork-test-image",
+            content_type="image/png",
+        )
         created = partner_client.post("/api/ledger/partner-verified/", {
             "vehicle_public_id": str(self.mine.public_id),
             "plate_number": "12가3456",
             "partner": partner.pk,
-            "kind": "wheel_tire",
+            "kind": "electrical",
             "entry_date": timezone.localdate().isoformat(),
             "odometer_km": 43000,
             "amount_krw": 150000,
-            "description": "휠 타이어 교체",
-            "evidence_image": photo,
+            "description": "블랙박스 배선 작업",
+            "evidence_images": [photo, work_photo],
         }, format="multipart")
         self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(created.data["kind"], "electrical")
+        self.assertEqual(len(created.data["evidence_images"]), 2)
         self.assertIn(f"/api/ledger/{created.data['id']}/evidence/", created.data["evidence_url"])
         owner_response = self.client.get(f"/api/ledger/{created.data['id']}/evidence/")
         self.assertEqual(owner_response.status_code, 200)
         self.assertEqual(owner_response["Content-Type"], "image/png")
         self.assertEqual(owner_response.content, b"\x89PNG\r\n\x1a\nsmall-test-image")
+        second_id = created.data["evidence_images"][1]["id"]
+        second_response = self.client.get(
+            f"/api/ledger/{created.data['id']}/evidence/?image_id={second_id}"
+        )
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.content, b"\x89PNG\r\n\x1a\nwork-test-image")
         another_member = APIClient()
         another_member.force_authenticate(self.other)
         self.assertEqual(another_member.get(f"/api/ledger/{created.data['id']}/evidence/").status_code, 404)

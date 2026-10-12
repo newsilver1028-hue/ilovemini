@@ -825,11 +825,19 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="partner-verified", throttle_classes=[ScopedRateThrottle])
     def create_partner_verified(self, request):
-        evidence_image = request.FILES.get("evidence_image")
-        if evidence_image is not None:
+        evidence_images = request.FILES.getlist("evidence_images")
+        evidence_images.extend(request.FILES.getlist("evidence_image"))
+        if len(evidence_images) > 5:
+            return Response({"detail": "사진은 최대 5장까지 첨부할 수 있습니다."}, status=status.HTTP_400_BAD_REQUEST)
+        prepared_images = []
+        total_image_bytes = 0
+        for evidence_image in evidence_images:
             if evidence_image.size > 8 * 1024 * 1024:
-                return Response({"detail": "사진은 8MB 이하로 첨부해 주세요."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"detail": "사진 한 장은 8MB 이하로 첨부해 주세요."}, status=status.HTTP_400_BAD_REQUEST)
             image_data = evidence_image.read()
+            total_image_bytes += len(image_data)
+            if total_image_bytes > 16 * 1024 * 1024:
+                return Response({"detail": "사진 전체 용량은 16MB 이하로 첨부해 주세요."}, status=status.HTTP_400_BAD_REQUEST)
             image_types = (
                 ("image/jpeg", image_data.startswith(b"\xff\xd8\xff")),
                 ("image/png", image_data.startswith(b"\x89PNG\r\n\x1a\n")),
@@ -838,11 +846,8 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
             content_type = next((kind for kind, valid in image_types if valid), None)
             if content_type is None:
                 return Response({"detail": "JPEG, PNG, WebP 사진만 첨부할 수 있습니다."}, status=status.HTTP_400_BAD_REQUEST)
-            if not evidence_image.name or len(evidence_image.name) > 180:
-                evidence_image.name = "service-evidence.jpg"
-        else:
-            image_data = None
-            content_type = None
+            file_name = evidence_image.name if evidence_image.name and len(evidence_image.name) <= 180 else "service-evidence.jpg"
+            prepared_images.append((image_data, content_type, file_name))
         data = self.VerifiedRecordInput(data=request.data)
         data.is_valid(raise_exception=True)
         partner = data.validated_data["partner"]
@@ -948,13 +953,16 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
                 corrects=correction,
                 correction_reason=data.validated_data.get("correction_reason", "").strip(),
             )
-            if image_data is not None:
-                LedgerEvidence.objects.create(
-                    entry=entry,
-                    image_data=image_data,
-                    content_type=content_type,
-                    file_name=evidence_image.name,
-                )
+            if prepared_images:
+                LedgerEvidence.objects.bulk_create([
+                    LedgerEvidence(
+                        entry=entry,
+                        image_data=image_data,
+                        content_type=content_type,
+                        file_name=file_name,
+                    )
+                    for image_data, content_type, file_name in prepared_images
+                ])
                 entry.evidence_url = request.build_absolute_uri(
                     reverse("ledger-evidence", kwargs={"pk": entry.pk})
                 )
@@ -1016,7 +1024,15 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="evidence")
     def evidence(self, request, pk=None):
         entry = self.get_object()
-        attachment = get_object_or_404(LedgerEvidence, entry=entry)
+        attachments = LedgerEvidence.objects.filter(entry=entry).order_by("id")
+        image_id = request.query_params.get("image_id")
+        attachment = (
+            get_object_or_404(attachments, pk=image_id)
+            if image_id
+            else attachments.first()
+        )
+        if attachment is None:
+            return Response({"detail": "첨부 사진을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
         response = HttpResponse(bytes(attachment.image_data), content_type=attachment.content_type)
         response["X-Content-Type-Options"] = "nosniff"
         response["Cache-Control"] = "private, no-store"
