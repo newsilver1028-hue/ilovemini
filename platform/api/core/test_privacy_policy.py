@@ -3,6 +3,10 @@ from django.urls import reverse
 
 
 class PrivacyPolicyPageTests(SimpleTestCase):
+    def test_public_root_redirects_to_privacy_policy(self):
+        response = self.client.get("/")
+        self.assertRedirects(response, "/privacy/")
+
     def test_privacy_policy_page_is_public_and_contains_controller_contact(self):
         response = self.client.get(reverse("privacy_policy"))
         self.assertEqual(response.status_code, 200)
