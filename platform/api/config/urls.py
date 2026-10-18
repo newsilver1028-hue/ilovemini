@@ -7,6 +7,7 @@ from rest_framework.routers import DefaultRouter
 from core.views import HealthView, CafeSearchView, CafeLatestView, CafeAnswerView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet, PartnerPointRedemptionView, PartnerPointBalanceView, MemberPointRedemptionView
 from core.member_views import MemberGradeView
 from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView, AppReviewLoginView
+from core.privacy_views import privacy_policy
 
 router = DefaultRouter()
 router.register("vehicles", VehicleViewSet, basename="vehicle")
@@ -17,6 +18,7 @@ router.register("partners", PartnerViewSet, basename="partner")
 router.register("offers", OfferViewSet, basename="offer")
 router.register("bookings", PartnerBookingViewSet, basename="booking")
 urlpatterns = [
+    path("privacy/", privacy_policy, name="privacy_policy"),
     path("api/app/content/", AppContentView.as_view(), name="app_content"),
     path("api/shopping/search/", ShoppingSearchView.as_view(), name="shopping_search"),
     path("api/me/preferences/", MemberPreferenceView.as_view(), name="member_preferences"),
