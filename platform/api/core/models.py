@@ -427,6 +427,27 @@ class NaverIdentity(models.Model):
     mobile = models.CharField("휴대전화번호", max_length=32, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+
+class AppReviewAccount(models.Model):
+    """Admin-managed demo credentials for app store review."""
+    username = models.CharField("심사용 아이디", max_length=150, unique=True)
+    password_hash = models.CharField("비밀번호 해시", max_length=128, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, verbose_name="앱 회원 계정", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="app_review_account",
+    )
+    is_active = models.BooleanField("사용", default=True)
+    created_at = models.DateTimeField("생성일", auto_now_add=True)
+    updated_at = models.DateTimeField("수정일", auto_now=True)
+
+    class Meta:
+        verbose_name = "앱 심사용 계정"
+        verbose_name_plural = "앱 심사용 계정"
+        ordering = ["-created_at", "username"]
+
+    def __str__(self):
+        return self.username
+
 class NaverOAuthAttempt(models.Model):
     state_digest = models.CharField(max_length=64, unique=True)
     ticket_digest = models.CharField(max_length=64, unique=True, null=True, blank=True)
