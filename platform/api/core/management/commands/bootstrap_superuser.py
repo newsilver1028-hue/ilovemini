@@ -6,7 +6,14 @@ from django.db import transaction
 
 
 class Command(BaseCommand):
-    help = 'Create the initial administrator from environment variables, without changing an existing password.'
+    help = 'Create the configured administrator; optionally synchronize its password from the environment.'
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--sync-password',
+            action='store_true',
+            help='Set the configured superuser password to DJANGO_SUPERUSER_PASSWORD when the command runs.',
+        )
 
     def handle(self, *args, **options):
         username = os.environ.get('DJANGO_SUPERUSER_USERNAME', '').strip()
@@ -22,7 +29,13 @@ class Command(BaseCommand):
             if user:
                 if not user.is_superuser:
                     raise CommandError('Username belongs to a non-superuser. Choose another username.')
-                self.stdout.write('Configured superuser already exists; no changes made.')
+                if options['sync_password'] and not user.check_password(password):
+                    validate_password(password, user=user)
+                    user.set_password(password)
+                    user.save(update_fields=['password'])
+                    self.stdout.write(self.style.SUCCESS('Configured superuser password synchronized.'))
+                else:
+                    self.stdout.write('Configured superuser already exists; no changes made.')
                 return
             user = User(**{User.USERNAME_FIELD: username})
             email = os.environ.get('DJANGO_SUPERUSER_EMAIL', '').strip()
