@@ -6,7 +6,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from core.views import HealthView, CafeSearchView, CafeLatestView, CafeAnswerView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet, PartnerPointRedemptionView, PartnerPointBalanceView, MemberPointRedemptionView
 from core.member_views import MemberGradeView
-from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView
+from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView, AppReviewLoginView
 
 router = DefaultRouter()
 router.register("vehicles", VehicleViewSet, basename="vehicle")
@@ -36,6 +36,7 @@ urlpatterns = [
     path("api/auth/naver/start/", NaverStartView.as_view(), name="naver_start"),
     path("api/auth/naver/callback/", NaverCallbackView.as_view(), name="naver_callback"),
     path("api/auth/naver/complete/", NaverCompleteView.as_view(), name="naver_complete"),
+    path("api/auth/review-login/", AppReviewLoginView.as_view(), name="review_login"),
     path("api/push/devices/", PushDeviceView.as_view(), name="push_devices"),
     path("api/attendance/", AttendanceView.as_view(), name="attendance"),
     path("api/points/balance/", PartnerPointBalanceView.as_view(), name="partner_point_balance"),
