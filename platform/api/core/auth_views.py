@@ -2,6 +2,8 @@ import secrets
 from datetime import timedelta
 from urllib.parse import urlencode
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import check_password
 from django.db import transaction
 from django.http import HttpResponseRedirect
 from django.utils import timezone
@@ -9,7 +11,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.throttling import ScopedRateThrottle
-from .models import NaverOAuthAttempt, MemberConsent
+from .models import NaverOAuthAttempt, MemberConsent, NaverIdentity, Vehicle, VehicleOwnership, AppReviewAccount, PartnerStaff
 from .naver_auth import digest, exchange_code, get_profile, jwt_pair, user_for_profile, NaverUnavailable
 
 class NaverAppRedirect(HttpResponseRedirect):
@@ -96,5 +98,59 @@ class NaverCompleteView(APIView):
             attempt.ticket_digest = None
             attempt.profile_data = {}
             attempt.save(update_fields=["user", "ticket_digest", "profile_data"])
+            tokens = jwt_pair(user)
+        return Response(tokens)
+
+
+
+class AppReviewLoginView(APIView):
+    """Authenticate a demo account created by a site administrator for app review."""
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "review_login"
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        username = request.data.get("username", "")
+        password = request.data.get("password", "")
+        if not isinstance(username, str) or not isinstance(password, str) or not username or not password:
+            return Response({"detail": "아이디 또는 비밀번호를 확인해 주세요."}, status=400)
+
+        with transaction.atomic():
+            account = AppReviewAccount.objects.select_for_update().filter(
+                username=username, is_active=True,
+            ).first()
+            if not account or not account.password_hash or not check_password(password, account.password_hash):
+                return Response({"detail": "아이디 또는 비밀번호를 확인해 주세요."}, status=400)
+
+            User = get_user_model()
+            user = account.user
+            if user is None:
+                if User.objects.filter(username=username).exists():
+                    return Response({"detail": "심사용 계정을 사용할 수 없습니다."}, status=503)
+                user = User.objects.create_user(
+                    username=username, password=None, first_name="앱 심사 데모",
+                    is_active=True, is_staff=False, is_superuser=False,
+                )
+                account.user = user
+                account.save(update_fields=["user", "updated_at"])
+            if (not user.is_active or user.is_staff or user.is_superuser
+                    or NaverIdentity.objects.filter(user=user).exists()
+                    or PartnerStaff.objects.filter(user=user, is_active=True, partner__is_active=True).exists()):
+                return Response({"detail": "심사용 계정을 사용할 수 없습니다."}, status=503)
+
+            now = timezone.now()
+            user.last_login = now
+            user.save(update_fields=["last_login"])
+            MemberConsent.objects.update_or_create(user=user, defaults={
+                "terms_accepted_at": now, "privacy_accepted_at": now,
+                "marketing_opt_in": False,
+            })
+            if not VehicleOwnership.objects.filter(user=user, ended_at__isnull=True).exists():
+                vehicle = Vehicle.objects.create(
+                    model_name="MINI Cooper S", generation="F56", model_year=2022,
+                    manufacturer="MINI", current_odometer_km=46200,
+                )
+                VehicleOwnership.objects.create(user=user, vehicle=vehicle)
             tokens = jwt_pair(user)
         return Response(tokens)
