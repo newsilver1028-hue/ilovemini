@@ -16,6 +16,16 @@ class PatchLifecycleTests(TestCase):
         self.assertTrue(user.check_password('old-test-password-K8!'))
         self.assertFalse(user.check_password('new-test-password-J9!'))
 
+    def test_bootstrap_sync_password_updates_existing_superuser(self):
+        User = get_user_model()
+        user = User.objects.create_superuser(username='sync-admin', password='old-test-password-K8!')
+        configured_password = 'new-test-password-J9!'
+        with patch.dict(os.environ, {'DJANGO_SUPERUSER_USERNAME': 'sync-admin', 'DJANGO_SUPERUSER_PASSWORD': configured_password}):
+            call_command('bootstrap_superuser', sync_password=True)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password(configured_password))
+        self.assertFalse(user.check_password('old-test-password-K8!'))
+
     def test_sync_preserves_shop_identity_and_separates_branches(self):
         old = Partner.objects.create(name='아이모터스랩', cafe_url='https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/347')
         old_id = old.pk
