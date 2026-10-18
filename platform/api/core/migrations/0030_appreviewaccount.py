@@ -7,7 +7,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("core", "0029_ledgerentry_line_items"),
+        ("core", "0022_pushdevice_fcm_token_length"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
