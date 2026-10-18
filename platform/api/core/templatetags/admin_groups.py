@@ -9,7 +9,7 @@ def admin_groups(app_list):
     definitions = [
         ('업체 관리', '매장 정보, 사진, 담당자와 혜택', ['Partner', 'PartnerImage', 'PartnerStaff', 'PartnerReview', 'PartnerBooking', 'Offer']),
         ('쇼핑·콘텐츠', '추천 상품, 공동구매와 공지', ['AppContent', 'Notice', 'SeasonBanner']),
-        ('회원·권한', '가입 회원, 등급과 접근 권한', ['User', 'Group']),
+        ('회원·권한', '가입 회원, 등급과 접근 권한', ['User', 'AppReviewAccount', 'Group']),
         ('포인트·출석', '출석 1회 100P · 정비 결제액 1% 적립 · 적립 다음 날 사용 가능', ['AttendanceCheckin', 'PointTransaction', 'PointRedemptionRequest']),
         ('차량·정비', '차량 정보, 차계부와 정비 기록', ['Vehicle', 'LedgerEntry', 'RecordCorrectionRequest', 'Reminder', 'MemberPreference', 'VehicleOwnership', 'VehiclePlateHistory', 'VehicleTransferCode']),
         ('앱 운영', '업데이트와 알림 기기', ['AppRelease', 'PushDevice']),
