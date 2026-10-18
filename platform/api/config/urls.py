@@ -3,6 +3,7 @@ from core.app_views import AppContentView, ShoppingSearchView, MemberPreferenceV
 from rest_framework_simplejwt.views import TokenRefreshView
 from django.contrib import admin
 from django.urls import include, path
+from django.views.generic import RedirectView
 from rest_framework.routers import DefaultRouter
 from core.views import HealthView, CafeSearchView, CafeLatestView, CafeAnswerView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet, PartnerPointRedemptionView, PartnerPointBalanceView, MemberPointRedemptionView
 from core.member_views import MemberGradeView
@@ -18,6 +19,7 @@ router.register("partners", PartnerViewSet, basename="partner")
 router.register("offers", OfferViewSet, basename="offer")
 router.register("bookings", PartnerBookingViewSet, basename="booking")
 urlpatterns = [
+    path("", RedirectView.as_view(url="/privacy/", permanent=False), name="public_home"),
     path("privacy/", privacy_policy, name="privacy_policy"),
     path("api/app/content/", AppContentView.as_view(), name="app_content"),
     path("api/shopping/search/", ShoppingSearchView.as_view(), name="shopping_search"),
