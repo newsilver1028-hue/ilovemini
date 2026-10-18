@@ -1,3 +1,4 @@
+import base64
 import os
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
@@ -25,6 +26,23 @@ class PatchLifecycleTests(TestCase):
         user.refresh_from_db()
         self.assertTrue(user.check_password(configured_password))
         self.assertFalse(user.check_password('old-test-password-K8!'))
+
+    def test_bootstrap_sync_password_decodes_literal_dollars(self):
+        User = get_user_model()
+        user = User.objects.create_superuser(username='literal-dollar-admin', password='old-test-password-K8!')
+        configured_password = 'new-test-password-J9!$$'
+        encoded_password = base64.b64encode(configured_password.encode('utf-8')).decode('ascii')
+        environment = {
+            'DJANGO_SUPERUSER_USERNAME': 'literal-dollar-admin',
+            'DJANGO_SUPERUSER_PASSWORD': '',
+            'DJANGO_SUPERUSER_PASSWORD_B64': encoded_password,
+        }
+        with patch.dict(os.environ, environment):
+            call_command('bootstrap_superuser', sync_password=True)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password(configured_password))
+        self.assertFalse(user.check_password('new-test-password-J9!$'))
+
 
     def test_sync_preserves_shop_identity_and_separates_branches(self):
         old = Partner.objects.create(name='아이모터스랩', cafe_url='https://m.cafe.naver.com/ca-fe/cafes/13071593/menus/347')

@@ -1,3 +1,5 @@
+import base64
+import binascii
 import os
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
@@ -12,17 +14,24 @@ class Command(BaseCommand):
         parser.add_argument(
             '--sync-password',
             action='store_true',
-            help='Set the configured superuser password to DJANGO_SUPERUSER_PASSWORD when the command runs.',
+            help='Synchronize from DJANGO_SUPERUSER_PASSWORD_B64 or DJANGO_SUPERUSER_PASSWORD when the command runs.',
         )
 
     def handle(self, *args, **options):
         username = os.environ.get('DJANGO_SUPERUSER_USERNAME', '').strip()
-        password = os.environ.get('DJANGO_SUPERUSER_PASSWORD', '')
+        encoded_password = os.environ.get('DJANGO_SUPERUSER_PASSWORD_B64', '').strip()
+        if encoded_password:
+            try:
+                password = base64.b64decode(encoded_password, validate=True).decode('utf-8')
+            except (binascii.Error, UnicodeDecodeError):
+                raise CommandError('DJANGO_SUPERUSER_PASSWORD_B64 must contain valid Base64-encoded UTF-8.')
+        else:
+            password = os.environ.get('DJANGO_SUPERUSER_PASSWORD', '')
         if not username and not password:
             self.stdout.write('Superuser bootstrap skipped (credentials not configured).')
             return
         if not username or not password:
-            raise CommandError('Set both DJANGO_SUPERUSER_USERNAME and DJANGO_SUPERUSER_PASSWORD.')
+            raise CommandError('Set DJANGO_SUPERUSER_USERNAME and a password environment variable.')
         User = get_user_model()
         with transaction.atomic():
             user = User.objects.filter(**{User.USERNAME_FIELD: username}).first()
