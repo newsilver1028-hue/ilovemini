@@ -3,6 +3,8 @@ from django.utils.html import format_html
 from django import forms
 from django.contrib import admin
 from django.contrib.auth.models import Group
+from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password
 from django.db.models import IntegerField, OuterRef, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.urls import path
@@ -11,7 +13,7 @@ from .member_display import member_nickname, member_label, MemberAutocompleteVie
 from .models import (
     LedgerEntry, Notice, Offer, Partner, PartnerImage, PartnerReview, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
     VehicleOwnership, VehicleTransferCode, AttendanceCheckin, PointTransaction, PointRedemptionRequest,
-    SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest,
+    SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest, AppReviewAccount,
 )
 
 
@@ -640,3 +642,7 @@ class RecordCorrectionRequestAdmin(admin.ModelAdmin):
     def has_add_permission(self, request): return False
     def has_change_permission(self, request, obj=None): return False
     def has_delete_permission(self, request, obj=None): return False
+
+
+# Register app review account management after the core admin models.
+from . import review_admin as _review_admin
