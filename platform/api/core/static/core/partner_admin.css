@@ -1,0 +1,111 @@
+.mini-export-link {
+  display: inline-flex !important;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 14px !important;
+  border-radius: 9px !important;
+  background: #b3213b !important;
+  color: #fff !important;
+  font-weight: 750;
+}
+body.model-partnerbooking #changelist { display: none; }
+
+.partner-calendar,
+.partner-records-heading {
+  margin: 0 0 22px;
+  padding: clamp(16px, 2.4vw, 28px);
+  border: 1px solid var(--border-color, #e3e4e8);
+  border-radius: 15px;
+  background: var(--body-bg, #fff);
+}
+.partner-calendar-heading,
+.partner-records-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.partner-calendar-eyebrow { margin: 0 0 5px; color: #b3213b; font-size: 12px; font-weight: 800; }
+.partner-calendar-heading h1,
+.partner-records-heading h1 { margin: 0 0 5px !important; font-size: clamp(22px, 3vw, 30px) !important; }
+.partner-calendar-description { margin: 0; color: var(--body-quiet-color, #737780); }
+.partner-calendar-nav { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.partner-calendar-nav a {
+  display: inline-grid;
+  place-items: center;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color, #dedfe4);
+  border-radius: 10px;
+  color: var(--body-fg, #34363b) !important;
+  font-size: 20px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.partner-calendar-nav .partner-calendar-today { font-size: 13px; }
+.partner-calendar-nav a:hover { border-color: #b3213b; text-decoration: none; }
+.partner-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-top: 1px solid var(--border-color, #e3e4e8); border-left: 1px solid var(--border-color, #e3e4e8); }
+.partner-weekday { padding: 10px 8px; background: var(--darkened-bg, #f7f7f8); color: var(--body-quiet-color, #737780); font-weight: 750; text-align: center; }
+.partner-day-cell { box-sizing: border-box; min-width: 0; min-height: 132px; padding: 9px; border-right: 1px solid var(--border-color, #e3e4e8); border-bottom: 1px solid var(--border-color, #e3e4e8); }
+.partner-day-cell.is-outside { background: color-mix(in srgb, var(--darkened-bg, #f7f7f8) 65%, transparent); }
+.partner-day-cell.is-outside .partner-day-number { opacity: .45; }
+.partner-day-cell.is-today { box-shadow: inset 0 0 0 2px #b3213b; }
+.partner-day-number { display: flex; align-items: baseline; gap: 6px; min-height: 23px; margin-bottom: 5px; color: var(--body-fg, #34363b); font-size: 14px; font-weight: 800; }
+.partner-day-number span { display: none; color: var(--body-quiet-color, #737780); font-size: 12px; font-weight: 600; }
+.partner-day-events { display: grid; gap: 5px; }
+.partner-event { display: grid; gap: 2px; min-width: 0; padding: 6px 7px; border-left: 3px solid #8d9098; border-radius: 5px; background: var(--darkened-bg, #f7f7f8); color: var(--body-fg, #34363b) !important; font-size: 11px; line-height: 1.35; text-decoration: none; }
+.partner-event:hover { outline: 1px solid #b3213b; text-decoration: none; }
+.partner-event strong, .partner-event span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.partner-event small { color: var(--body-quiet-color, #737780); }
+.partner-event.status-requested { border-left-color: #d98200; }
+.partner-event.status-confirmed { border-left-color: #24854d; }
+.partner-event.status-completed { border-left-color: #5863a5; }
+.partner-event.status-rejected, .partner-event.status-cancelled { border-left-color: #9b9ca2; }
+.partner-more-events { color: var(--body-quiet-color, #737780); font-size: 11px; }
+.partner-calendar-empty { margin: 13px 0 0; color: var(--body-quiet-color, #737780); font-size: 12px; }
+.partner-records-heading { margin-bottom: 16px; padding-bottom: 0; border: 0; background: transparent; }
+.partner-records-heading h1 { margin-bottom: 5px !important; }
+
+@media (max-width: 760px) {
+  .partner-calendar, .partner-records-heading { padding: 16px; }
+  .partner-calendar-heading { align-items: flex-start; }
+  .partner-calendar-description { max-width: 40ch; font-size: 13px; }
+  .partner-calendar-grid { display: block; border-left: 0; border-top: 0; }
+  .partner-weekday { display: none; }
+  .partner-day-cell { display: none; min-height: 0; margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--border-color, #e3e4e8); border-radius: 10px; }
+  .partner-day-cell.has-events { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: start; gap: 10px; }
+  .partner-day-number { display: grid; gap: 0; margin: 0; }
+  .partner-day-number span { display: block; }
+  .partner-day-events { grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); }
+  .partner-event { padding: 8px; font-size: 12px; }
+  .partner-calendar-empty { margin-top: 0; }
+  body.model-ledgerentry #changelist { overflow: visible; }
+  body.model-ledgerentry #changelist #toolbar { display: block; padding: 12px; }
+  body.model-ledgerentry #changelist-form { overflow: visible; }
+  body.model-ledgerentry #result_list { display: block; width: 100%; border: 0; }
+  body.model-ledgerentry #result_list thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+  body.model-ledgerentry #result_list tbody { display: grid; gap: 10px; padding: 10px; }
+  body.model-ledgerentry #result_list tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; padding: 9px 12px; border: 1px solid var(--border-color, #e3e4e8); border-radius: 12px; background: var(--body-bg, #fff); }
+  body.model-ledgerentry #result_list tbody td { display: block; min-width: 0; padding: 8px 0; overflow-wrap: anywhere; border-bottom: 1px solid var(--hairline-color, #ececf0); }
+  body.model-ledgerentry #result_list tbody td::before { display: block; margin-bottom: 3px; color: var(--body-quiet-color, #737780); font-size: 10px; font-weight: 750; }
+  body.model-ledgerentry #result_list tbody td:nth-child(1)::before { content: "정비 일자"; }
+  body.model-ledgerentry #result_list tbody td:nth-child(2)::before { content: "차량"; }
+  body.model-ledgerentry #result_list tbody td:nth-child(3)::before { content: "작업 종류"; }
+  body.model-ledgerentry #result_list tbody td:nth-child(4)::before { content: "금액"; }
+  body.model-ledgerentry #result_list tbody td:nth-child(5)::before { content: "주행거리"; }
+  body.model-ledgerentry #result_list tbody td:nth-child(6)::before { content: "정비 내용"; }
+  body.model-ledgerentry #result_list tbody td:nth-child(7)::before { content: "첨부 사진"; }
+  body.model-ledgerentry #result_list tbody td:nth-child(6), body.model-ledgerentry #result_list tbody td:nth-child(7) { grid-column: 1 / -1; }
+  body.model-ledgerentry #result_list tbody td:last-child { border-bottom: 0; }
+  body.model-ledgerentry #changelist .paginator { padding: 12px; }
+}
+
+@media (max-width: 480px) {
+  .partner-calendar-heading { display: grid; }
+  .partner-calendar-nav { justify-content: space-between; width: 100%; }
+  .partner-day-cell.has-events { grid-template-columns: 60px minmax(0, 1fr); gap: 7px; }
+  .partner-day-events { grid-template-columns: 1fr; }
+  body.model-ledgerentry #result_list tbody tr { grid-template-columns: 1fr 1fr; }
+}
