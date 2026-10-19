@@ -18,5 +18,35 @@
     <p class="partner-calendar-description">등록된 인증 정비기록을 확인하고 관리대장으로 내려받을 수 있습니다.</p>
   </div>
 </div>
+<section class="partner-calendar partner-calendar--mini" aria-labelledby="partner-record-calendar-title">
+  <div class="partner-calendar-heading">
+    <div>
+      <p class="partner-calendar-eyebrow">정비 일정</p>
+      <h1 id="partner-record-calendar-title">{{ partner_calendar_month|date:"Y년 n월" }}</h1>
+      <p class="partner-calendar-description">날짜별 인증 정비기록과 차량번호를 확인할 수 있습니다.</p>
+    </div>
+    <nav class="partner-calendar-nav" aria-label="월 이동">
+      <a href="?entry_date__year={{ partner_calendar_prev|slice:':4' }}&amp;entry_date__month={{ partner_calendar_prev|slice:'5:' }}" aria-label="이전 달">‹</a>
+      <a href="?entry_date__year={{ partner_calendar_month|date:'Y' }}&amp;entry_date__month={{ partner_calendar_month|date:'n' }}" class="partner-calendar-today">이번 달</a>
+      <a href="?entry_date__year={{ partner_calendar_next|slice:':4' }}&amp;entry_date__month={{ partner_calendar_next|slice:'5:' }}" aria-label="다음 달">›</a>
+    </nav>
+  </div>
+  <div class="partner-calendar-grid" role="grid" aria-label="정비기록 미니 캘린더">
+    {% for weekday in partner_calendar_weekdays %}<div class="partner-weekday">{{ weekday }}</div>{% endfor %}
+    {% for week in partner_calendar_weeks %}
+      {% for cell in week %}
+        <article class="partner-day-cell{% if not cell.in_month %} is-outside{% endif %}{% if cell.is_today %} is-today{% endif %}{% if cell.events %} has-events{% endif %}" role="gridcell">
+          <time class="partner-day-number" datetime="{{ cell.date|date:'Y-m-d' }}">{{ cell.day }}<span>{{ cell.date|date:"n월 j일" }}</span></time>
+          <div class="partner-day-events">
+            {% for event in cell.events|slice:":2" %}
+              <div class="partner-event"><strong>{{ event.plate }}</strong><span>{{ event.kind }} · {{ event.amount }}</span></div>
+            {% endfor %}
+            {% if cell.events|length > 2 %}<span class="partner-more-events">외 {{ cell.events|length|add:"-2" }}건</span>{% endif %}
+          </div>
+        </article>
+      {% endfor %}
+    {% endfor %}
+  </div>
+</section>
 {{ block.super }}
 {% endblock %}

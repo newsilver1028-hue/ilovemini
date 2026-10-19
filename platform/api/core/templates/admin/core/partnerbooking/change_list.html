@@ -35,7 +35,8 @@
             {% for event in cell.events|slice:":3" %}
               {% if event.change_url %}<a class="partner-event status-{{ event.status_code }}" href="{{ event.change_url }}">{% else %}<div class="partner-event status-{{ event.status_code }}">{% endif %}
                 <strong>{{ event.time }} · {{ event.service }}</strong>
-                <span>{{ event.member }} · {{ event.vehicle }}</span>
+                <span>{{ event.plate }}</span>
+                <span>{{ event.phone }}</span>
                 <small>{{ event.status }}</small>
               {% if event.change_url %}</a>{% else %}</div>{% endif %}
             {% endfor %}

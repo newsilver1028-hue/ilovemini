@@ -135,16 +135,14 @@ class PartnerAdminSite(AdminSite):
         ).order_by("-scheduled_at", "-pk")
         rows = []
         for booking in bookings.iterator():
-            identity = getattr(booking.customer, "naver_identity", None)
             vehicle = booking.vehicle
             rows.append((
                 timezone.localtime(booking.scheduled_at).strftime("%Y-%m-%d %H:%M"),
-                timezone.localtime(booking.requested_at).strftime("%Y-%m-%d %H:%M"),
-                booking.partner.name,
-                (identity.cafe_nickname or identity.nickname) if identity else booking.customer.get_username(),
-                booking.contact_phone,
-                vehicle.model_name if vehicle else "차량 정보 없음",
                 vehicle.plate_number if vehicle else "",
+                booking.contact_phone or "미등록",
+                vehicle.model_name if vehicle else "차량 정보 없음",
+                booking.partner.name,
+                timezone.localtime(booking.requested_at).strftime("%Y-%m-%d %H:%M"),
                 booking.service_type,
                 booking.get_status_display(),
                 booking.customer_note,
@@ -153,7 +151,7 @@ class PartnerAdminSite(AdminSite):
         return self._excel_response(
             f"ilovemini-bookings-{timezone.localdate():%Y%m%d}.xlsx",
             "예약 관리대장",
-            ["예약 일시", "요청 일시", "업체", "회원", "연락처", "차량", "차량번호", "작업 종류", "상태", "회원 요청사항", "업체 메모"],
+            ["예약 일시", "차량번호", "연락처", "차량", "업체", "요청 일시", "작업 종류", "예약 상태", "요청 사항", "업체 메모"],
             rows,
         )
 
@@ -225,18 +223,71 @@ class PartnerAdminSite(AdminSite):
 partner_admin_site = PartnerAdminSite(name="partner_admin")
 
 
+class PartnerBookingStatusFilter(admin.SimpleListFilter):
+    title = "예약 상태"
+    parameter_name = "status"
+
+    def lookups(self, request, model_admin):
+        return PartnerBooking.Status.choices
+
+    def queryset(self, request, queryset):
+        return queryset.filter(status=self.value()) if self.value() else queryset
+
+
 @admin.register(PartnerBooking, site=partner_admin_site)
 class PartnerBookingAdmin(admin.ModelAdmin):
     change_list_template = "admin/core/partnerbooking/change_list.html"
-    list_display = ("scheduled_at", "customer", "vehicle", "service_type", "status", "contact_phone")
-    list_filter = ("status", "scheduled_at")
-    search_fields = ("customer__username", "customer__naver_identity__nickname", "vehicle__model_name", "vehicle__plate_number", "service_type")
-    list_select_related = ("customer", "vehicle", "partner")
-    date_hierarchy = "scheduled_at"
+    list_display = ("booking_time", "vehicle_plate", "contact_phone_display", "vehicle_model", "service_label", "status_label")
+    list_filter = (PartnerBookingStatusFilter,)
+    search_fields = ("vehicle__model_name", "vehicle__plate_number", "contact_phone", "service_type")
+    list_select_related = ("vehicle", "partner")
+    date_hierarchy = None
     ordering = ("-requested_at",)
     actions = None
-    fields = ("scheduled_at", "customer", "vehicle", "service_type", "customer_note", "contact_phone", "status", "partner_note")
-    readonly_fields = ("scheduled_at", "customer", "vehicle", "service_type", "customer_note", "contact_phone")
+    fields = ("vehicle_registration", "contact_phone_display", "booking_time", "service_label", "customer_note_display", "status", "partner_note")
+    readonly_fields = ("vehicle_registration", "contact_phone_display", "booking_time", "service_label", "customer_note_display")
+
+    @admin.display(description="차량번호 / 차량")
+    def vehicle_registration(self, obj):
+        if not obj.vehicle:
+            return "차량 정보 없음"
+        plate = obj.vehicle.plate_number or "차량번호 미등록"
+        return f"{plate} · {obj.vehicle.model_name}"
+
+    @admin.display(description="예약 일시", ordering="scheduled_at")
+    def booking_time(self, obj):
+        return timezone.localtime(obj.scheduled_at).strftime("%Y-%m-%d %H:%M")
+
+    @admin.display(description="차량번호", ordering="vehicle__plate_number")
+    def vehicle_plate(self, obj):
+        return obj.vehicle.plate_number if obj.vehicle and obj.vehicle.plate_number else "미등록"
+
+    @admin.display(description="차량")
+    def vehicle_model(self, obj):
+        return obj.vehicle.model_name if obj.vehicle else "차량 정보 없음"
+
+    @admin.display(description="연락처", ordering="contact_phone")
+    def contact_phone_display(self, obj):
+        return obj.contact_phone or "미등록"
+
+    @admin.display(description="작업 종류", ordering="service_type")
+    def service_label(self, obj):
+        return obj.service_type or "미등록"
+
+    @admin.display(description="예약 상태", ordering="status")
+    def status_label(self, obj):
+        return obj.get_status_display()
+
+    @admin.display(description="요청 사항")
+    def customer_note_display(self, obj):
+        return obj.customer_note or "없음"
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        field = super().formfield_for_dbfield(db_field, request, **kwargs)
+        labels = {"status": "예약 상태", "partner_note": "업체 메모"}
+        if field and db_field.name in labels:
+            field.label = labels[db_field.name]
+        return field
 
     def get_queryset(self, request):
         return super().get_queryset(request).filter(
@@ -263,11 +314,11 @@ class PartnerBookingAdmin(admin.ModelAdmin):
         ).order_by("scheduled_at", "pk")
         events_by_day = {}
         for booking in bookings:
-            identity = getattr(booking.customer, "naver_identity", None)
+            vehicle = booking.vehicle
             event = {
                 "time": timezone.localtime(booking.scheduled_at).strftime("%H:%M"),
-                "member": (identity.cafe_nickname or identity.nickname) if identity else booking.customer.get_username(),
-                "vehicle": booking.vehicle.model_name if booking.vehicle else "차량 정보 없음",
+                "plate": vehicle.plate_number if vehicle and vehicle.plate_number else "차량번호 미등록",
+                "phone": booking.contact_phone or "연락처 미등록",
                 "service": booking.service_type,
                 "status": booking.get_status_display(),
                 "status_code": booking.status,
@@ -343,13 +394,85 @@ class PartnerBookingAdmin(admin.ModelAdmin):
 @admin.register(LedgerEntry, site=partner_admin_site)
 class PartnerLedgerEntryAdmin(admin.ModelAdmin):
     change_list_template = "admin/core/ledgerentry/change_list.html"
-    list_display = ("entry_date", "vehicle", "kind", "amount_krw", "odometer_km", "description", "evidence_count")
+    list_display = ("entry_date", "vehicle_plate", "vehicle_model", "kind_display", "amount_display", "odometer_display", "description_display", "evidence_count")
     list_filter = ("kind", "entry_date")
     search_fields = ("vehicle__model_name", "vehicle__plate_number", "description")
     list_select_related = ("partner", "vehicle")
     date_hierarchy = "entry_date"
     ordering = ("-entry_date", "-pk")
     actions = None
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        today = timezone.localdate()
+        year = request.GET.get("entry_date__year", "")
+        month_number = request.GET.get("entry_date__month", "")
+        try:
+            month_start = datetime.strptime(f"{year}-{month_number}", "%Y-%m").date().replace(day=1)
+        except ValueError:
+            month_start = today.replace(day=1)
+        next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        prev_month = (month_start - timedelta(days=1)).replace(day=1)
+        grid_start = month_start - timedelta(days=month_start.weekday())
+        final_day = next_month - timedelta(days=1)
+        grid_end = final_day + timedelta(days=6 - final_day.weekday())
+        entries = self.get_queryset(request).filter(
+            entry_date__gte=month_start, entry_date__lt=next_month
+        ).order_by("entry_date", "pk")
+        entries_by_day = {}
+        for entry in entries:
+            vehicle = entry.vehicle
+            entries_by_day.setdefault(entry.entry_date, []).append({
+                "plate": vehicle.plate_number if vehicle and vehicle.plate_number else "번호 미등록",
+                "kind": entry.get_kind_display(),
+                "amount": f"{entry.amount_krw:,}원",
+            })
+        weeks = []
+        current_day = grid_start
+        while current_day <= grid_end:
+            week = []
+            for _ in range(7):
+                week.append({
+                    "date": current_day,
+                    "day": current_day.day,
+                    "in_month": current_day.month == month_start.month,
+                    "is_today": current_day == today,
+                    "events": entries_by_day.get(current_day, []),
+                })
+                current_day += timedelta(days=1)
+            weeks.append(week)
+        extra_context.update({
+            "partner_calendar_month": month_start,
+            "partner_calendar_prev": prev_month.strftime("%Y-%m"),
+            "partner_calendar_next": next_month.strftime("%Y-%m"),
+            "partner_calendar_weeks": weeks,
+            "partner_calendar_weekdays": ["월", "화", "수", "목", "금", "토", "일"],
+        })
+        return super().changelist_view(request, extra_context=extra_context)
+
+    @admin.display(description="차량번호", ordering="vehicle__plate_number")
+    def vehicle_plate(self, obj):
+        return obj.vehicle.plate_number if obj.vehicle and obj.vehicle.plate_number else "미등록"
+
+    @admin.display(description="차량", ordering="vehicle__model_name")
+    def vehicle_model(self, obj):
+        return obj.vehicle.model_name if obj.vehicle else "차량 정보 없음"
+
+    @admin.display(description="작업 종류", ordering="kind")
+    def kind_display(self, obj):
+        return obj.get_kind_display()
+
+    @admin.display(description="총액(원)", ordering="amount_krw")
+    def amount_display(self, obj):
+        return f"{obj.amount_krw:,}"
+
+    @admin.display(description="주행거리(km)", ordering="odometer_km")
+    def odometer_display(self, obj):
+        return obj.odometer_km if obj.odometer_km is not None else "미등록"
+
+    @admin.display(description="정비 내용", ordering="description")
+    def description_display(self, obj):
+        return obj.description or "없음"
 
     def get_queryset(self, request):
         return super().get_queryset(request).filter(

@@ -396,6 +396,8 @@ class PartnerBooking(models.Model):
 
     class Meta:
         ordering = ["-requested_at"]
+        verbose_name = "업체 예약"
+        verbose_name_plural = "업체 예약"
         indexes = [models.Index(fields=["partner", "scheduled_at", "status"], name="core_partne_partner_427ead_idx")]
 
     def __str__(self):
