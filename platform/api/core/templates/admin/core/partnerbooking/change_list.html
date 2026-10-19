@@ -1,0 +1,50 @@
+{% extends "admin/change_list.html" %}
+{% load static %}
+
+{% block extrastyle %}{{ block.super }}
+<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}">
+{% endblock %}
+
+{% block object-tools-items %}
+<li><a class="mini-export-link" href="{% url 'partner_admin:partner-booking-export' %}">예약대장 엑셀 다운로드</a></li>
+{{ block.super }}
+{% endblock %}
+
+{% block content %}
+{{ block.super }}
+<section class="partner-calendar" aria-labelledby="partner-calendar-title">
+  <div class="partner-calendar-heading">
+    <div>
+      <p class="partner-calendar-eyebrow">예약 관리</p>
+      <h1 id="partner-calendar-title">{{ partner_calendar_month|date:"Y년 n월" }}</h1>
+      <p class="partner-calendar-description">날짜별 예약을 확인하고 선택하면 예약 내용을 볼 수 있습니다.</p>
+    </div>
+    <nav class="partner-calendar-nav" aria-label="월 이동">
+      <a href="?scheduled_at__year={{ partner_calendar_prev|slice:':4' }}&amp;scheduled_at__month={{ partner_calendar_prev|slice:'5:' }}" aria-label="이전 달">‹</a>
+      <a href="?scheduled_at__year={{ partner_calendar_month|date:'Y' }}&amp;scheduled_at__month={{ partner_calendar_month|date:'n' }}" class="partner-calendar-today">이번 달</a>
+      <a href="?scheduled_at__year={{ partner_calendar_next|slice:':4' }}&amp;scheduled_at__month={{ partner_calendar_next|slice:'5:' }}" aria-label="다음 달">›</a>
+    </nav>
+  </div>
+  <div class="partner-calendar-grid" role="grid" aria-label="월간 예약 캘린더">
+    {% for weekday in partner_calendar_weekdays %}<div class="partner-weekday">{{ weekday }}</div>{% endfor %}
+    {% for week in partner_calendar_weeks %}
+      {% for cell in week %}
+        <article class="partner-day-cell{% if not cell.in_month %} is-outside{% endif %}{% if cell.is_today %} is-today{% endif %}{% if cell.events %} has-events{% endif %}" role="gridcell">
+          <time class="partner-day-number" datetime="{{ cell.date|date:'Y-m-d' }}">{{ cell.day }}<span>{{ cell.date|date:"n월 j일" }}</span></time>
+          <div class="partner-day-events">
+            {% for event in cell.events|slice:":3" %}
+              {% if event.change_url %}<a class="partner-event status-{{ event.status_code }}" href="{{ event.change_url }}">{% else %}<div class="partner-event status-{{ event.status_code }}">{% endif %}
+                <strong>{{ event.time }} · {{ event.service }}</strong>
+                <span>{{ event.member }} · {{ event.vehicle }}</span>
+                <small>{{ event.status }}</small>
+              {% if event.change_url %}</a>{% else %}</div>{% endif %}
+            {% endfor %}
+            {% if cell.events|length > 3 %}<span class="partner-more-events">외 {{ cell.events|length|add:"-3" }}건</span>{% endif %}
+          </div>
+        </article>
+      {% endfor %}
+    {% endfor %}
+  </div>
+  <p class="partner-calendar-empty">예약이 있는 날짜에만 일정이 표시됩니다.</p>
+</section>
+{% endblock %}

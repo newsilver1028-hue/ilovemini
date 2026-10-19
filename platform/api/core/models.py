@@ -156,6 +156,7 @@ class LedgerEntry(models.Model):
     odometer_km = models.PositiveIntegerField(null=True, blank=True)
     amount_krw = models.PositiveIntegerField(default=0, validators=[MinValueValidator(0)])
     description = models.CharField(max_length=160, blank=True)
+    line_items = models.JSONField("정비 항목별 금액", default=list, blank=True)
     quantity_liters = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)
     source = models.CharField(max_length=16, choices=Source.choices, default=Source.OWNER)
     partner = models.ForeignKey("Partner", on_delete=models.PROTECT, related_name="verified_ledger_entries", null=True, blank=True)

@@ -1,8 +1,10 @@
 from unittest.mock import patch
+from io import BytesIO
 
 from django.contrib.auth import get_user_model
 from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
+from openpyxl import load_workbook
 
 from .models import (
     LedgerEntry,
@@ -149,3 +151,63 @@ class PartnerPortalTests(TestCase):
         self.assertContains(partner_page, "네이버 아이디로 협력업체 로그인")
         self.assertContains(regular_page, "협력업체 네이버 로그인")
         self.assertContains(regular_page, 'id="login-form"')
+
+    def test_booking_calendar_renders_month_view_and_keeps_partner_scope(self):
+        client = Client()
+        client.force_login(self.user)
+        year, month = self.booking.scheduled_at.strftime("%Y-%m").split("-")
+        response = client.get(
+            reverse("partner_admin:core_partnerbooking_changelist"),
+            {"scheduled_at__year": year, "scheduled_at__month": month},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "월간 예약 캘린더")
+        self.assertContains(response, "정비")
+        self.assertContains(response, "예약대장 엑셀 다운로드")
+        self.assertNotContains(response, "다른 업체")
+
+    def test_partner_booking_export_is_xlsx_and_only_contains_assigned_partner_rows(self):
+        client = Client()
+        client.force_login(self.user)
+        response = client.get(reverse("partner_admin:partner-booking-export"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.assertTrue(response.content.startswith(b"PK"))
+        rows = list(load_workbook(BytesIO(response.content), read_only=True).active.values)
+        self.assertEqual(len(rows), 2)
+        self.assertIn("테스트 업체", rows[1])
+        self.assertNotIn("다른 업체", rows[1])
+
+    def test_partner_maintenance_export_is_scoped_and_contains_itemized_amounts(self):
+        client = Client()
+        client.force_login(self.user)
+        LedgerEntry.objects.create(
+            vehicle=self.own_vehicle,
+            kind=LedgerEntry.Kind.SERVICE,
+            source=LedgerEntry.Source.PARTNER,
+            partner=self.partner,
+            amount_krw=120000,
+            line_items=[{"name": "엔진오일", "amount_krw": 120000}],
+            description="정기 점검",
+        )
+        LedgerEntry.objects.create(
+            vehicle=self.other_vehicle,
+            kind=LedgerEntry.Kind.SERVICE,
+            source=LedgerEntry.Source.PARTNER,
+            partner=self.other_partner,
+            amount_krw=50000,
+        )
+        response = client.get(reverse("partner_admin:partner-maintenance-export"))
+        self.assertEqual(response.status_code, 200)
+        rows = list(load_workbook(BytesIO(response.content), read_only=True).active.values)
+        self.assertEqual(len(rows), 2)
+        self.assertIn("테스트 업체", rows[1])
+        self.assertIn("엔진오일: 120,000원", rows[1])
+        self.assertNotIn("다른 업체", rows[1])
+
+    def test_excel_exports_require_the_matching_partner_permission(self):
+        PartnerStaff.objects.filter(user=self.user).update(can_manage_bookings=False)
+        client = Client()
+        client.force_login(self.user)
+        self.assertEqual(client.get(reverse("partner_admin:partner-booking-export")).status_code, 404)
+        self.assertEqual(client.get(reverse("partner_admin:partner-maintenance-export")).status_code, 200)
