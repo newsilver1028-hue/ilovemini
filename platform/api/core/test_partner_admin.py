@@ -37,7 +37,7 @@ class PartnerPortalTests(TestCase):
         self.other_partner = Partner.objects.create(name="다른 업체", is_active=True)
         self.other_user = User.objects.create_user(username="other", password=None)
         self.other_vehicle = Vehicle.objects.create(model_name="MINI Cooper", generation="F56", model_year=2022)
-        self.own_vehicle = Vehicle.objects.create(model_name="MINI Cooper S", generation="F56", model_year=2023)
+        self.own_vehicle = Vehicle.objects.create(model_name="MINI Cooper S", generation="F56", model_year=2023, plate_number="12가3456")
         from django.utils import timezone
         self.booking = PartnerBooking.objects.create(
             customer=self.other_user,
@@ -45,6 +45,7 @@ class PartnerPortalTests(TestCase):
             vehicle=self.own_vehicle,
             scheduled_at=timezone.now(),
             service_type="정비",
+            contact_phone="010-1234-5678",
         )
         self.other_booking = PartnerBooking.objects.create(
             customer=self.other_user,
@@ -138,6 +139,14 @@ class PartnerPortalTests(TestCase):
         self.assertEqual(list(ledger_admin.get_queryset(request)), [own_entry])
         self.assertFalse(ledger_admin.has_view_permission(request, LedgerEntry.objects.filter(partner=self.other_partner).first()))
 
+        client = Client()
+        client.force_login(self.user)
+        response = client.get(reverse("partner_admin:core_ledgerentry_changelist"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "차량번호")
+        self.assertContains(response, "12가3456")
+        self.assertContains(response, "정비기록 미니 캘린더")
+
     def test_inactive_membership_is_denied(self):
         PartnerStaff.objects.filter(user=self.user, partner=self.partner).update(is_active=False)
         self.assertFalse(partner_admin_site.has_permission(self.request_for_partner()))
@@ -163,6 +172,9 @@ class PartnerPortalTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "월간 예약 캘린더")
         self.assertContains(response, "정비")
+        self.assertContains(response, "12가3456")
+        self.assertContains(response, "010-1234-5678")
+        self.assertNotContains(response, "naver-subject-1")
         self.assertContains(response, "예약대장 엑셀 다운로드")
         self.assertNotContains(response, "다른 업체")
 
@@ -176,7 +188,24 @@ class PartnerPortalTests(TestCase):
         rows = list(load_workbook(BytesIO(response.content), read_only=True).active.values)
         self.assertEqual(len(rows), 2)
         self.assertIn("테스트 업체", rows[1])
+        self.assertIn("12가3456", rows[1])
+        self.assertIn("010-1234-5678", rows[1])
+        self.assertNotIn("naver-subject-1", rows[1])
+        self.assertNotIn("partner-user", rows[1])
         self.assertNotIn("다른 업체", rows[1])
+
+    def test_partner_booking_change_form_uses_korean_labels_without_customer_login_id(self):
+        client = Client()
+        client.force_login(self.user)
+        response = client.get(reverse("partner_admin:core_partnerbooking_change", args=[self.booking.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "차량번호")
+        self.assertContains(response, "12가3456")
+        self.assertContains(response, "연락처")
+        self.assertContains(response, "010-1234-5678")
+        self.assertContains(response, "예약 상태")
+        self.assertNotContains(response, "Customer:")
+        self.assertNotContains(response, "naver-subject-1")
 
     def test_partner_maintenance_export_is_scoped_and_contains_itemized_amounts(self):
         client = Client()
