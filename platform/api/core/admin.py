@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 8355)
-Total output lines: 654
-
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils.html import format_html
 from django import forms
@@ -271,7 +268,211 @@ class PartnerImageAdminForm(forms.ModelForm):
                 return cleaned
             data = upload.read()
             mime = ""
-            if data.s…2355 tokens truncated…et_queryset(request).select_related("naver_identity")
+            if data.startswith(b"\x89PNG\r\n\x1a\n"):
+                mime = "image/png"
+            elif data.startswith(b"\xff\xd8\xff"):
+                mime = "image/jpeg"
+            elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+                mime = "image/webp"
+            if not mime:
+                self.add_error("upload", "PNG, JPEG, WebP 이미지 파일만 첨부할 수 있습니다.")
+            else:
+                self.instance.image_data = data
+                self.instance.content_type = mime
+        elif not self.instance.pk:
+            self.add_error("upload", "소개 이미지 파일을 첨부해 주세요.")
+        return cleaned
+
+
+class PartnerImageInline(admin.TabularInline):
+    model = PartnerImage
+    form = PartnerImageAdminForm
+    fields = ("preview", "upload", "caption", "display_order")
+    readonly_fields = ("preview",)
+    extra = 1
+    verbose_name = "매장 사진"
+    verbose_name_plural = "매장 사진 · 파일 첨부 및 교체"
+
+    @admin.display(description="현재 이미지")
+    def preview(self, obj):
+        if not obj.pk:
+            return "저장 후 표시됩니다."
+        return format_html('<img src="/api/partners/{}/images/{}/" style="max-width:180px;max-height:120px" alt="업체 소개 이미지">', obj.partner_id, obj.pk)
+
+
+@admin.register(PartnerImage)
+class PartnerImageAdmin(admin.ModelAdmin):
+    form = PartnerImageAdminForm
+    list_display = ("partner", "caption", "display_order")
+    list_filter = ("partner",)
+    fields = ("partner", "upload", "caption", "display_order")
+
+
+@admin.register(Partner)
+class PartnerAdmin(admin.ModelAdmin):
+    form = PartnerAdminForm
+    list_display = ("name", "branch_label", "region", "is_active", "is_sponsored", "display_order")
+    list_editable = ("is_active", "is_sponsored", "display_order")
+    list_filter = ("is_active", "is_sponsored", "region")
+    search_fields = ("name", "branch_label", "region", "description", "address")
+    save_on_top = True
+    inlines = (PartnerImageInline, OfferInline)
+    fieldsets = (
+        ("업체 기본 정보", {"fields": ("name", "branch_label", "region", "service_categories")}),
+        ("업체 소개 글", {"description": "앱의 사진 아래 소개 문구를 수정하는 곳입니다.", "fields": ("description",)}),
+        ("매장 상세 안내", {"description": "앱의 업체 정보에 표시할 방문 및 이용 안내입니다.", "fields": ("business_info",)}),
+        ("대표 사진 주소", {"description": "파일 사진은 아래 매장 사진에서 첨부하세요. 이 항목은 외부 이미지 주소가 있을 때만 사용합니다.", "fields": ("storefront_photo_url",)}),
+        ("대표 정비사", {"fields": ("representative_name", "representative_title", "representative_experience_years", "representative_photo_url")}),
+        ("연락처 및 연결", {"fields": ("address", "phone", "hours", "cafe_url", "map_url")}),
+        ("앱 노출 설정", {"fields": ("is_active", "is_sponsored", "display_order")}),
+    )
+
+
+@admin.register(PartnerReview)
+class PartnerReviewAdmin(admin.ModelAdmin):
+    list_display = ("partner", "user", "rating", "created_at", "updated_at")
+    list_filter = ("rating", "created_at")
+    search_fields = ("partner__name", "partner__branch_label", "comment", "user__naver_identity__nickname")
+    readonly_fields = ("created_at", "updated_at")
+    date_hierarchy = "created_at"
+
+
+@admin.register(PartnerStaff)
+class PartnerStaffAdmin(admin.ModelAdmin):
+    autocomplete_fields = ("user",)
+
+    def get_urls(self):
+        return [path("member-autocomplete/", self.admin_site.admin_view(MemberAutocompleteView.as_view(admin_site=self.admin_site)), name="core_partnerstaff_member_autocomplete")] + super().get_urls()
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "user":
+            kwargs["widget"] = MemberAutocompleteSelect(db_field.remote_field, self.admin_site)
+            kwargs["queryset"] = db_field.remote_field.model.objects.select_related("naver_identity")
+            field = super().formfield_for_foreignkey(db_field, request, **kwargs)
+            field.label_from_instance = member_label
+            return field
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    @admin.display(description="회원 계정")
+    def member_account(self, obj):
+        return member_label(obj.user)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("user__naver_identity", "partner")
+    list_display = ("member_account", "partner", "can_verify_records", "can_manage_bookings", "is_active", "created_at")
+    list_editable = ("can_verify_records", "can_manage_bookings", "is_active")
+    list_filter = ("partner", "can_verify_records", "can_manage_bookings", "is_active")
+    search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "=user__id", "partner__name")
+    readonly_fields = ("created_at",)
+    date_hierarchy = "created_at"
+
+
+@admin.register(Offer)
+class OfferAdmin(admin.ModelAdmin):
+    form = OfferAdminForm
+    list_display = ("title", "partner", "is_active", "starts_at", "ends_at")
+    list_editable = ("is_active",)
+    list_filter = ("is_active", "partner")
+    search_fields = ("title", "description", "partner__name")
+    date_hierarchy = "starts_at"
+    save_on_top = True
+
+
+@admin.register(PushDevice)
+class PushDeviceAdmin(admin.ModelAdmin):
+    list_display = ("user", "platform", "updated_at")
+    list_filter = ("platform",)
+    search_fields = ("user__username", "user__email", "installation_id")
+    readonly_fields = ("user", "installation_id", "platform", "created_at", "updated_at")
+    date_hierarchy = "updated_at"
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(VehicleTransferCode)
+class VehicleTransferCodeAdmin(admin.ModelAdmin):
+    list_display = ("vehicle", "previous_owner", "new_owner", "created_at", "expires_at", "accepted_at", "invalidated_at")
+    list_filter = ("accepted_at", "invalidated_at", "created_at")
+    search_fields = ("vehicle__model_name", "previous_owner__username", "new_owner__username")
+    readonly_fields = tuple(field.name for field in VehicleTransferCode._meta.fields if field.name != "code_digest")
+    exclude = ("code_digest",)
+    date_hierarchy = "created_at"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+# Grade changes are restricted to operators; staff cannot promote themselves.
+from django.contrib.auth import get_user_model
+from django.contrib.auth.admin import UserAdmin
+from django.core.exceptions import ValidationError
+from .member_roles import GRADES, assign_member_grade, member_grade
+
+
+def grade_action(code):
+    @admin.action(description=f"회원 등급을 {GRADES[code]}(으)로 변경")
+    def action(modeladmin, request, queryset):
+        for user in queryset:
+            try:
+                assign_member_grade(request.user, user, code)
+                modeladmin.log_change(request, user, f"회원 등급: {GRADES[code]}")
+            except ValidationError as exc:
+                modeladmin.message_user(request, f"{user}: {' '.join(exc.messages)}", level="ERROR")
+    action.__name__ = f"set_grade_{code}"
+    return action
+
+
+class NaverProfileInline(admin.StackedInline):
+    from .models import NaverIdentity
+    model = NaverIdentity
+    verbose_name = "네이버 회원정보"
+    verbose_name_plural = "네이버 회원정보 (네이버가 제공한 항목)"
+    fields = ("name", "email", "nickname", "profile_image", "gender", "birthday", "age", "birthyear", "mobile")
+    readonly_fields = fields
+    extra = 0
+    can_delete = False
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+User = get_user_model()
+admin.site.unregister(User)
+
+
+@admin.register(User)
+class MemberUserAdmin(UserAdmin):
+    inlines = (NaverProfileInline,)
+    list_display = ("id", "display_nickname", "display_member_name", "email", "display_mobile", "ilovemini_grade", "display_points_balance", "display_workplaces", "is_active", "date_joined", "last_login")
+    search_fields = ("naver_identity__nickname", "email", "username", "first_name", "last_name", "naver_identity__mobile", "=id")
+    list_per_page = 50
+    date_hierarchy = "date_joined"
+    ordering = ("-date_joined", "-id")
+    list_filter = ("is_active", "is_staff", "is_superuser", "groups")
+    readonly_fields = (*UserAdmin.readonly_fields, "display_nickname", "id", "display_workplaces")
+    fieldsets = (("회원 식별 정보", {"fields": ("id", "display_nickname", "display_workplaces")}),) + UserAdmin.fieldsets
+
+    @admin.display(description="휴대전화번호")
+    def display_mobile(self, obj):
+        try:
+            return obj.naver_identity.mobile or "—"
+        except ObjectDoesNotExist:
+            return "—"
+
+    @admin.display(description="회원 이름")
+    def display_member_name(self, obj):
+        return obj.get_full_name() or "이름 미제공"
+
+    @admin.display(description="닉네임")
+    def display_nickname(self, obj):
+        return member_nickname(obj)
+
+    def get_queryset(self, request):
+        point_total = PointTransaction.objects.filter(user_id=OuterRef("pk")).order_by().values("user_id").annotate(total=Sum("points_delta")).values("total")[:1]
+        return (super().get_queryset(request).select_related("naver_identity")
                 .prefetch_related("partner_memberships__partner", "groups")
                 .annotate(_point_balance=Coalesce(Subquery(point_total, output_field=IntegerField()), Value(0))))
     actions = [grade_action(code) for code in GRADES] + ["export_members_csv"]
