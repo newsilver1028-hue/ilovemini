@@ -11,8 +11,10 @@ from .models import (
     NaverIdentity,
     Partner,
     PartnerBooking,
+    PartnerReview,
     PartnerStaff,
     Vehicle,
+    WebPushSubscription,
 )
 from .partner_admin import (
     PartnerBookingAdmin,
@@ -204,8 +206,67 @@ class PartnerPortalTests(TestCase):
         self.assertContains(response, "연락처")
         self.assertContains(response, "010-1234-5678")
         self.assertContains(response, "예약 상태")
+        self.assertContains(response, 'id="id_status"')
+        self.assertNotContains(response, ">History</a>")
         self.assertNotContains(response, "Customer:")
         self.assertNotContains(response, "naver-subject-1")
+
+    def test_authorized_partner_booking_staff_can_register_web_push(self):
+        client = Client()
+        client.force_login(self.user)
+        response = client.post(
+            reverse("partner_web_push_subscribe"),
+            data={
+                "endpoint": "https://push.example.test/subscription/abc",
+                "keys": {"p256dh": "public-key", "auth": "auth-secret"},
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        subscription = WebPushSubscription.objects.get()
+        self.assertEqual(subscription.user, self.user)
+        self.assertEqual(subscription.partner, self.partner)
+
+    def test_new_booking_sends_web_push_even_without_mobile_fcm(self):
+        WebPushSubscription.objects.create(
+            user=self.user,
+            partner=self.partner,
+            endpoint="https://push.example.test/subscription/abc",
+            p256dh="public-key",
+            auth="auth-secret",
+        )
+        from django.test import override_settings
+        with override_settings(WEB_PUSH_VAPID_PRIVATE_KEY="test-private-key"):
+            with patch("pywebpush.webpush") as webpush:
+                from .push import send_booking_notification
+                sent = send_booking_notification(self.booking)
+        self.assertEqual(sent, 1)
+        self.assertEqual(webpush.call_count, 1)
+        self.assertEqual(webpush.call_args.kwargs["subscription_info"]["endpoint"], "https://push.example.test/subscription/abc")
+
+    def test_partner_without_booking_permission_cannot_register_web_push(self):
+        self.user.partner_memberships.update(can_manage_bookings=False)
+        client = Client()
+        client.force_login(self.user)
+        response = client.post(
+            reverse("partner_web_push_subscribe"),
+            data={
+                "endpoint": "https://push.example.test/subscription/abc",
+                "keys": {"p256dh": "public-key", "auth": "auth-secret"},
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_browser_admin_changelist_renders_date_mini_calendar(self):
+        operator = get_user_model().objects.create_superuser("operator", "operator@example.test", "test-password")
+        PartnerReview.objects.create(partner=self.partner, user=self.other_user, rating=5, comment="좋아요")
+        client = Client()
+        client.force_login(operator)
+        response = client.get(reverse("admin:core_partnerreview_changelist"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "날짜별 조회")
+        self.assertContains(response, "1건")
 
     def test_partner_maintenance_export_is_scoped_and_contains_itemized_amounts(self):
         client = Client()

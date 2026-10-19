@@ -3,7 +3,8 @@ import logging
 from firebase_admin import credentials, messaging
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from .models import PartnerStaff
+from django.urls import reverse
+from .models import PartnerStaff, WebPushSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -58,16 +59,69 @@ def send_reminder_notification(reminder, trigger):
     return result.success_count
 
 
-def send_booking_notification(booking):
-    if not _ensure_firebase():
+def send_partner_web_push(booking, *, cancelled=False):
+    private_key = getattr(settings, "WEB_PUSH_VAPID_PRIVATE_KEY", "").strip()
+    subject = getattr(settings, "WEB_PUSH_VAPID_SUBJECT", "https://ilovemini.onrender.com/privacy/").strip()
+    if not private_key:
         return 0
+    staff = PartnerStaff.objects.filter(
+        partner=booking.partner,
+        is_active=True,
+        partner__is_active=True,
+        can_manage_bookings=True,
+    ).values_list("user_id", flat=True)
+    subscriptions = WebPushSubscription.objects.filter(
+        partner=booking.partner,
+        user_id__in=staff,
+    )
+    if not subscriptions.exists():
+        return 0
+    from pywebpush import WebPushException, webpush
+
+    action = "예약 취소" if cancelled else "새 예약 요청"
+    title = f"{action} · {booking.partner.name}" + (f" · {booking.partner.branch_label}" if booking.partner.branch_label else "")
+    body = f"{booking.scheduled_at:%m월 %d일 %H:%M} · {booking.service_type}"
+    payload = json.dumps({
+        "title": title,
+        "body": body,
+        "url": reverse("partner_admin:core_partnerbooking_change", args=[booking.pk]),
+        "tag": f"partner-booking-{booking.pk}",
+    }, ensure_ascii=False)
+    sent = 0
+    for subscription in subscriptions:
+        try:
+            webpush(
+                subscription_info={
+                    "endpoint": subscription.endpoint,
+                    "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth},
+                },
+                data=payload,
+                vapid_private_key=private_key,
+                vapid_claims={"sub": subject},
+            )
+            sent += 1
+        except WebPushException as exc:
+            response = getattr(exc, "response", None)
+            if response is not None and response.status_code in (404, 410):
+                subscription.delete()
+            else:
+                logger.exception("Failed to send partner web push (booking_id=%s, subscription_id=%s)", booking.pk, subscription.pk)
+        except Exception:
+            logger.exception("Failed to send partner web push (booking_id=%s, subscription_id=%s)", booking.pk, subscription.pk)
+    return sent
+
+
+def send_booking_notification(booking):
+    sent = send_partner_web_push(booking)
+    if not _ensure_firebase():
+        return sent
     user_ids = PartnerStaff.objects.filter(
         partner=booking.partner, is_active=True, can_manage_bookings=True,
     ).values_list("user_id", flat=True)
     devices = list(get_user_model().objects.filter(pk__in=user_ids).values_list("push_devices__installation_id", flat=True))
     devices = [value for value in devices if value]
     if not devices:
-        return 0
+        return sent
     message = messaging.MulticastMessage(
         notification=messaging.Notification(
             title=f"새 예약 요청 · {booking.partner.name}" + (f" · {booking.partner.branch_label}" if booking.partner.branch_label else ""),
@@ -76,7 +130,7 @@ def send_booking_notification(booking):
         data={"type": "partner_booking", "booking_id": str(booking.pk)},
         tokens=devices,
     )
-    return messaging.send_each_for_multicast(message).success_count
+    return sent + messaging.send_each_for_multicast(message).success_count
 
 
 def send_booking_status_notification(booking):
@@ -98,15 +152,16 @@ def send_booking_status_notification(booking):
 
 
 def send_booking_cancel_notification(booking):
+    sent = send_partner_web_push(booking, cancelled=True)
     if not _ensure_firebase():
-        return 0
+        return sent
     user_ids = PartnerStaff.objects.filter(
         partner=booking.partner, is_active=True, can_manage_bookings=True,
     ).values_list("user_id", flat=True)
     devices = list(get_user_model().objects.filter(pk__in=user_ids).values_list("push_devices__installation_id", flat=True))
     devices = [value for value in devices if value]
     if not devices:
-        return 0
+        return sent
     message = messaging.MulticastMessage(
         notification=messaging.Notification(
             title=f"예약 취소 · {booking.partner.name}" + (f" · {booking.partner.branch_label}" if booking.partner.branch_label else ""),
@@ -115,7 +170,7 @@ def send_booking_cancel_notification(booking):
         data={"type": "partner_booking_status", "booking_id": str(booking.pk), "status": booking.status},
         tokens=devices,
     )
-    return messaging.send_each_for_multicast(message).success_count
+    return sent + messaging.send_each_for_multicast(message).success_count
 
 
 def send_record_correction_notification(correction_request):

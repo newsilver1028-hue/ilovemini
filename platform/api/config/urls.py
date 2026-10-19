@@ -10,6 +10,7 @@ from core.member_views import MemberGradeView
 from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView, AppReviewLoginView, PartnerNaverLoginStartView
 from core.partner_admin import partner_admin_site
 from core.privacy_views import privacy_policy
+from core.partner_push_views import web_push_subscribe, web_push_unsubscribe, partner_service_worker
 
 router = DefaultRouter()
 router.register("vehicles", VehicleViewSet, basename="vehicle")
@@ -33,6 +34,9 @@ urlpatterns = [
     path("api/app/season-banner/", SeasonBannerView.as_view(), name="season_banner"),
     path("admin/", admin.site.urls),
     path("partner-admin/naver/start/", PartnerNaverLoginStartView.as_view(), name="partner_naver_start"),
+    path("partner-admin/push/subscribe/", web_push_subscribe, name="partner_web_push_subscribe"),
+    path("partner-admin/push/unsubscribe/", web_push_unsubscribe, name="partner_web_push_unsubscribe"),
+    path("partner-admin/service-worker.js", partner_service_worker, name="partner_service_worker"),
     path("partner-admin/", partner_admin_site.urls),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/me/grade/", MemberGradeView.as_view(), name="member_grade"),

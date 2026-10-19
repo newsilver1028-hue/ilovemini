@@ -7,6 +7,7 @@ from django.http import Http404, HttpResponse
 from django.urls import path, reverse
 from django.utils.html import format_html_join
 from django.utils import timezone
+from django.conf import settings
 from datetime import datetime, time, timedelta
 
 from .models import (
@@ -42,6 +43,14 @@ class PartnerAdminSite(AdminSite):
     index_title = "업체 업무"
     login_template = "core/partner_admin_login.html"
     site_url = None
+
+    def each_context(self, request):
+        context = super().each_context(request)
+        context["is_partner_admin"] = True
+        context["partner_web_push_public_key"] = (
+            getattr(settings, "WEB_PUSH_VAPID_PUBLIC_KEY", "") if self.has_permission(request) else ""
+        )
+        return context
 
     def has_permission(self, request):
         return bool(
@@ -237,6 +246,7 @@ class PartnerBookingStatusFilter(admin.SimpleListFilter):
 @admin.register(PartnerBooking, site=partner_admin_site)
 class PartnerBookingAdmin(admin.ModelAdmin):
     change_list_template = "admin/core/partnerbooking/change_list.html"
+    change_form_template = "admin/core/partnerbooking/change_form.html"
     list_display = ("booking_time", "vehicle_plate", "contact_phone_display", "vehicle_model", "service_label", "status_label")
     list_filter = (PartnerBookingStatusFilter,)
     search_fields = ("vehicle__model_name", "vehicle__plate_number", "contact_phone", "service_type")
@@ -287,6 +297,8 @@ class PartnerBookingAdmin(admin.ModelAdmin):
         labels = {"status": "예약 상태", "partner_note": "업체 메모"}
         if field and db_field.name in labels:
             field.label = labels[db_field.name]
+        if field and db_field.name == "status":
+            field.widget.attrs.update({"class": "partner-booking-status"})
         return field
 
     def get_queryset(self, request):
