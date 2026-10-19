@@ -7,7 +7,8 @@ from django.views.generic import RedirectView
 from rest_framework.routers import DefaultRouter
 from core.views import HealthView, CafeSearchView, CafeLatestView, CafeAnswerView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet, PartnerPointRedemptionView, PartnerPointBalanceView, MemberPointRedemptionView
 from core.member_views import MemberGradeView
-from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView, AppReviewLoginView
+from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView, AppReviewLoginView, PartnerNaverLoginStartView
+from core.partner_admin import partner_admin_site
 from core.privacy_views import privacy_policy
 
 router = DefaultRouter()
@@ -31,6 +32,8 @@ urlpatterns = [
     path("api/record-corrections/<int:pk>/complete/", CompleteCorrectionView.as_view(), name="complete_correction"),
     path("api/app/season-banner/", SeasonBannerView.as_view(), name="season_banner"),
     path("admin/", admin.site.urls),
+    path("partner-admin/naver/start/", PartnerNaverLoginStartView.as_view(), name="partner_naver_start"),
+    path("partner-admin/", partner_admin_site.urls),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/me/grade/", MemberGradeView.as_view(), name="member_grade"),
     path("api/health/", HealthView.as_view(), name="health"),
