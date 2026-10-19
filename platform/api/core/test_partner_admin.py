@@ -148,6 +148,8 @@ class PartnerPortalTests(TestCase):
         self.assertContains(response, "차량번호")
         self.assertContains(response, "12가3456")
         self.assertContains(response, "정비기록 미니 캘린더")
+        self.assertContains(response, "인증 정비기록 조회")
+        self.assertNotContains(response, "보려면 기록을 선택")
 
     def test_inactive_membership_is_denied(self):
         PartnerStaff.objects.filter(user=self.user, partner=self.partner).update(is_active=False)
