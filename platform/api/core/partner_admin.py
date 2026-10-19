@@ -416,6 +416,7 @@ class PartnerLedgerEntryAdmin(admin.ModelAdmin):
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
+        extra_context.setdefault("title", "인증 정비기록 조회")
         today = timezone.localdate()
         year = request.GET.get("entry_date__year", "")
         month_number = request.GET.get("entry_date__month", "")
