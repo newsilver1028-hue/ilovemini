@@ -9,6 +9,14 @@
   font-weight: 750;
 }
 body.model-partnerbooking #changelist { display: none; }
+.partner-push-control { display: flex; align-items: center; gap: 10px; margin: 0 22px; }
+.partner-push-button { min-height: 36px; padding: 0 13px; border: 1px solid #d7d9df; border-radius: 9px; background: #fff; color: #34363b; font: inherit; font-size: 13px; font-weight: 750; cursor: pointer; }
+.partner-push-button:hover { border-color: #b3213b; color: #a51e36; }
+.partner-push-button:disabled { cursor: wait; opacity: .65; }
+#partner-push-status { color: var(--body-quiet-color, #737780); font-size: 12px; }
+#partner-push-status.is-error { color: #b3213b; }
+body.model-partnerbooking.change-form #id_status { box-sizing: border-box; width: min(100%, 250px); min-height: 42px; height: auto; padding: 8px 34px 8px 12px; line-height: 1.45; vertical-align: middle; }
+body.model-partnerbooking.change-form #content-main > .object-tools { display: none; }
 
 .partner-calendar,
 .partner-records-heading {
@@ -73,6 +81,7 @@ body.model-partnerbooking #changelist { display: none; }
 .partner-records-heading h1 { margin-bottom: 5px !important; }
 
 @media (max-width: 760px) {
+  .partner-push-control { flex-wrap: wrap; gap: 4px 8px; margin: 8px 0; }
   .partner-calendar, .partner-records-heading { padding: 16px; }
   .partner-calendar-heading { align-items: flex-start; }
   .partner-calendar-description { max-width: 40ch; font-size: 13px; }

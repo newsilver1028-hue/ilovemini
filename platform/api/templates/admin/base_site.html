@@ -1,6 +1,7 @@
 {% extends "admin/base.html" %}
 {% load static i18n %}
 {% block title %}{{ title }} · ILOVEMINI 관리자{% endblock %}
-{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/admin.css' %}?v=20261010002237">{% endblock %}
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/admin.css' %}?v=2026102001">{% if is_partner_admin %}<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=2026102001">{% endif %}{% endblock %}
 {% block branding %}<div class="mini-brand"><a href="{% url 'admin:index' %}"><span class="mini-mark">MINI</span><span>ILOVEMINI<small>운영 관리자</small></span></a></div>{% endblock %}
-{% block nav-global %}{% endblock %}
+{% block nav-global %}{% if is_partner_admin and partner_web_push_public_key %}<div class="partner-push-control"><button type="button" id="partner-push-toggle" class="partner-push-button">PC 예약 알림 켜기</button><span id="partner-push-status" role="status" aria-live="polite"></span></div>{% endif %}{% endblock %}
+{% block extrahead %}{{ block.super }}{% if is_partner_admin and partner_web_push_public_key %}<script>window.PARTNER_WEB_PUSH_CONFIG={publicKey:"{{ partner_web_push_public_key|escapejs }}",subscribeUrl:"{% url 'partner_web_push_subscribe' %}",unsubscribeUrl:"{% url 'partner_web_push_unsubscribe' %}",serviceWorkerUrl:"{% url 'partner_service_worker' %}"};</script><script src="{% static 'core/partner_push.js' %}?v=2026102001" defer></script>{% endif %}{% endblock %}

@@ -1,0 +1,25 @@
+{% if show_calendar %}
+<section class="partner-calendar partner-calendar--mini admin-mini-calendar" aria-label="날짜별 {{ calendar_field_label }} 미니 캘린더">
+  <div class="partner-calendar-heading">
+    <div>
+      <p class="partner-calendar-eyebrow">날짜별 조회</p>
+      <h2>{{ calendar_month|date:"Y년 n월" }}</h2>
+      <p class="partner-calendar-description">날짜를 누르면 해당 날짜의 기록을 확인할 수 있습니다.</p>
+    </div>
+    <nav class="partner-calendar-nav" aria-label="월 이동">
+      <a href="{{ calendar_prev_url }}" aria-label="이전 달">‹</a>
+      <a href="{{ calendar_today_url }}" class="partner-calendar-today">이번 달</a>
+      <a href="{{ calendar_next_url }}" aria-label="다음 달">›</a>
+    </nav>
+  </div>
+  <div class="partner-calendar-grid" role="grid">
+    {% for weekday in calendar_weekdays %}<div class="partner-weekday">{{ weekday }}</div>{% endfor %}
+    {% for week in calendar_weeks %}{% for cell in week %}
+      <a class="partner-day-cell admin-mini-calendar-day{% if not cell.in_month %} is-outside{% endif %}{% if cell.is_today %} is-today{% endif %}{% if cell.count %} has-events{% endif %}" href="{{ cell.url }}" role="gridcell" aria-label="{{ cell.date|date:'Y년 n월 j일' }} {{ cell.count }}건">
+        <time class="partner-day-number" datetime="{{ cell.date|date:'Y-m-d' }}">{{ cell.date|date:"j" }}<span>{{ cell.date|date:"n월 j일" }}</span></time>
+        {% if cell.count %}<span class="admin-mini-calendar-count">{{ cell.count }}건</span>{% endif %}
+      </a>
+    {% endfor %}{% endfor %}
+  </div>
+</section>
+{% endif %}

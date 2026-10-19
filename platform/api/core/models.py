@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 7406)
+Total output lines: 559
+
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -213,6 +216,23 @@ class PushDevice(models.Model):
     class Meta:
         ordering = ["-updated_at"]
 
+
+class WebPushSubscription(models.Model):
+    """Browser push endpoint registered by an authorized partner staff member."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="web_push_subscriptions")
+    partner = models.ForeignKey("Partner", on_delete=models.CASCADE, related_name="web_push_subscriptions")
+    endpoint = models.URLField(max_length=2048)
+    p256dh = models.CharField(max_length=256)
+    auth = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "협력업체 PC 알림 구독"
+        verbose_name_plural = "협력업체 PC 알림 구독"
+        constraints = [models.UniqueConstraint(fields=["partner", "endpoint"], name="unique_partner_webpush_endpoint")]
+        indexes = [models.Index(fields=["partner", "user"], name="core_webpush_partner_user_idx")]
+
 class Notice(models.Model):
     title = models.CharField(max_length=140)
     summary = models.CharField(max_length=280, blank=True)
@@ -221,111 +241,7 @@ class Notice(models.Model):
     original_url = models.URLField(blank=True)
     is_pinned = models.BooleanField(default=False)
     published_at = models.DateTimeField(default=timezone.now)
-    expires_at = models.DateTimeField(null=True, blank=True)
-    is_published = models.BooleanField(default=False)
-
-    class Meta:
-        ordering = ["-is_pinned", "-published_at"]
-
-
-class AttendanceCheckin(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="attendance_checkins")
-    checkin_date = models.DateField()
-    points_awarded = models.PositiveIntegerField(default=100)
-    streak_days = models.PositiveSmallIntegerField(default=1)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["-checkin_date"]
-        constraints = [models.UniqueConstraint(fields=["user", "checkin_date"], name="unique_user_daily_checkin")]
-
-    def __str__(self):
-        return f"{self.user_id} · {self.checkin_date} · {self.points_awarded}P"
-
-
-class PointTransaction(models.Model):
-    class Type(models.TextChoices):
-        ATTENDANCE = "attendance", "출석 적립"
-        SERVICE_EARN = "service_earn", "정비 결제 적립"
-        REDEMPTION = "redemption", "포인트 사용"
-        REFUND = "refund", "사용 취소·환급"
-        ADJUSTMENT = "adjustment", "운영자 조정"
-
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name="회원", on_delete=models.PROTECT, related_name="point_transactions")
-    partner = models.ForeignKey("Partner", verbose_name="협력업체", on_delete=models.PROTECT, null=True, blank=True, related_name="point_transactions")
-    ledger_entry = models.ForeignKey("LedgerEntry", verbose_name="정비 기록", on_delete=models.PROTECT, null=True, blank=True, related_name="point_transactions")
-    transaction_type = models.CharField("거래 종류", max_length=20, choices=Type.choices)
-    points_delta = models.IntegerField("포인트 변동", help_text="적립은 양수, 사용은 음수로 기록합니다.")
-    available_at = models.DateTimeField("사용 가능 시각", default=timezone.now)
-    memo = models.CharField("처리 내용", max_length=240, blank=True)
-    idempotency_key = models.CharField("중복 방지 키", max_length=100, unique=True, default=uuid.uuid4)
-    created_at = models.DateTimeField("거래 시각", auto_now_add=True)
-
-    class Meta:
-        verbose_name = "포인트 거래 내역"
-        verbose_name_plural = "포인트 거래 내역"
-        ordering = ["-created_at", "-pk"]
-
-    def __str__(self):
-        sign = "+" if self.points_delta > 0 else ""
-        return f"회원 {self.user_id} · {sign}{self.points_delta}P"
-
-
-class PointRedemptionRequest(models.Model):
-    class Status(models.TextChoices):
-        PENDING = "pending", "승인 대기"
-        APPROVED = "approved", "회원 승인"
-        COMPLETED = "completed", "사용 완료"
-        REJECTED = "rejected", "회원 거절"
-        EXPIRED = "expired", "시간 만료"
-        CANCELLED = "cancelled", "업체 취소"
-
-    member = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name="회원", on_delete=models.PROTECT, related_name="point_redemption_requests")
-    partner = models.ForeignKey("Partner", verbose_name="협력업체", on_delete=models.PROTECT, related_name="point_redemption_requests")
-    payment_amount_krw = models.PositiveIntegerField("결제 금액(원)")
-    points_requested = models.PositiveIntegerField("사용 요청 포인트")
-    status = models.CharField("처리 상태", max_length=16, choices=Status.choices, default=Status.PENDING)
-    expires_at = models.DateTimeField("요청 만료 시각")
-    responded_at = models.DateTimeField("회원 응답 시각", null=True, blank=True)
-    completed_at = models.DateTimeField("사용 완료 시각", null=True, blank=True)
-    transaction = models.ForeignKey(PointTransaction, verbose_name="포인트 거래", on_delete=models.PROTECT, null=True, blank=True, related_name="redemption_requests")
-    created_at = models.DateTimeField("요청 시각", auto_now_add=True)
-
-    class Meta:
-        verbose_name = "포인트 사용 승인 요청"
-        verbose_name_plural = "포인트 사용 승인 요청"
-        ordering = ["-created_at", "-pk"]
-
-    def __str__(self):
-        return f"{self.partner} · 회원 {self.member_id} · {self.points_requested}P"
-
-class Partner(models.Model):
-    name = models.CharField(max_length=120)
-    branch_label = models.CharField(max_length=80, blank=True, default="")
-    region = models.CharField(max_length=80, blank=True)
-    service_categories = models.JSONField(default=list, blank=True)
-    description = models.TextField(blank=True)
-    address = models.CharField(max_length=240, blank=True)
-    phone = models.CharField(max_length=40, blank=True)
-    hours = models.CharField(max_length=160, blank=True)
-    cafe_url = models.URLField(blank=True)
-    map_url = models.URLField(blank=True)
-    storefront_photo_url = models.URLField(max_length=2048, blank=True)
-    business_info = models.TextField(blank=True)
-    representative_name = models.CharField(max_length=100, blank=True)
-    representative_title = models.CharField(max_length=100, blank=True)
-    representative_experience_years = models.PositiveSmallIntegerField(null=True, blank=True)
-    representative_photo_url = models.URLField(max_length=2048, blank=True)
-    is_sponsored = models.BooleanField(default=False)
-    is_active = models.BooleanField(default=False)
-    display_order = models.PositiveSmallIntegerField(default=100)
-
-    class Meta:
-        ordering = ["display_order", "name"]
-        constraints = [models.UniqueConstraint(fields=["name", "branch_label"], name="unique_partner_name_branch")]
-
-    def __str__(self):
-        return f"{self.name} · {self.branch_label}" if self.branch_label else self.name
+    expires_…1406 tokens truncated…anch_label}" if self.branch_label else self.name
 
 
 class PartnerImage(models.Model):
