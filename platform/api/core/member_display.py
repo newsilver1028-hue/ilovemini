@@ -16,12 +16,21 @@ def member_nickname(user):
     except ObjectDoesNotExist:
         nickname = ""
 
+    if not nickname:
+        try:
+            nickname = user.apple_identity.cafe_nickname
+        except ObjectDoesNotExist:
+            nickname = ""
+
+    if not nickname and user.username.startswith("apple_"):
+        nickname = "Apple 회원"
+
     return (
         nickname
         or user.get_full_name()
         or (
             "닉네임 미제공"
-            if user.username.startswith("naver_")
+            if user.username.startswith(("naver_", "apple_"))
             else user.username
         )
     )
@@ -49,7 +58,7 @@ class MemberAutocompleteView(AutocompleteJsonView):
 
         users = (
             get_user_model()
-            .objects.select_related("naver_identity")
+            .objects.select_related("naver_identity", "apple_identity")
             .order_by("-date_joined", "-pk")
         )
 
@@ -62,6 +71,7 @@ class MemberAutocompleteView(AutocompleteJsonView):
                 | Q(first_name__icontains=term)
                 | Q(last_name__icontains=term)
                 | Q(naver_identity__nickname__icontains=term)
+                | Q(apple_identity__cafe_nickname__icontains=term)
             )
 
             if term.isdecimal() and len(term) <= 18:
