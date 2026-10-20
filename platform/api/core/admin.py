@@ -1,13 +1,18 @@
+from datetime import date, datetime, time, timedelta
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils.html import format_html
 from django import forms
 from django.contrib import admin
+from django.contrib.admin.widgets import AdminDateWidget, AdminSplitDateTime
 from django.contrib.auth.models import Group
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
+from django.db import models
 from django.db.models import IntegerField, OuterRef, Subquery, Sum, Value
-from django.db.models.functions import Coalesce
+from django.db.models import Count
+from django.db.models.functions import Coalesce, TruncDate
 from django.urls import path
+from django.utils import timezone
 from .member_display import member_nickname, member_label, MemberAutocompleteView, MemberAutocompleteSelect
 
 from .models import (
@@ -20,6 +25,122 @@ from .models import (
 admin.site.site_header = "아이러브미니 운영 관리"
 admin.site.site_title = "ILOVEMINI 운영자"
 admin.site.index_title = "앱 콘텐츠와 회원 데이터 관리"
+
+
+class AdminCalendarMixin:
+    """Add date pickers to forms and a small date browser to each model list."""
+
+    change_list_template = "admin/core/change_list_with_calendar.html"
+    calendar_weekdays = ("월", "화", "수", "목", "금", "토", "일")
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        field = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if field is None:
+            return None
+        if isinstance(db_field, models.DateTimeField):
+            previous = getattr(field.widget, "widgets", ())
+            widget = AdminSplitDateTime()
+            for new_widget, old_widget in zip(widget.widgets, previous):
+                new_widget.attrs.update(old_widget.attrs)
+            field.widget = widget
+        elif isinstance(db_field, models.DateField):
+            attrs = dict(getattr(field.widget, "attrs", {}))
+            field.widget = AdminDateWidget(attrs=attrs)
+        return field
+
+    def _calendar_date_field(self):
+        if self.date_hierarchy:
+            try:
+                field = self.model._meta.get_field(self.date_hierarchy)
+                if isinstance(field, models.DateField):
+                    return field
+            except LookupError:
+                pass
+        return next((field for field in self.model._meta.fields if isinstance(field, models.DateField)), None)
+
+    def _calendar_context(self, request):
+        date_field = self._calendar_date_field()
+        if date_field is None:
+            return {"show_calendar": False}
+
+        today = timezone.localdate()
+        try:
+            year = int(request.GET.get("calendar_year", today.year))
+            month = int(request.GET.get("calendar_month", today.month))
+            if month < 1 or month > 12 or year < 1900 or year > 9998:
+                raise ValueError
+        except (TypeError, ValueError):
+            year, month = today.year, today.month
+
+        month_start = date(year, month, 1)
+        next_month = date(year + (month == 12), 1 if month == 12 else month + 1, 1)
+        previous_month = date(year - (month == 1), 12 if month == 1 else month - 1, 1)
+        grid_start = month_start - timedelta(days=month_start.weekday())
+        field_name = date_field.name
+        queryset = self.get_queryset(request)
+
+        if isinstance(date_field, models.DateTimeField):
+            start_at = timezone.make_aware(datetime.combine(month_start, time.min), timezone.get_current_timezone())
+            end_at = timezone.make_aware(datetime.combine(next_month, time.min), timezone.get_current_timezone())
+            queryset = queryset.filter(**{f"{field_name}__gte": start_at, f"{field_name}__lt": end_at})
+            daily_counts = {
+                row["calendar_day"]: row["count"]
+                for row in queryset.annotate(
+                    calendar_day=TruncDate(field_name, tzinfo=timezone.get_current_timezone())
+                ).values("calendar_day").annotate(count=Count("pk"))
+            }
+            date_filter = f"{field_name}__date"
+        else:
+            queryset = queryset.filter(**{f"{field_name}__gte": month_start, f"{field_name}__lt": next_month})
+            daily_counts = {
+                row[field_name]: row["count"]
+                for row in queryset.values(field_name).annotate(count=Count("pk"))
+            }
+            date_filter = f"{field_name}__exact"
+
+        def calendar_url(*, target_month=None, target_day=None):
+            params = request.GET.copy()
+            for key in list(params):
+                if key in {"calendar_year", "calendar_month", "p"} or key.startswith(f"{field_name}__"):
+                    params.pop(key, None)
+            if target_month:
+                params["calendar_year"] = str(target_month.year)
+                params["calendar_month"] = str(target_month.month)
+            if target_day:
+                params[date_filter] = target_day.isoformat()
+            suffix = params.urlencode()
+            return f"{request.path}?{suffix}" if suffix else request.path
+
+        weeks = []
+        current_day = grid_start
+        while len(weeks) < 6:
+            week = []
+            for _ in range(7):
+                week.append({
+                    "date": current_day,
+                    "in_month": current_day.month == month_start.month,
+                    "is_today": current_day == today,
+                    "count": daily_counts.get(current_day, 0),
+                    "url": calendar_url(target_month=month_start, target_day=current_day),
+                })
+                current_day += timedelta(days=1)
+            weeks.append(week)
+
+        return {
+            "show_calendar": True,
+            "calendar_month": month_start,
+            "calendar_field_label": date_field.verbose_name,
+            "calendar_prev_url": calendar_url(target_month=previous_month),
+            "calendar_today_url": calendar_url(target_month=today.replace(day=1)),
+            "calendar_next_url": calendar_url(target_month=next_month),
+            "calendar_weeks": weeks,
+            "calendar_weekdays": self.calendar_weekdays,
+        }
+
+    def changelist_view(self, request, extra_context=None):
+        context = dict(extra_context or {})
+        context.update(self._calendar_context(request))
+        return super().changelist_view(request, extra_context=context)
 
 
 class NoticeAdminForm(forms.ModelForm):
@@ -80,7 +201,7 @@ class OfferAdminForm(forms.ModelForm):
 
 
 @admin.register(Vehicle)
-class VehicleAdmin(admin.ModelAdmin):
+class VehicleAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("id", "current_owner", "model_name", "plate_number", "model_year", "current_odometer_km", "public_id", "created_at")
     list_filter = ("model_year",)
     search_fields = ("ownerships__user__username", "ownerships__user__email", "model_name", "nickname", "generation", "plate_number", "vin_hash")
@@ -103,7 +224,7 @@ class VehicleAdmin(admin.ModelAdmin):
 
 
 @admin.register(VehiclePlateHistory)
-class VehiclePlateHistoryAdmin(admin.ModelAdmin):
+class VehiclePlateHistoryAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("vehicle", "plate_number", "started_at", "ended_at", "changed_by")
     search_fields = ("plate_number", "vehicle__model_name", "changed_by__username")
     readonly_fields = tuple(field.name for field in VehiclePlateHistory._meta.fields)
@@ -122,7 +243,7 @@ class VehiclePlateHistoryAdmin(admin.ModelAdmin):
 
 
 @admin.register(VehicleOwnership)
-class VehicleOwnershipAdmin(admin.ModelAdmin):
+class VehicleOwnershipAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("vehicle", "user", "relationship", "started_at", "ended_at", "verification_method", "verification_status")
     list_filter = ("relationship", "verification_status", "verification_method")
     search_fields = ("vehicle__model_name", "user__username", "user__email")
@@ -140,7 +261,7 @@ class VehicleOwnershipAdmin(admin.ModelAdmin):
 
 
 @admin.register(LedgerEntry)
-class LedgerEntryAdmin(admin.ModelAdmin):
+class LedgerEntryAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("entry_date", "vehicle", "kind", "source", "partner", "amount_krw", "odometer_km", "description")
     list_filter = ("source", "partner", "kind", "entry_date")
     search_fields = ("vehicle__model_name", "vehicle__nickname", "description", "part_number")
@@ -166,7 +287,7 @@ class LedgerEntryAdmin(admin.ModelAdmin):
 
 
 @admin.register(Reminder)
-class ReminderAdmin(admin.ModelAdmin):
+class ReminderAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("title", "vehicle", "due_date", "due_odometer_km", "completed_at", "notification_sent_at")
     list_filter = ("completed_at", "due_date")
     search_fields = ("title", "vehicle__model_name", "vehicle__nickname")
@@ -175,7 +296,7 @@ class ReminderAdmin(admin.ModelAdmin):
 
 
 @admin.register(AttendanceCheckin)
-class AttendanceCheckinAdmin(admin.ModelAdmin):
+class AttendanceCheckinAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("checkin_date", "member", "points_awarded", "created_at")
     list_filter = ("checkin_date",)
     search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname")
@@ -193,7 +314,7 @@ class AttendanceCheckinAdmin(admin.ModelAdmin):
 
 
 @admin.register(PointTransaction)
-class PointTransactionAdmin(admin.ModelAdmin):
+class PointTransactionAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("created_at", "member", "transaction_type", "points_delta", "available_at", "partner", "ledger_entry", "memo")
     list_filter = ("transaction_type", "created_at", "available_at", "partner")
     search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "memo", "idempotency_key")
@@ -211,7 +332,7 @@ class PointTransactionAdmin(admin.ModelAdmin):
 
 
 @admin.register(PointRedemptionRequest)
-class PointRedemptionRequestAdmin(admin.ModelAdmin):
+class PointRedemptionRequestAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("created_at", "member_label", "partner", "payment_amount_krw", "points_requested", "status", "expires_at", "responded_at", "completed_at")
     list_filter = ("status", "created_at", "partner")
     search_fields = ("member__username", "member__email", "member__naver_identity__nickname", "member__naver_identity__cafe_nickname", "partner__name", "partner__branch_label")
@@ -236,7 +357,7 @@ class OfferInline(admin.TabularInline):
 
 
 @admin.register(Notice)
-class NoticeAdmin(admin.ModelAdmin):
+class NoticeAdmin(AdminCalendarMixin, admin.ModelAdmin):
     form = NoticeAdminForm
     list_display = ("title", "category", "is_published", "is_pinned", "published_at", "expires_at")
     list_editable = ("is_published", "is_pinned")
@@ -301,7 +422,7 @@ class PartnerImageInline(admin.TabularInline):
 
 
 @admin.register(PartnerImage)
-class PartnerImageAdmin(admin.ModelAdmin):
+class PartnerImageAdmin(AdminCalendarMixin, admin.ModelAdmin):
     form = PartnerImageAdminForm
     list_display = ("partner", "caption", "display_order")
     list_filter = ("partner",)
@@ -309,7 +430,7 @@ class PartnerImageAdmin(admin.ModelAdmin):
 
 
 @admin.register(Partner)
-class PartnerAdmin(admin.ModelAdmin):
+class PartnerAdmin(AdminCalendarMixin, admin.ModelAdmin):
     form = PartnerAdminForm
     list_display = ("name", "branch_label", "region", "is_active", "is_sponsored", "display_order")
     list_editable = ("is_active", "is_sponsored", "display_order")
@@ -329,7 +450,7 @@ class PartnerAdmin(admin.ModelAdmin):
 
 
 @admin.register(PartnerReview)
-class PartnerReviewAdmin(admin.ModelAdmin):
+class PartnerReviewAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("partner", "user", "rating", "created_at", "updated_at")
     list_filter = ("rating", "created_at")
     search_fields = ("partner__name", "partner__branch_label", "comment", "user__naver_identity__nickname")
@@ -338,7 +459,7 @@ class PartnerReviewAdmin(admin.ModelAdmin):
 
 
 @admin.register(PartnerStaff)
-class PartnerStaffAdmin(admin.ModelAdmin):
+class PartnerStaffAdmin(AdminCalendarMixin, admin.ModelAdmin):
     autocomplete_fields = ("user",)
 
     def get_urls(self):
@@ -368,7 +489,7 @@ class PartnerStaffAdmin(admin.ModelAdmin):
 
 
 @admin.register(Offer)
-class OfferAdmin(admin.ModelAdmin):
+class OfferAdmin(AdminCalendarMixin, admin.ModelAdmin):
     form = OfferAdminForm
     list_display = ("title", "partner", "is_active", "starts_at", "ends_at")
     list_editable = ("is_active",)
@@ -379,7 +500,7 @@ class OfferAdmin(admin.ModelAdmin):
 
 
 @admin.register(PushDevice)
-class PushDeviceAdmin(admin.ModelAdmin):
+class PushDeviceAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("user", "platform", "updated_at")
     list_filter = ("platform",)
     search_fields = ("user__username", "user__email", "installation_id")
@@ -391,7 +512,7 @@ class PushDeviceAdmin(admin.ModelAdmin):
 
 
 @admin.register(VehicleTransferCode)
-class VehicleTransferCodeAdmin(admin.ModelAdmin):
+class VehicleTransferCodeAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("vehicle", "previous_owner", "new_owner", "created_at", "expires_at", "accepted_at", "invalidated_at")
     list_filter = ("accepted_at", "invalidated_at", "created_at")
     search_fields = ("vehicle__model_name", "previous_owner__username", "new_owner__username")
@@ -444,7 +565,7 @@ admin.site.unregister(User)
 
 
 @admin.register(User)
-class MemberUserAdmin(UserAdmin):
+class MemberUserAdmin(AdminCalendarMixin, UserAdmin):
     inlines = (NaverProfileInline,)
     list_display = ("id", "display_nickname", "display_member_name", "email", "display_mobile", "ilovemini_grade", "display_points_balance", "display_workplaces", "is_active", "date_joined", "last_login")
     search_fields = ("naver_identity__nickname", "email", "username", "first_name", "last_name", "naver_identity__mobile", "=id")
@@ -613,22 +734,22 @@ User._meta.get_field("id").verbose_name = "회원 번호"
 Group._meta.get_field("id").verbose_name = "번호"
 
 @admin.register(SeasonBanner)
-class SeasonBannerAdmin(admin.ModelAdmin):
+class SeasonBannerAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("title", "is_active", "starts_at", "ends_at", "duration_seconds", "priority")
     list_filter = ("is_active",)
     search_fields = ("title", "subtitle")
     date_hierarchy = "starts_at"
 @admin.register(AppContent)
-class AppContentAdmin(admin.ModelAdmin):
+class AppContentAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("title", "kind", "category", "is_active", "display_order", "starts_at", "ends_at")
     list_filter = ("kind", "category", "is_active")
     search_fields = ("title", "description", "compatible_models")
     date_hierarchy = "starts_at"
 @admin.register(AppRelease)
-class AppReleaseAdmin(admin.ModelAdmin):
+class AppReleaseAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("platform", "version", "build_number", "is_active")
 @admin.register(MemberPreference)
-class MemberPreferenceAdmin(admin.ModelAdmin):
+class MemberPreferenceAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("member", "primary_vehicle")
     list_select_related = ("user__naver_identity", "primary_vehicle")
     readonly_fields = ("user", "primary_vehicle")
@@ -637,7 +758,7 @@ class MemberPreferenceAdmin(admin.ModelAdmin):
     def has_add_permission(self, request): return False
     def has_change_permission(self, request, obj=None): return False
 @admin.register(RecordCorrectionRequest)
-class RecordCorrectionRequestAdmin(admin.ModelAdmin):
+class RecordCorrectionRequestAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("entry", "member", "reason", "created_at", "resolved_at")
     list_select_related = ("requested_by__naver_identity", "entry")
     list_filter = ("resolved_at",)
