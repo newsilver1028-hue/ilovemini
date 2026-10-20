@@ -47,18 +47,18 @@ class AdminCalendarPageTests(TestCase):
             username="admin-calendar-test", email="calendar@example.com", password="test-password-123"
         )
 
-    def test_model_changelist_renders_the_mini_calendar(self):
-        self.client.force_login(self.admin_user)
-        response = self.client.get(reverse("admin:core_ledgerentry_changelist"))
+    def assert_single_mini_calendar(self, response):
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "미니 캘린더")
-        self.assertContains(response, "날짜별 조회")
+        self.assertEqual(response.content.count("날짜별".encode()), 1)
         self.assertNotContains(response, 'id="date-hierarchy"')
 
-        datetime_response = self.client.get(reverse("admin:core_vehicle_changelist"))
-        self.assertEqual(datetime_response.status_code, 200)
-        self.assertContains(datetime_response, "날짜별 조회")
-        self.assertNotContains(datetime_response, 'id="date-hierarchy"')
+    def test_model_changelist_renders_one_mini_calendar(self):
+        self.client.force_login(self.admin_user)
+        ledger_response = self.client.get(reverse("admin:core_ledgerentry_changelist"))
+        self.assert_single_mini_calendar(ledger_response)
+
+        vehicle_response = self.client.get(reverse("admin:core_vehicle_changelist"))
+        self.assert_single_mini_calendar(vehicle_response)
 
     def test_dashboard_shows_policy_page_links(self):
         self.client.force_login(self.admin_user)
