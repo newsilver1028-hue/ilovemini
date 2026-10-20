@@ -453,6 +453,7 @@ class AppleIdentity(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="apple_identity")
     subject = models.CharField(max_length=255, unique=True)
     email = models.EmailField("Apple 제공 이메일", blank=True)
+    cafe_nickname = models.CharField("카페 닉네임", max_length=40, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
