@@ -1,7 +1,21 @@
+from django.contrib import admin
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.urls import reverse
-from .models import NaverIdentity, PartnerStaff
+from .models import (
+    AttendanceCheckin,
+    MemberPreference,
+    NaverIdentity,
+    PartnerReview,
+    PartnerStaff,
+    PointRedemptionRequest,
+    PointTransaction,
+    PushDevice,
+    RecordCorrectionRequest,
+    VehicleOwnership,
+    VehiclePlateHistory,
+    VehicleTransferCode,
+)
 from .naver_auth import user_for_profile
 from .member_display import member_label
 
@@ -67,3 +81,23 @@ class MemberDisplayTests(TestCase):
         user.refresh_from_db()
         self.assertEqual(user.get_full_name(), '홍길동')
         self.assertEqual(user.email, 'mini@example.com')
+
+    def test_admin_member_columns_show_nicknames(self):
+        self.assertIn('display_nickname', admin.site._registry[User].list_display)
+        self.assertNotIn('username', admin.site._registry[User].list_display)
+        expected = {
+            VehiclePlateHistory: 'changed_by_nickname',
+            VehicleOwnership: 'member_nickname',
+            AttendanceCheckin: 'member',
+            PointTransaction: 'member',
+            PointRedemptionRequest: 'member_nickname',
+            PartnerReview: 'reviewer_nickname',
+            PartnerStaff: 'member_account',
+            PushDevice: 'member_nickname',
+            VehicleTransferCode: 'previous_owner_nickname',
+            MemberPreference: 'member',
+            RecordCorrectionRequest: 'member',
+        }
+        for model, column in expected.items():
+            with self.subTest(model=model.__name__):
+                self.assertIn(column, admin.site._registry[model].list_display)
