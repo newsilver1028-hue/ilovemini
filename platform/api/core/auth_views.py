@@ -1,7 +1,11 @@
 import secrets
 import hmac
+import json
+import urllib.error
+import urllib.request
 from datetime import timedelta
 from urllib.parse import urlencode
+import jwt
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
@@ -16,7 +20,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.throttling import ScopedRateThrottle
-from .models import NaverOAuthAttempt, MemberConsent, NaverIdentity, Vehicle, VehicleOwnership, AppReviewAccount, PartnerStaff
+from .models import NaverOAuthAttempt, MemberConsent, NaverIdentity, AppleIdentity, Vehicle, VehicleOwnership, AppReviewAccount, PartnerStaff
 from .naver_auth import digest, exchange_code, get_profile, jwt_pair, sync_identity, user_for_profile, NaverUnavailable
 
 class NaverAppRedirect(HttpResponseRedirect):
@@ -160,6 +164,71 @@ class NaverCompleteView(APIView):
             attempt.ticket_digest = None
             attempt.profile_data = {}
             attempt.save(update_fields=["user", "ticket_digest", "profile_data"])
+            tokens = jwt_pair(user)
+        return Response(tokens)
+
+
+class AppleLoginView(APIView):
+    """Verify a native Sign in with Apple identity token and create an app session."""
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "apple_login"
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        token = request.data.get("identity_token", "")
+        nonce = request.data.get("nonce", "")
+        if request.data.get("terms_accepted") is not True or request.data.get("privacy_accepted") is not True:
+            return Response({"detail": "이용약관과 개인정보 처리방침에 동의해야 가입할 수 있습니다."}, status=400)
+        if not isinstance(token, str) or not token or not isinstance(nonce, str) or len(nonce) < 16:
+            return Response({"detail": "Apple 로그인 정보가 올바르지 않습니다."}, status=400)
+        try:
+            header = jwt.get_unverified_header(token)
+            if header.get("alg") != "RS256" or not header.get("kid"):
+                raise jwt.InvalidTokenError("Unexpected signing key")
+            with urllib.request.urlopen("https://appleid.apple.com/auth/keys", timeout=6) as response:
+                jwks = json.loads(response.read())
+            jwk = next((key for key in jwks.get("keys", []) if key.get("kid") == header["kid"]), None)
+            if not jwk:
+                raise jwt.InvalidTokenError("Unknown signing key")
+            public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
+            claims = jwt.decode(
+                token, public_key, algorithms=["RS256"], audience=settings.APPLE_CLIENT_ID,
+                issuer="https://appleid.apple.com", options={"require": ["exp", "iat", "sub", "nonce"]},
+            )
+            if not hmac.compare_digest(str(claims.get("nonce", "")), nonce):
+                raise jwt.InvalidTokenError("Nonce mismatch")
+        except (jwt.InvalidTokenError, jwt.PyJWKError, ValueError, KeyError, urllib.error.URLError, TimeoutError):
+            return Response({"detail": "Apple 로그인을 확인할 수 없습니다. 다시 시도해 주세요."}, status=401)
+
+        subject = str(claims.get("sub", ""))
+        email = str(claims.get("email", ""))[:254]
+        if not subject:
+            return Response({"detail": "Apple 계정 식별값이 없습니다."}, status=401)
+        with transaction.atomic():
+            identity = AppleIdentity.objects.select_related("user").filter(subject=subject).first()
+            if identity is None:
+                User = get_user_model()
+                username = "apple_" + digest(subject)[:40]
+                user = User.objects.filter(username=username).first()
+                if user is None:
+                    user = User.objects.create_user(username=username, email=email, password=None)
+                AppleIdentity.objects.create(user=user, subject=subject, email=email)
+            else:
+                user = identity.user
+                if email and identity.email != email:
+                    identity.email = email
+                    identity.save(update_fields=["email"])
+                if email and not user.email:
+                    user.email = email
+                    user.save(update_fields=["email"])
+            now = timezone.now()
+            user.last_login = now
+            user.save(update_fields=["last_login"])
+            MemberConsent.objects.update_or_create(user=user, defaults={
+                "terms_accepted_at": now, "privacy_accepted_at": now,
+                "marketing_opt_in": False,
+            })
             tokens = jwt_pair(user)
         return Response(tokens)
 
