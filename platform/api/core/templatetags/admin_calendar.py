@@ -12,11 +12,17 @@ register = template.Library()
 def mini_admin_calendar(context, cl):
     model_admin = getattr(cl, "model_admin", None)
     field_name = getattr(cl, "date_hierarchy", None)
-    if not model_admin or not field_name or cl.opts.model_name in {"partnerbooking", "ledgerentry"}:
+    request = context.get("request")
+    resolver_match = getattr(request, "resolver_match", None)
+    if (
+        not model_admin
+        or not field_name
+        or cl.opts.model_name == "partnerbooking"
+        or getattr(resolver_match, "namespace", None) == "partner_admin"
+    ):
         return {"show_calendar": False}
 
     today = timezone.localdate()
-    request = context.get("request")
     params = request.GET if request else {}
     try:
         year = int(params.get(f"{field_name}__year", today.year))
