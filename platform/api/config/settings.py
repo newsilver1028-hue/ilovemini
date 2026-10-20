@@ -67,7 +67,7 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework_simplejwt.authentication.JWTAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticatedOrReadOnly"],
     "DEFAULT_THROTTLE_RATES": {
-        "naver_start": "5/minute", "naver_complete": "10/minute",
+        "naver_start": "5/minute", "naver_complete": "10/minute", "apple_login": "10/minute",
         "vehicle_transfer": "5/minute", "verified_record": "10/minute",
         "attendance": "30/minute",
         "cafe_search": "20/minute",
@@ -83,6 +83,7 @@ NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
 NAVER_SEARCH_CLIENT_ID = os.getenv("NAVER_SEARCH_CLIENT_ID", NAVER_CLIENT_ID)
 NAVER_SEARCH_CLIENT_SECRET = os.getenv("NAVER_SEARCH_CLIENT_SECRET", NAVER_CLIENT_SECRET)
 NAVER_REDIRECT_URI = os.getenv("NAVER_REDIRECT_URI", "")
+APPLE_CLIENT_ID = os.getenv("APPLE_CLIENT_ID", "com.ilovemini.ilovemini")
 MOBILE_AUTH_REDIRECT_URI = os.getenv("MOBILE_AUTH_REDIRECT_URI", "ilovemini://auth")
 FCM_ENABLED = os.getenv("FCM_ENABLED", "0") == "1"
 FCM_CREDENTIALS_JSON = os.getenv("FCM_CREDENTIALS_JSON", "")

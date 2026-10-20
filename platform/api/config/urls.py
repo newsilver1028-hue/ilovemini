@@ -7,7 +7,7 @@ from django.views.generic import RedirectView
 from rest_framework.routers import DefaultRouter
 from core.views import HealthView, CafeSearchView, CafeLatestView, CafeAnswerView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet, PartnerPointRedemptionView, PartnerPointBalanceView, MemberPointRedemptionView
 from core.member_views import MemberGradeView
-from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView, AppReviewLoginView, PartnerNaverLoginStartView
+from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView, AppleLoginView, AppReviewLoginView, PartnerNaverLoginStartView
 from core.partner_admin import partner_admin_site
 from core.privacy_views import privacy_policy, terms_of_service
 from core.partner_push_views import web_push_subscribe, web_push_unsubscribe, partner_service_worker
@@ -48,6 +48,7 @@ urlpatterns = [
     path("api/auth/naver/start/", NaverStartView.as_view(), name="naver_start"),
     path("api/auth/naver/callback/", NaverCallbackView.as_view(), name="naver_callback"),
     path("api/auth/naver/complete/", NaverCompleteView.as_view(), name="naver_complete"),
+    path("api/auth/apple/", AppleLoginView.as_view(), name="apple_login"),
     path("api/auth/review-login/", AppReviewLoginView.as_view(), name="review_login"),
     path("api/push/devices/", PushDeviceView.as_view(), name="push_devices"),
     path("api/attendance/", AttendanceView.as_view(), name="attendance"),

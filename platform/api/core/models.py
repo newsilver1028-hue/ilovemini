@@ -448,6 +448,21 @@ class NaverIdentity(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
+class AppleIdentity(models.Model):
+    """Apple's stable, app-scoped subject used to authenticate an app member."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="apple_identity")
+    subject = models.CharField(max_length=255, unique=True)
+    email = models.EmailField("Apple 제공 이메일", blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Apple 로그인 연결"
+        verbose_name_plural = "Apple 로그인 연결"
+
+    def __str__(self):
+        return self.email or self.subject[:12]
+
+
 class AppReviewAccount(models.Model):
     """Admin-managed demo credentials for app store review."""
     username = models.CharField("심사용 아이디", max_length=150, unique=True)
