@@ -49,7 +49,7 @@ class AdminCalendarPageTests(TestCase):
 
     def assert_single_mini_calendar(self, response):
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content.count("날짜별".encode()), 1)
+        self.assertEqual(response.content.count(b'admin-mini-calendar"'), 1)
         self.assertNotContains(response, 'id="date-hierarchy"')
 
     def test_model_changelist_renders_one_mini_calendar(self):
