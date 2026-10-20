@@ -210,7 +210,8 @@ class VehicleAdmin(AdminCalendarMixin, admin.ModelAdmin):
 
     @admin.display(description="현재 등록 사용자")
     def current_owner(self, obj):
-        return obj.owner or "미지정"
+        owner = obj.owner
+        return member_nickname(owner) if owner else "미지정"
 
     def get_actions(self, request):
         actions = super().get_actions(request)
@@ -225,10 +226,14 @@ class VehicleAdmin(AdminCalendarMixin, admin.ModelAdmin):
 
 @admin.register(VehiclePlateHistory)
 class VehiclePlateHistoryAdmin(AdminCalendarMixin, admin.ModelAdmin):
-    list_display = ("vehicle", "plate_number", "started_at", "ended_at", "changed_by")
-    search_fields = ("plate_number", "vehicle__model_name", "changed_by__username")
+    list_display = ("vehicle", "plate_number", "started_at", "ended_at", "changed_by_nickname")
+    search_fields = ("plate_number", "vehicle__model_name", "changed_by__username", "changed_by__naver_identity__cafe_nickname", "changed_by__apple_identity__cafe_nickname")
     readonly_fields = tuple(field.name for field in VehiclePlateHistory._meta.fields)
     date_hierarchy = "started_at"
+
+    @admin.display(description="변경 담당자")
+    def changed_by_nickname(self, obj):
+        return member_nickname(obj.changed_by) if obj.changed_by else "—"
 
     def has_add_permission(self, request):
         return False
@@ -244,11 +249,15 @@ class VehiclePlateHistoryAdmin(AdminCalendarMixin, admin.ModelAdmin):
 
 @admin.register(VehicleOwnership)
 class VehicleOwnershipAdmin(AdminCalendarMixin, admin.ModelAdmin):
-    list_display = ("vehicle", "user", "relationship", "started_at", "ended_at", "verification_method", "verification_status")
+    list_display = ("vehicle", "member_nickname", "relationship", "started_at", "ended_at", "verification_method", "verification_status")
     list_filter = ("relationship", "verification_status", "verification_method")
-    search_fields = ("vehicle__model_name", "user__username", "user__email")
+    search_fields = ("vehicle__model_name", "user__username", "user__email", "user__naver_identity__cafe_nickname", "user__apple_identity__cafe_nickname")
     readonly_fields = tuple(field.name for field in VehicleOwnership._meta.fields)
     date_hierarchy = "started_at"
+
+    @admin.display(description="회원 닉네임")
+    def member_nickname(self, obj):
+        return member_nickname(obj.user)
 
     def has_add_permission(self, request):
         return False
@@ -299,14 +308,14 @@ class ReminderAdmin(AdminCalendarMixin, admin.ModelAdmin):
 class AttendanceCheckinAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("checkin_date", "member", "points_awarded", "created_at")
     list_filter = ("checkin_date",)
-    search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname")
-    list_select_related = ("user__naver_identity",)
+    search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "user__apple_identity__cafe_nickname")
+    list_select_related = ("user__naver_identity", "user__apple_identity")
     readonly_fields = tuple(field.name for field in AttendanceCheckin._meta.fields)
     date_hierarchy = "checkin_date"
 
     @admin.display(description="회원")
     def member(self, obj):
-        return member_label(obj.user)
+        return member_nickname(obj.user)
 
     def has_add_permission(self, request): return False
     def has_change_permission(self, request, obj=None): return False
@@ -317,14 +326,14 @@ class AttendanceCheckinAdmin(AdminCalendarMixin, admin.ModelAdmin):
 class PointTransactionAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("created_at", "member", "transaction_type", "points_delta", "available_at", "partner", "ledger_entry", "memo")
     list_filter = ("transaction_type", "created_at", "available_at", "partner")
-    search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "memo", "idempotency_key")
-    list_select_related = ("user__naver_identity", "partner", "ledger_entry")
+    search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "user__apple_identity__cafe_nickname", "memo", "idempotency_key")
+    list_select_related = ("user__naver_identity", "user__apple_identity", "partner", "ledger_entry")
     readonly_fields = tuple(field.name for field in PointTransaction._meta.fields)
     date_hierarchy = "created_at"
 
     @admin.display(description="회원")
     def member(self, obj):
-        return member_label(obj.user)
+        return member_nickname(obj.user)
 
     def has_add_permission(self, request): return False
     def has_change_permission(self, request, obj=None): return False
@@ -333,16 +342,16 @@ class PointTransactionAdmin(AdminCalendarMixin, admin.ModelAdmin):
 
 @admin.register(PointRedemptionRequest)
 class PointRedemptionRequestAdmin(AdminCalendarMixin, admin.ModelAdmin):
-    list_display = ("created_at", "member_label", "partner", "payment_amount_krw", "points_requested", "status", "expires_at", "responded_at", "completed_at")
+    list_display = ("created_at", "member_nickname", "partner", "payment_amount_krw", "points_requested", "status", "expires_at", "responded_at", "completed_at")
     list_filter = ("status", "created_at", "partner")
-    search_fields = ("member__username", "member__email", "member__naver_identity__nickname", "member__naver_identity__cafe_nickname", "partner__name", "partner__branch_label")
-    list_select_related = ("member__naver_identity", "partner", "transaction")
+    search_fields = ("member__username", "member__email", "member__naver_identity__nickname", "member__naver_identity__cafe_nickname", "member__apple_identity__cafe_nickname", "partner__name", "partner__branch_label")
+    list_select_related = ("member__naver_identity", "member__apple_identity", "partner", "transaction")
     readonly_fields = tuple(field.name for field in PointRedemptionRequest._meta.fields)
     date_hierarchy = "created_at"
 
     @admin.display(description="회원")
-    def member_label(self, obj):
-        return member_label(obj.member)
+    def member_nickname(self, obj):
+        return member_nickname(obj.member)
 
     def has_add_permission(self, request): return False
     def has_change_permission(self, request, obj=None): return False
@@ -451,10 +460,14 @@ class PartnerAdmin(AdminCalendarMixin, admin.ModelAdmin):
 
 @admin.register(PartnerReview)
 class PartnerReviewAdmin(AdminCalendarMixin, admin.ModelAdmin):
-    list_display = ("partner", "user", "rating", "created_at", "updated_at")
+    list_display = ("partner", "reviewer_nickname", "rating", "created_at", "updated_at")
     list_filter = ("rating", "created_at")
-    search_fields = ("partner__name", "partner__branch_label", "comment", "user__naver_identity__nickname")
+    search_fields = ("partner__name", "partner__branch_label", "comment", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "user__apple_identity__cafe_nickname")
     readonly_fields = ("created_at", "updated_at")
+
+    @admin.display(description="회원 닉네임")
+    def reviewer_nickname(self, obj):
+        return member_nickname(obj.user)
     date_hierarchy = "created_at"
 
 
@@ -468,22 +481,22 @@ class PartnerStaffAdmin(AdminCalendarMixin, admin.ModelAdmin):
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "user":
             kwargs["widget"] = MemberAutocompleteSelect(db_field.remote_field, self.admin_site)
-            kwargs["queryset"] = db_field.remote_field.model.objects.select_related("naver_identity")
+            kwargs["queryset"] = db_field.remote_field.model.objects.select_related("naver_identity", "apple_identity")
             field = super().formfield_for_foreignkey(db_field, request, **kwargs)
             field.label_from_instance = member_label
             return field
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-    @admin.display(description="회원 계정")
+    @admin.display(description="회원 닉네임")
     def member_account(self, obj):
-        return member_label(obj.user)
+        return member_nickname(obj.user)
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related("user__naver_identity", "partner")
+        return super().get_queryset(request).select_related("user__naver_identity", "user__apple_identity", "partner")
     list_display = ("member_account", "partner", "can_verify_records", "can_manage_bookings", "is_active", "created_at")
     list_editable = ("can_verify_records", "can_manage_bookings", "is_active")
     list_filter = ("partner", "can_verify_records", "can_manage_bookings", "is_active")
-    search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "=user__id", "partner__name")
+    search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "user__apple_identity__cafe_nickname", "=user__id", "partner__name")
     readonly_fields = ("created_at",)
     date_hierarchy = "created_at"
 
@@ -501,11 +514,15 @@ class OfferAdmin(AdminCalendarMixin, admin.ModelAdmin):
 
 @admin.register(PushDevice)
 class PushDeviceAdmin(AdminCalendarMixin, admin.ModelAdmin):
-    list_display = ("user", "platform", "updated_at")
+    list_display = ("member_nickname", "platform", "updated_at")
     list_filter = ("platform",)
-    search_fields = ("user__username", "user__email", "installation_id")
+    search_fields = ("user__username", "user__email", "user__naver_identity__cafe_nickname", "user__apple_identity__cafe_nickname", "installation_id")
     readonly_fields = ("user", "installation_id", "platform", "created_at", "updated_at")
     date_hierarchy = "updated_at"
+
+    @admin.display(description="회원 닉네임")
+    def member_nickname(self, obj):
+        return member_nickname(obj.user)
 
     def has_add_permission(self, request):
         return False
@@ -513,12 +530,20 @@ class PushDeviceAdmin(AdminCalendarMixin, admin.ModelAdmin):
 
 @admin.register(VehicleTransferCode)
 class VehicleTransferCodeAdmin(AdminCalendarMixin, admin.ModelAdmin):
-    list_display = ("vehicle", "previous_owner", "new_owner", "created_at", "expires_at", "accepted_at", "invalidated_at")
+    list_display = ("vehicle", "previous_owner_nickname", "new_owner_nickname", "created_at", "expires_at", "accepted_at", "invalidated_at")
     list_filter = ("accepted_at", "invalidated_at", "created_at")
-    search_fields = ("vehicle__model_name", "previous_owner__username", "new_owner__username")
+    search_fields = ("vehicle__model_name", "previous_owner__username", "previous_owner__naver_identity__cafe_nickname", "previous_owner__apple_identity__cafe_nickname", "new_owner__username", "new_owner__naver_identity__cafe_nickname", "new_owner__apple_identity__cafe_nickname")
     readonly_fields = tuple(field.name for field in VehicleTransferCode._meta.fields if field.name != "code_digest")
     exclude = ("code_digest",)
     date_hierarchy = "created_at"
+
+    @admin.display(description="이전 소유자 닉네임")
+    def previous_owner_nickname(self, obj):
+        return member_nickname(obj.previous_owner) if obj.previous_owner else "—"
+
+    @admin.display(description="새 소유자 닉네임")
+    def new_owner_nickname(self, obj):
+        return member_nickname(obj.new_owner) if obj.new_owner else "—"
 
     def has_add_permission(self, request):
         return False
@@ -568,7 +593,7 @@ admin.site.unregister(User)
 class MemberUserAdmin(AdminCalendarMixin, UserAdmin):
     inlines = (NaverProfileInline,)
     list_display = ("id", "display_nickname", "display_member_name", "email", "display_mobile", "ilovemini_grade", "display_points_balance", "display_workplaces", "is_active", "date_joined", "last_login")
-    search_fields = ("naver_identity__nickname", "email", "username", "first_name", "last_name", "naver_identity__mobile", "=id")
+    search_fields = ("naver_identity__nickname", "naver_identity__cafe_nickname", "apple_identity__cafe_nickname", "email", "username", "first_name", "last_name", "naver_identity__mobile", "=id")
     list_per_page = 50
     date_hierarchy = "date_joined"
     ordering = ("-date_joined", "-id")
@@ -593,7 +618,7 @@ class MemberUserAdmin(AdminCalendarMixin, UserAdmin):
 
     def get_queryset(self, request):
         point_total = PointTransaction.objects.filter(user_id=OuterRef("pk")).order_by().values("user_id").annotate(total=Sum("points_delta")).values("total")[:1]
-        return (super().get_queryset(request).select_related("naver_identity")
+        return (super().get_queryset(request).select_related("naver_identity", "apple_identity")
                 .prefetch_related("partner_memberships__partner", "groups")
                 .annotate(_point_balance=Coalesce(Subquery(point_total, output_field=IntegerField()), Value(0))))
     actions = [grade_action(code) for code in GRADES] + ["export_members_csv"]
@@ -751,21 +776,21 @@ class AppReleaseAdmin(AdminCalendarMixin, admin.ModelAdmin):
 @admin.register(MemberPreference)
 class MemberPreferenceAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("member", "primary_vehicle")
-    list_select_related = ("user__naver_identity", "primary_vehicle")
+    list_select_related = ("user__naver_identity", "user__apple_identity", "primary_vehicle")
     readonly_fields = ("user", "primary_vehicle")
     @admin.display(description="회원")
-    def member(self, obj): return member_label(obj.user)
+    def member(self, obj): return member_nickname(obj.user)
     def has_add_permission(self, request): return False
     def has_change_permission(self, request, obj=None): return False
 @admin.register(RecordCorrectionRequest)
 class RecordCorrectionRequestAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("entry", "member", "reason", "created_at", "resolved_at")
-    list_select_related = ("requested_by__naver_identity", "entry")
+    list_select_related = ("requested_by__naver_identity", "requested_by__apple_identity", "entry")
     list_filter = ("resolved_at",)
     date_hierarchy = "created_at"
     readonly_fields = ("entry", "requested_by", "reason", "created_at", "resolved_entry", "resolved_at")
     @admin.display(description="요청 회원")
-    def member(self, obj): return member_label(obj.requested_by)
+    def member(self, obj): return member_nickname(obj.requested_by)
     def has_add_permission(self, request): return False
     def has_change_permission(self, request, obj=None): return False
     def has_delete_permission(self, request, obj=None): return False
