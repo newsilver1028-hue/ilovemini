@@ -514,3 +514,54 @@ html[data-theme="auto"] td, html[data-theme="auto"] .mini-menu-link { color: var
   .mini-menu-finder { grid-template-columns: 1fr; }
   .mini-dashboard-hero h1 { font-size: 23px !important; }
 }
+
+
+/* Always-visible links to the published policies from every admin page. */
+.mini-admin-policy-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.mini-admin-policy-links a {
+  padding: 7px 11px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 999px;
+  color: var(--header-link-color) !important;
+  font-size: 12px;
+  font-weight: 700;
+}
+.mini-admin-policy-links a:hover { background: rgba(255, 255, 255, .1); }
+.mini-policy-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0 0 22px;
+}
+.mini-policy-shortcuts a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--mini-panel);
+  box-shadow: var(--mini-shadow);
+  text-decoration: none;
+}
+.mini-policy-shortcuts strong { color: var(--body-loud-color); font-size: 15px; }
+.mini-policy-shortcuts span { color: var(--body-quiet-color); font-size: 12px; }
+.mini-policy-shortcuts b { margin-left: 6px; color: var(--link-fg); }
+@media (max-width: 720px) {
+  .mini-policy-shortcuts { grid-template-columns: 1fr; }
+  .mini-policy-shortcuts a { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .mini-admin-policy-links { gap: 5px; }
+  .mini-admin-policy-links a { padding: 6px 8px; font-size: 11px; }
+}
+
+.admin-mini-calendar { max-width: 980px; margin: 24px auto 0; }
+.admin-mini-calendar .partner-calendar-heading h2 { margin: 0; }
+.admin-mini-calendar-day { text-decoration: none; }
+.admin-mini-calendar-count { display: block; margin-top: 3px; font-size: 11px; font-weight: 700; }
