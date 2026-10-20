@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from core.models import NaverIdentity, Partner, PartnerReview
+from core.models import AppleIdentity, NaverIdentity, Partner, PartnerReview
 from core.serializers import PartnerReviewSerializer
 
 
@@ -42,3 +42,17 @@ class MemberCafeNicknameTests(TestCase):
         )
         self.assertEqual(empty.status_code, 400)
         self.assertEqual(too_long.status_code, 400)
+
+    def test_apple_member_can_set_cafe_nickname(self):
+        apple_user = get_user_model().objects.create_user(username="apple_nickname_member")
+        AppleIdentity.objects.create(user=apple_user, subject="apple-nickname-subject")
+        self.client.force_authenticate(apple_user)
+
+        response = self.client.patch(
+            "/api/me/overview/", {"cafe_nickname": "Apple 카페 회원"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["cafe_nickname"], "Apple 카페 회원")
+        self.assertEqual(AppleIdentity.objects.get(user=apple_user).cafe_nickname, "Apple 카페 회원")
+        self.assertEqual(self.client.get("/api/me/overview/").json()["nickname"], "Apple 카페 회원")
