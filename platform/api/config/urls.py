@@ -9,7 +9,7 @@ from core.views import HealthView, CafeSearchView, CafeLatestView, CafeAnswerVie
 from core.member_views import MemberGradeView
 from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView, AppReviewLoginView, PartnerNaverLoginStartView
 from core.partner_admin import partner_admin_site
-from core.privacy_views import privacy_policy
+from core.privacy_views import privacy_policy, terms_of_service
 from core.partner_push_views import web_push_subscribe, web_push_unsubscribe, partner_service_worker
 
 router = DefaultRouter()
@@ -23,6 +23,7 @@ router.register("bookings", PartnerBookingViewSet, basename="booking")
 urlpatterns = [
     path("", RedirectView.as_view(url="/privacy/", permanent=False), name="public_home"),
     path("privacy/", privacy_policy, name="privacy_policy"),
+    path("terms/", terms_of_service, name="terms_of_service"),
     path("api/app/content/", AppContentView.as_view(), name="app_content"),
     path("api/shopping/search/", ShoppingSearchView.as_view(), name="shopping_search"),
     path("api/me/preferences/", MemberPreferenceView.as_view(), name="member_preferences"),
