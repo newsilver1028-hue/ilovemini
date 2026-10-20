@@ -39,6 +39,9 @@
 
 {% block coltype %}{% endblock %}
 
+{# The custom month grid above the list is the single calendar control. #}
+{% block date_hierarchy %}{% endblock %}
+
 {% block content %}
   {% mini_admin_calendar cl %}
   <div id="content-main">
@@ -58,7 +61,6 @@
     <div class="module{% if cl.has_filters %} filtered{% endif %}" id="changelist">
       <div class="changelist-form-container">
         {% block search %}{% search_form cl %}{% endblock %}
-        {% block date_hierarchy %}{% if cl.date_hierarchy %}{% date_hierarchy cl %}{% endif %}{% endblock %}
 
         <form id="changelist-form" method="post"{% if cl.formset and cl.formset.is_multipart %} enctype="multipart/form-data"{% endif %} novalidate>{% csrf_token %}
         {% if cl.formset %}
