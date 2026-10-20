@@ -16,6 +16,7 @@ from .models import (
     PartnerBooking,
     PartnerStaff,
 )
+from .member_display import member_nickname
 
 
 def active_staff_for(request):
@@ -140,7 +141,7 @@ class PartnerAdminSite(AdminSite):
             raise Http404
         partner_ids = staff.values_list("partner_id", flat=True)
         bookings = PartnerBooking.objects.filter(partner_id__in=partner_ids).select_related(
-            "partner", "customer__naver_identity", "vehicle"
+            "partner", "customer__naver_identity", "customer__apple_identity", "vehicle"
         ).order_by("-scheduled_at", "-pk")
         rows = []
         for booking in bookings.iterator():
@@ -172,14 +173,13 @@ class PartnerAdminSite(AdminSite):
         entries = LedgerEntry.objects.filter(
             source=LedgerEntry.Source.PARTNER,
             partner_id__in=partner_ids,
-        ).select_related("partner", "vehicle", "verified_by__naver_identity").prefetch_related(
+        ).select_related("partner", "vehicle", "verified_by__naver_identity", "verified_by__apple_identity").prefetch_related(
             "evidence_images"
         ).order_by("-entry_date", "-pk")
         rows = []
         for entry in entries.iterator(chunk_size=200):
             vehicle = entry.vehicle
             verified_by = entry.verified_by
-            identity = getattr(verified_by, "naver_identity", None) if verified_by else None
             line_items = entry.line_items if isinstance(entry.line_items, list) else []
             item_values = []
             for item in line_items:
@@ -202,7 +202,7 @@ class PartnerAdminSite(AdminSite):
                 entry.amount_krw,
                 entry.description,
                 entry.evidence_images.count(),
-                (identity.cafe_nickname or identity.nickname) if identity else (verified_by.get_username() if verified_by else ""),
+                member_nickname(verified_by) if verified_by else "",
             ))
         return self._excel_response(
             f"ilovemini-maintenance-records-{timezone.localdate():%Y%m%d}.xlsx",
