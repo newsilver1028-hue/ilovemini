@@ -45,6 +45,7 @@ class Vehicle(models.Model):
     passport_public = models.BooleanField(default=False)
     status = models.CharField(max_length=16, default="active")
     current_odometer_km = models.PositiveIntegerField(null=True, blank=True)
+    retention_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
