@@ -19,7 +19,7 @@ from .member_display import member_nickname, member_label, MemberAutocompleteVie
 from .models import (
     LedgerEntry, Notice, Offer, Partner, PartnerImage, PartnerReview, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
     VehicleOwnership, VehicleTransferCode, AttendanceCheckin, PointTransaction, PointRedemptionRequest,
-    SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest, AppReviewAccount,
+    SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest, AppReviewAccount, AppleIdentity,
     PartnerServiceCategoryOption,
 )
 
@@ -709,6 +709,28 @@ class NaverProfileInline(admin.StackedInline):
         return False
 
 
+class AppleProfileInline(admin.StackedInline):
+    model = AppleIdentity
+    verbose_name = "Apple 로그인 정보"
+    verbose_name_plural = "Apple 로그인 정보"
+    fields = ("cafe_nickname", "email", "subject", "created_at")
+    readonly_fields = fields
+    extra = 0
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+
 class MemberPointTransactionInline(admin.TabularInline):
     model = PointTransaction
     verbose_name = "포인트 거래"
@@ -743,7 +765,7 @@ admin.site.unregister(User)
 
 @admin.register(User)
 class MemberUserAdmin(AdminCalendarMixin, UserAdmin):
-    inlines = (NaverProfileInline, MemberPointTransactionInline)
+    inlines = (NaverProfileInline, AppleProfileInline, MemberPointTransactionInline)
     list_display = ("id", "display_nickname", "display_member_name", "email", "display_mobile", "ilovemini_grade", "display_points_balance", "display_workplaces", "is_active", "date_joined", "last_login")
     search_fields = ("naver_identity__nickname", "naver_identity__cafe_nickname", "apple_identity__cafe_nickname", "email", "username", "first_name", "last_name", "naver_identity__mobile", "=id")
     list_per_page = 50
@@ -979,6 +1001,21 @@ class AppReleaseAdmin(AdminCalendarMixin, admin.ModelAdmin):
     search_fields = ("version", "notes")
     save_on_top = True
 
+class PrimaryVehicleAssignedFilter(admin.SimpleListFilter):
+    title = "대표 차량 설정"
+    parameter_name = "vehicle_assigned"
+
+    def lookups(self, request, model_admin):
+        return (("assigned", "설정됨"), ("unassigned", "미설정"))
+
+    def queryset(self, request, queryset):
+        if self.value() == "assigned":
+            return queryset.filter(primary_vehicle__isnull=False)
+        if self.value() == "unassigned":
+            return queryset.filter(primary_vehicle__isnull=True)
+        return queryset
+
+
 class MemberPreferenceAdminForm(forms.ModelForm):
     class Meta:
         model = MemberPreference
@@ -987,20 +1024,45 @@ class MemberPreferenceAdminForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         user_id = self.data.get("user") or self.initial.get("user") or getattr(self.instance, "user_id", None)
-        self.fields["primary_vehicle"].queryset = Vehicle.objects.filter(
+        vehicle_field = self.fields["primary_vehicle"]
+        vehicle_field.queryset = Vehicle.objects.filter(
             status="active", ownerships__user_id=user_id, ownerships__ended_at__isnull=True,
         ).distinct() if user_id else Vehicle.objects.none()
+
+        def vehicle_label(vehicle):
+            plate = vehicle.plate_number or "번호 미등록"
+            return f"{plate} · {vehicle.model_name}"
+
+        vehicle_field.label_from_instance = vehicle_label
+
 
 @admin.register(MemberPreference)
 class MemberPreferenceAdmin(AdminCalendarMixin, admin.ModelAdmin):
     form = MemberPreferenceAdminForm
-    list_display = ("member", "primary_vehicle")
+    list_display = ("member", "member_number", "primary_vehicle")
+    list_filter = (PrimaryVehicleAssignedFilter,)
+    search_fields = (
+        "user__naver_identity__cafe_nickname", "user__naver_identity__nickname",
+        "user__apple_identity__cafe_nickname", "user__username", "=user__id",
+        "primary_vehicle__plate_number", "primary_vehicle__model_name",
+    )
     list_select_related = ("user__naver_identity", "user__apple_identity", "primary_vehicle")
     readonly_fields = ("user",)
-    @admin.display(description="회원")
-    def member(self, obj): return member_nickname(obj.user)
-    def has_add_permission(self, request): return False
-    def has_delete_permission(self, request, obj=None): return False
+    list_per_page = 50
+
+    @admin.display(description="회원 닉네임")
+    def member(self, obj):
+        return member_nickname(obj.user)
+
+    @admin.display(description="회원번호", ordering="user_id")
+    def member_number(self, obj):
+        return f"#{obj.user_id}"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 @admin.register(RecordCorrectionRequest)
 class RecordCorrectionRequestAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("entry", "member", "reason", "created_at", "resolved_at")
