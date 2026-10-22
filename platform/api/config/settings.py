@@ -8,6 +8,13 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-only-change-me-replace-before-d
 LEDGER_INTEGRITY_KEY = os.getenv("LEDGER_INTEGRITY_KEY", SECRET_KEY)
 DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
 ALLOWED_HOSTS = [host for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,0.0.0.0").split(",") if host]
+ADMIN_CUSTOM_DOMAIN = "admin.ilovemini.co.kr"
+if ADMIN_CUSTOM_DOMAIN not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(ADMIN_CUSTOM_DOMAIN)
+CSRF_TRUSTED_ORIGINS = [origin.strip().rstrip("/") for origin in os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if origin.strip()]
+ADMIN_CUSTOM_ORIGIN = f"https://{ADMIN_CUSTOM_DOMAIN}"
+if ADMIN_CUSTOM_ORIGIN not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append(ADMIN_CUSTOM_ORIGIN)
 
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",

@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.contrib.admin.widgets import AdminDateWidget, AdminSplitDateTime
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
+from django.conf import settings
 from django.db import models
 from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.urls import reverse
@@ -84,3 +85,13 @@ class AdminCalendarPageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "/privacy/")
         self.assertContains(response, "/terms/")
+
+    def test_admin_custom_domain_routes_to_partner_login(self):
+        response = self.client.get("/", HTTP_HOST="admin.ilovemini.co.kr")
+        self.assertRedirects(response, "/partner-admin/login/", fetch_redirect_response=False)
+
+        shortcut = self.client.get("/partner/", HTTP_HOST="admin.ilovemini.co.kr")
+        self.assertRedirects(shortcut, "/partner-admin/login/", fetch_redirect_response=False)
+
+        self.assertIn("admin.ilovemini.co.kr", settings.ALLOWED_HOSTS)
+        self.assertIn("https://admin.ilovemini.co.kr", settings.CSRF_TRUSTED_ORIGINS)
