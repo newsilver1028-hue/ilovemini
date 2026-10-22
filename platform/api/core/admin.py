@@ -352,6 +352,9 @@ class PointTransactionAdmin(AdminCalendarMixin, admin.ModelAdmin):
     )
     list_per_page = 50
 
+    def _calendar_date_field(self):
+        return PointTransaction._meta.get_field("created_at")
+
     @admin.display(description="회원 닉네임 / 식별번호")
     def member(self, obj):
         return format_html(
