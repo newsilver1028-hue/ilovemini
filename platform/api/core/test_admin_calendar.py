@@ -72,8 +72,11 @@ class AdminCalendarPageTests(TestCase):
             with self.subTest(route=route):
                 response = self.client.get(reverse(route))
                 self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.context["title"], response.context["cl"].opts.verbose_name_plural)
+                clean_title = response.context["cl"].opts.verbose_name_plural
+                self.assertEqual(response.context["title"], clean_title)
+                self.assertEqual(response.context["cl"].title, clean_title)
                 self.assertNotIn("보기위한", response.context["title"])
+                self.assertContains(response, f"<title>{clean_title} · ILOVEMINI 관리자</title>")
 
     def test_dashboard_shows_policy_page_links(self):
         self.client.force_login(self.admin_user)
