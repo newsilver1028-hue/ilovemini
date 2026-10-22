@@ -698,21 +698,52 @@ class NaverProfileInline(admin.StackedInline):
         return False
 
 
+class MemberPointTransactionInline(admin.TabularInline):
+    model = PointTransaction
+    verbose_name = "포인트 거래"
+    verbose_name_plural = "전체 포인트 거래 내역"
+    fk_name = "user"
+    fields = ("created_at", "transaction_type", "points_delta", "partner", "ledger_entry", "memo")
+    readonly_fields = fields
+    ordering = ("-created_at", "-pk")
+    extra = 0
+    can_delete = False
+    show_change_link = True
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("partner", "ledger_entry")
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+
 User = get_user_model()
 admin.site.unregister(User)
 
 
 @admin.register(User)
 class MemberUserAdmin(AdminCalendarMixin, UserAdmin):
-    inlines = (NaverProfileInline,)
+    inlines = (NaverProfileInline, MemberPointTransactionInline)
     list_display = ("id", "display_nickname", "display_member_name", "email", "display_mobile", "ilovemini_grade", "display_points_balance", "display_workplaces", "is_active", "date_joined", "last_login")
     search_fields = ("naver_identity__nickname", "naver_identity__cafe_nickname", "apple_identity__cafe_nickname", "email", "username", "first_name", "last_name", "naver_identity__mobile", "=id")
     list_per_page = 50
     date_hierarchy = "date_joined"
     ordering = ("-date_joined", "-id")
     list_filter = ("is_active", "is_staff", "is_superuser", "groups")
-    readonly_fields = (*UserAdmin.readonly_fields, "display_nickname", "id", "display_workplaces")
-    fieldsets = (("회원 식별 정보", {"fields": ("id", "display_nickname", "display_workplaces")}),) + UserAdmin.fieldsets
+    readonly_fields = (*UserAdmin.readonly_fields, "display_nickname", "id", "display_workplaces", "display_points_earned", "display_points_used", "display_points_balance")
+    fieldsets = (
+        ("회원 식별 정보", {"fields": ("id", "display_nickname", "display_workplaces")}),
+        ("포인트 요약", {"fields": ("display_points_earned", "display_points_used", "display_points_balance")}),
+    ) + UserAdmin.fieldsets
 
     @admin.display(description="휴대전화번호")
     def display_mobile(self, obj):
@@ -743,7 +774,20 @@ class MemberUserAdmin(AdminCalendarMixin, UserAdmin):
 
     @admin.display(description="포인트 잔액", ordering="_point_balance")
     def display_points_balance(self, obj):
-        return f"{obj._point_balance:,}P"
+        balance = getattr(obj, "_point_balance", None)
+        if balance is None:
+            balance = obj.point_transactions.aggregate(total=Sum("points_delta"))["total"] or 0
+        return f"{balance:,}P"
+
+    @admin.display(description="누적 적립")
+    def display_points_earned(self, obj):
+        total = obj.point_transactions.filter(points_delta__gt=0).aggregate(total=Sum("points_delta"))["total"] or 0
+        return f"{total:,}P"
+
+    @admin.display(description="누적 사용")
+    def display_points_used(self, obj):
+        total = obj.point_transactions.filter(points_delta__lt=0).aggregate(total=Sum("points_delta"))["total"] or 0
+        return f"{abs(total):,}P"
 
     @admin.action(description="선택한 회원 목록 CSV 다운로드")
     def export_members_csv(self, request, queryset):
