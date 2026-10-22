@@ -6,6 +6,7 @@ from .models import (
     AttendanceCheckin,
     MemberPreference,
     NaverIdentity,
+    Partner,
     PartnerReview,
     PartnerStaff,
     PointRedemptionRequest,
@@ -101,3 +102,24 @@ class MemberDisplayTests(TestCase):
         for model, column in expected.items():
             with self.subTest(model=model.__name__):
                 self.assertIn(column, admin.site._registry[model].list_display)
+
+    def test_point_transaction_detail_uses_nickname_instead_of_login_username(self):
+        partner = Partner.objects.create(name="포인트 사용 업체", branch_label="성수점", is_active=True)
+        transaction = PointTransaction.objects.create(
+            user=self.member,
+            partner=partner,
+            transaction_type=PointTransaction.Type.REDEMPTION,
+            points_delta=-500,
+            memo="정비 결제 포인트 사용",
+        )
+
+        response = self.client.get(
+            reverse("admin:core_pointtransaction_change", args=[transaction.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "테스트회원")
+        self.assertContains(response, f"회원 #{self.member.pk}")
+        self.assertContains(response, "포인트 사용 업체")
+        self.assertContains(response, "정비 결제 포인트 사용")
+        self.assertNotContains(response, self.member.username)

@@ -335,16 +335,78 @@ class AttendanceCheckinAdmin(AdminCalendarMixin, admin.ModelAdmin):
 
 @admin.register(PointTransaction)
 class PointTransactionAdmin(AdminCalendarMixin, admin.ModelAdmin):
-    list_display = ("created_at", "member", "transaction_type", "points_delta", "available_at", "partner", "ledger_entry", "memo")
-    list_filter = ("transaction_type", "created_at", "available_at", "partner")
+    list_display = ("created_at", "member", "transaction_type", "points_delta", "partner_detail", "ledger_detail", "memo")
+    list_display_links = ("created_at",)
+    list_filter = ("transaction_type", "created_at", "partner")
     search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "user__apple_identity__cafe_nickname", "memo", "idempotency_key")
-    list_select_related = ("user__naver_identity", "user__apple_identity", "partner", "ledger_entry")
-    readonly_fields = tuple(field.name for field in PointTransaction._meta.fields)
-    date_hierarchy = "created_at"
+    list_select_related = ("user__naver_identity", "user__apple_identity", "partner", "ledger_entry__vehicle")
+    readonly_fields = (
+        "member_detail", "transaction_type", "points_delta", "created_at", "available_at",
+        "partner_detail", "ledger_detail", "redemption_details", "memo", "idempotency_key",
+    )
+    fieldsets = (
+        ("회원", {"fields": ("member_detail",)}),
+        ("포인트 거래", {"fields": ("transaction_type", "points_delta", "created_at", "available_at", "memo")}),
+        ("사용처 및 연결 기록", {"fields": ("partner_detail", "ledger_detail", "redemption_details")}),
+        ("시스템 정보", {"fields": ("idempotency_key",)}),
+    )
+    list_per_page = 50
 
-    @admin.display(description="회원")
+    @admin.display(description="회원 닉네임 / 식별번호")
     def member(self, obj):
-        return member_nickname(obj.user)
+        return format_html(
+            '<a href="{}">{} · 회원 #{}</a>',
+            reverse("admin:auth_user_change", args=[obj.user_id]),
+            member_nickname(obj.user), obj.user_id,
+        )
+
+    @admin.display(description="회원 닉네임 / 식별번호", ordering="user_id")
+    def member_detail(self, obj):
+        return self.member(obj)
+
+    @admin.display(description="사용 업체")
+    def partner_detail(self, obj):
+        if not obj.partner_id:
+            return "업체 거래 아님"
+        return format_html(
+            '<a href="{}">{}{}</a>',
+            reverse("admin:core_partner_change", args=[obj.partner_id]),
+            obj.partner.name,
+            f" · {obj.partner.branch_label}" if obj.partner.branch_label else "",
+        )
+
+    @admin.display(description="연결된 차계부 / 정비 기록")
+    def ledger_detail(self, obj):
+        entry = obj.ledger_entry
+        if not entry:
+            return "연결된 정비 기록 없음"
+        vehicle = entry.vehicle
+        title = f"{entry.entry_date:%Y-%m-%d} · {vehicle.plate_number or '번호 미등록'} · {entry.get_kind_display()}"
+        odometer = f"{entry.odometer_km:,}" if entry.odometer_km is not None else "주행거리 미등록"
+        return format_html(
+            '<a href="{}">{} · {:,}원 · {}km</a>',
+            reverse("admin:core_ledgerentry_change", args=[entry.pk]),
+            title, entry.amount_krw, odometer,
+        )
+
+    @admin.display(description="포인트 사용 요청 상세")
+    def redemption_details(self, obj):
+        requests = list(obj.redemption_requests.select_related("partner").order_by("-created_at"))
+        if not requests:
+            return "연결된 포인트 사용 요청 없음"
+        lines = []
+        for point_request in requests:
+            completed = point_request.completed_at.strftime("%Y-%m-%d %H:%M:%S") if point_request.completed_at else "미완료"
+            label = (
+                f"{point_request.partner.name} · {point_request.get_status_display()} · "
+                f"요청 {point_request.points_requested:,}P · 결제 {point_request.payment_amount_krw:,}원 · "
+                f"요청 {point_request.created_at:%Y-%m-%d %H:%M:%S} · 완료 {completed}"
+            )
+            lines.append(format_html(
+                '<a href="{}">{}</a>',
+                reverse("admin:core_pointredemptionrequest_change", args=[point_request.pk]), label,
+            ))
+        return format_html("<br>".join("{}" for _ in lines), *lines)
 
     def has_add_permission(self, request): return False
     def has_change_permission(self, request, obj=None): return False
