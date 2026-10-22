@@ -139,10 +139,18 @@ class AdminCalendarMixin:
             "calendar_weekdays": self.calendar_weekdays,
         }
 
+    def get_changelist_instance(self, request):
+        changelist = super().get_changelist_instance(request)
+        if not self.has_change_permission(request):
+            changelist.title = str(self.model._meta.verbose_name_plural)
+        return changelist
+
     def changelist_view(self, request, extra_context=None):
         context = dict(extra_context or {})
         if not self.has_change_permission(request):
-            context.setdefault("title", str(self.model._meta.verbose_name_plural))
+            # Django builds "Select %s to view" for read-only models. Use the
+            # plain model label in both the page heading and browser tab title.
+            context["title"] = str(self.model._meta.verbose_name_plural)
         context.update(self._calendar_context(request))
         return super().changelist_view(request, extra_context=context)
 
