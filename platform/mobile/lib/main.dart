@@ -331,7 +331,7 @@ Future<void> showVehiclePassportQr(BuildContext context, Map<String, dynamic> ve
     }
     final authenticated = await localAuth.authenticate(
       localizedReason: '차량 QR을 표시하려면 Face ID, 지문 또는 기기 잠금으로 인증해 주세요.',
-      biometricOnly: false,
+      options: const AuthenticationOptions(biometricOnly: false),
     );
     if (!authenticated) {
       if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
@@ -720,7 +720,8 @@ class _CafeKnowledgeSearchState extends State<CafeKnowledgeSearch> {
   void dispose() { queryController.dispose(); super.dispose(); }
 
   @override
-  Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(10), child: Row(children: [
+  Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(10), child: Column(children: [
+    Row(children: [
       Expanded(child: TextField(controller: queryController,
         style: const TextStyle(fontSize: 14),
         maxLength: 120,
@@ -745,7 +746,7 @@ class _CafeKnowledgeSearchState extends State<CafeKnowledgeSearch> {
         onPressed: searchNaver,
         child: const Text('카페 검색', maxLines: 1, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
       )),
-    ])),
+    ]),
     if (searchError != null) Padding(padding: const EdgeInsets.only(top: 6, left: 4), child: Text(searchError!, style: const TextStyle(fontSize: 12, color: brandRed))),
   ])));
 }
@@ -2304,6 +2305,56 @@ class _BookingListSectionState extends State<BookingListSection> {
   @override
   void initState() { super.initState(); reload(); }
 
+  Future<String?> _askCancellationReason() async {
+    final controller = TextEditingController();
+    String? validationMessage;
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: const Text('예약 취소 사유'),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text('취소 사유가 협력업체와 관리자에게 전달됩니다.'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 500,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  labelText: '취소 사유 *',
+                  hintText: '예: 일정 변경으로 방문이 어렵습니다.',
+                  errorText: validationMessage,
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ]),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('돌아가기'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final reason = controller.text.trim();
+                  if (reason.isEmpty) {
+                    setDialogState(() => validationMessage = '취소 사유를 입력해 주세요.');
+                    return;
+                  }
+                  Navigator.pop(dialogContext, reason);
+                },
+                child: const Text('예약 취소'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
   Future<void> act(Future<void> Function() action) async {
     try { await action(); if (mounted) setState(reload); }
     catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('Exception: ', '')))); }
@@ -2315,7 +2366,13 @@ class _BookingListSectionState extends State<BookingListSection> {
     builder: (context, snapshot) {
       if (snapshot.connectionState == ConnectionState.waiting) return const LinearProgressIndicator();
       if (snapshot.hasError) return const InfoCard(text: '예약 목록을 불러오지 못했습니다.');
-      final rows = (snapshot.data ?? []).where((row) => row['status'] != 'cancelled').toList();
+      final rows = (snapshot.data ?? []).where((row) {
+        final status = row['status']?.toString();
+        if (status == 'cancelled') return true;
+        if (status != 'requested' && status != 'confirmed') return false;
+        final scheduledAt = DateTime.tryParse(row['scheduled_at']?.toString() ?? '')?.toLocal();
+        return scheduledAt == null || scheduledAt.isAfter(DateTime.now());
+      }).toList();
       return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('업체 예약', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
         if (rows.isEmpty) const Padding(padding: EdgeInsets.only(top: 10), child: Text('예약 요청이 없습니다.')),
@@ -2331,9 +2388,13 @@ class _BookingListSectionState extends State<BookingListSection> {
               if ((row['partner_branch_label'] ?? '').toString().isNotEmpty) (row['partner_branch_label'] ?? '').toString(),
               if ((row['partner_region'] ?? '').toString().isNotEmpty) (row['partner_region'] ?? '').toString(),
             ].join(' · '), style: const TextStyle(fontWeight: FontWeight.w800)),
-              subtitle: Text('$when · ${row['service_type']} · ${row['status_label']}\n${(row['partner_note'] ?? row['customer_note'] ?? '').toString()}'),
+              subtitle: Text('$when · ${row['service_type']} · ${row['status_label']}\n${status == 'cancelled' ? '취소 사유: ${(row['cancellation_reason'] ?? '사유 미입력(이전 취소)').toString()}' : (row['partner_note'] ?? row['customer_note'] ?? '').toString()}'),
               trailing: owner && (status == 'requested' || status == 'confirmed')
-                ? TextButton(onPressed: () => act(() => widget.api.cancelPartnerBooking(row['id'] as int)), child: const Text('취소')) : null),
+                ? TextButton(onPressed: () async {
+                    final reason = await _askCancellationReason();
+                    if (reason == null || !mounted) return;
+                    await act(() => widget.api.cancelPartnerBooking(row['id'] as int, reason: reason));
+                  }, child: const Text('취소')) : null),
             if (manager && status == 'requested') Row(mainAxisAlignment: MainAxisAlignment.end, children: [
               TextButton(onPressed: () => act(() => widget.api.respondToPartnerBooking(row['id'] as int, status: 'rejected')), child: const Text('거절')),
               const SizedBox(width: 6),

@@ -76,12 +76,12 @@ class ApiClient {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  Future<void> cancelPartnerBooking(int bookingId) async {
+  Future<void> cancelPartnerBooking(int bookingId, {required String reason}) async {
     final token = await _storage.read(key: 'access_token');
     if (token == null) throw Exception('로그인이 필요합니다.');
     final response = await _client.post(_uri('bookings/$bookingId/cancel'), headers: {
       'Content-Type': 'application/json', 'Authorization': 'Bearer $token',
-    }, body: jsonEncode({}));
+    }, body: jsonEncode({'cancellation_reason': reason}));
     if (response.statusCode != 200) throw Exception(_message(response));
   }
 

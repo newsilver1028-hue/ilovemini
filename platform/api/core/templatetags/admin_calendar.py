@@ -48,6 +48,12 @@ def mini_admin_calendar(context, cl):
             .values("_calendar_day")
         )
         annotations = {"_count": Count("pk")}
+        if cl.opts.model_name == "partnerbooking":
+            annotations.update({
+                "_cancelled": Count("pk", filter=Q(status="cancelled")),
+                "_rejected": Count("pk", filter=Q(status="rejected")),
+                "_completed": Count("pk", filter=Q(status="completed")),
+            })
         if cl.opts.model_name == "pointtransaction":
             annotations.update({
                 "_earned": Sum("points_delta", filter=Q(points_delta__gt=0)),
@@ -58,11 +64,18 @@ def mini_admin_calendar(context, cl):
         return {"show_calendar": False}
     counts_by_day = {}
     points_by_day = {}
+    bookings_by_day = {}
     for row in counts:
         day = row["_calendar_day"]
         if not day:
             continue
         counts_by_day[day] = row["_count"]
+        if "_cancelled" in row:
+            bookings_by_day[day] = {
+                "cancelled": row["_cancelled"],
+                "rejected": row["_rejected"],
+                "completed": row["_completed"],
+            }
         if "_earned" in row:
             earned = row["_earned"] or 0
             spent = abs(row["_spent"] or 0)
@@ -99,6 +112,7 @@ def mini_admin_calendar(context, cl):
                 "is_today": current == today,
                 "count": counts_by_day.get(current, 0),
                 "points": points_by_day.get(current),
+                "bookings": bookings_by_day.get(current),
                 "url": query_for(current),
             })
             current += timedelta(days=1)

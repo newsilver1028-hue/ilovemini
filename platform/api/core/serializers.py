@@ -190,8 +190,8 @@ class PartnerBookingSerializer(serializers.ModelSerializer):
         model = PartnerBooking
         fields = ["id", "partner", "partner_name", "partner_branch_label", "partner_region", "vehicle", "vehicle_name", "vehicle_plate_number", "scheduled_at",
                   "service_type", "customer_note", "contact_phone", "status", "status_label", "can_manage", "can_verify_records", "is_customer",
-                  "partner_note", "requested_at", "updated_at"]
-        read_only_fields = ["id", "partner_name", "vehicle_name", "status", "partner_note", "requested_at", "updated_at"]
+                  "cancellation_reason", "partner_note", "requested_at", "updated_at"]
+        read_only_fields = ["id", "partner_name", "vehicle_name", "status", "cancellation_reason", "partner_note", "requested_at", "updated_at"]
 
     def get_can_manage(self, obj):
         request = self.context.get("request")

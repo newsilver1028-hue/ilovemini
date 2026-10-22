@@ -21,6 +21,10 @@
           {% if cell.points.earned %}<span class="admin-mini-calendar-count">{{ cell.points.earned_display }}</span>{% endif %}
           {% if cell.points.spent %}<span class="admin-mini-calendar-count">{{ cell.points.spent_display }}</span>{% endif %}
           {% if not cell.points.earned and not cell.points.spent and cell.count %}<span class="admin-mini-calendar-count">{{ cell.count }}건</span>{% endif %}
+        {% elif cell.bookings %}
+          <span class="admin-mini-calendar-count">예약 {{ cell.count }}건</span>
+          {% if cell.bookings.cancelled %}<span class="admin-mini-calendar-count booking-cancelled">취소 {{ cell.bookings.cancelled }}건</span>{% endif %}
+          {% if cell.bookings.rejected %}<span class="admin-mini-calendar-count">거절 {{ cell.bookings.rejected }}건</span>{% endif %}
         {% elif cell.count %}<span class="admin-mini-calendar-count">{{ cell.count }}건</span>{% endif %}
       </a>
     {% endfor %}{% endfor %}

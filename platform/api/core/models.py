@@ -423,6 +423,7 @@ class PartnerBooking(models.Model):
     customer_note = models.CharField(max_length=500, blank=True)
     contact_phone = models.CharField(max_length=24, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.REQUESTED)
+    cancellation_reason = models.CharField("예약 취소 사유", max_length=500, blank=True, default="")
     partner_note = models.CharField(max_length=500, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -597,8 +597,7 @@ class PartnerBookingStatusFilter(admin.SimpleListFilter):
 class PartnerBookingAdmin(AdminCalendarMixin, admin.ModelAdmin):
     """Central operator view; partner staff remain scoped to their own bookings."""
     list_display = (
-        "scheduled_at", "partner", "vehicle_plate", "vehicle_model",
-        "member", "contact_phone", "service_type", "status",
+        "booking_details", "status",
     )
     list_filter = (PartnerBookingStatusFilter, "partner")
     search_fields = (
@@ -614,12 +613,12 @@ class PartnerBookingAdmin(AdminCalendarMixin, admin.ModelAdmin):
     )
     fields = (
         "partner_name", "member_name", "vehicle_registration", "contact_phone",
-        "requested_at", "scheduled_at", "service_type", "customer_note",
+        "requested_at", "scheduled_at", "service_type", "customer_note", "cancellation_summary",
         "status", "partner_note",
     )
     readonly_fields = (
         "partner_name", "member_name", "vehicle_registration", "contact_phone",
-        "requested_at", "scheduled_at", "service_type", "customer_note",
+        "requested_at", "scheduled_at", "service_type", "customer_note", "cancellation_summary",
     )
     actions = None
     save_on_top = True
@@ -649,6 +648,146 @@ class PartnerBookingAdmin(AdminCalendarMixin, admin.ModelAdmin):
     @admin.display(description="차량", ordering="vehicle__model_name")
     def vehicle_model(self, obj):
         return obj.vehicle.model_name if obj.vehicle else "차량 정보 없음"
+
+    @admin.display(description="취소 사유")
+    def cancellation_summary(self, obj):
+        if obj.status != PartnerBooking.Status.CANCELLED:
+            return "—"
+        return obj.cancellation_reason or "사유 미입력(이전 취소)"
+
+    @admin.display(description="예약 상세")
+    def booking_details(self, obj):
+        branch = f" · {obj.partner.branch_label}" if obj.partner.branch_label else ""
+        vehicle = self.vehicle_registration(obj)
+        member_name = member_nickname(obj.customer)
+        customer_note = obj.customer_note or "요청 사항 없음"
+        partner_note = obj.partner_note or "업체 메모 없음"
+        cancellation = self.cancellation_summary(obj)
+        return format_html(
+            '<div class="booking-admin-card">'
+            '<strong>{} · {}</strong>'
+            '<div><b>회원 / 차량</b> {} · {} · 연락처 {}</div>'
+            '<div><b>요청 정비</b> {} · <b>요청 내용</b> {}</div>'
+            '<div><b>업체 메모</b> {}</div>'
+            '<div class="booking-admin-cancellation"><b>취소 사유</b> {}</div>'
+            '</div>',
+            obj.scheduled_at.strftime("%Y-%m-%d %H:%M"),
+            f"{obj.partner.name}{branch}", member_name, vehicle,
+            obj.contact_phone or "미등록", obj.service_type,
+            customer_note, partner_note, cancellation,
+        )
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        selected_day = None
+        try:
+            year = int(request.GET["scheduled_at__year"])
+            month = int(request.GET["scheduled_at__month"])
+            day = int(request.GET["scheduled_at__day"])
+            selected_day = date(year, month, day)
+        except (KeyError, TypeError, ValueError):
+            pass
+
+        if selected_day:
+            day_start = timezone.make_aware(datetime.combine(selected_day, time.min), timezone.get_current_timezone())
+            day_end = day_start + timedelta(days=1)
+            bookings = self.get_queryset(request).filter(
+                scheduled_at__gte=day_start, scheduled_at__lt=day_end,
+            ).order_by("scheduled_at", "partner__name", "pk")
+            entries = LedgerEntry.objects.filter(
+                source=LedgerEntry.Source.PARTNER,
+                entry_date=selected_day,
+                partner__isnull=False,
+            ).select_related("partner", "vehicle").order_by("partner__name", "-created_at")
+            transactions = PointTransaction.objects.filter(
+                partner__isnull=False,
+                created_at__gte=day_start,
+                created_at__lt=day_end,
+            ).select_related("partner", "user").order_by("partner__name", "-created_at")
+            partner_totals = {}
+            for entry in entries:
+                totals = partner_totals.setdefault(entry.partner_id, {
+                    "partner": entry.partner,
+                    "payment_total": 0,
+                    "service_count": 0,
+                "redemption_gross": 0,
+                "redemption_net": 0,
+                "redemption_count": 0,
+                    "earned": 0,
+                    "spent": 0,
+                "refunded": 0,
+                    "transactions": [],
+                "redemptions": [],
+                    "entries": [],
+                })
+                totals["payment_total"] += entry.amount_krw
+                totals["service_count"] += 1
+                totals["entries"].append(entry)
+            for transaction_record in transactions:
+                transaction_record.member_display = member_nickname(transaction_record.user)
+                totals = partner_totals.setdefault(transaction_record.partner_id, {
+                    "partner": transaction_record.partner,
+                    "payment_total": 0,
+                    "service_count": 0,
+                    "redemption_gross": 0,
+                    "redemption_net": 0,
+                    "redemption_count": 0,
+                    "earned": 0,
+                    "spent": 0,
+                    "refunded": 0,
+                    "transactions": [],
+                    "redemptions": [],
+                    "entries": [],
+                })
+                if transaction_record.points_delta > 0 and transaction_record.transaction_type == PointTransaction.Type.SERVICE_EARN:
+                    totals["earned"] += transaction_record.points_delta
+                elif transaction_record.transaction_type == PointTransaction.Type.REDEMPTION and transaction_record.points_delta < 0:
+                    totals["spent"] += abs(transaction_record.points_delta)
+                elif transaction_record.transaction_type == PointTransaction.Type.REFUND and transaction_record.points_delta > 0:
+                    totals["refunded"] += transaction_record.points_delta
+                totals["transactions"].append(transaction_record)
+            redemptions = PointRedemptionRequest.objects.filter(
+                status=PointRedemptionRequest.Status.COMPLETED,
+                completed_at__gte=day_start,
+                completed_at__lt=day_end,
+            ).select_related("partner", "member").order_by("partner__name", "-completed_at")
+            for redemption in redemptions:
+                redemption.member_display = member_nickname(redemption.member)
+                redemption.cash_payment_display = f'{max(redemption.payment_amount_krw - redemption.points_requested, 0):,}'
+                redemption.gross_payment_display = f'{redemption.payment_amount_krw:,}'
+                redemption.points_requested_display = f'{redemption.points_requested:,}'
+                totals = partner_totals.setdefault(redemption.partner_id, {
+                    "partner": redemption.partner,
+                    "payment_total": 0,
+                    "service_count": 0,
+                    "redemption_gross": 0,
+                    "redemption_net": 0,
+                    "redemption_count": 0,
+                    "earned": 0,
+                    "spent": 0,
+                    "refunded": 0,
+                    "transactions": [],
+                    "redemptions": [],
+                    "entries": [],
+                })
+                totals["redemption_gross"] += redemption.payment_amount_krw
+                totals["redemption_net"] += max(redemption.payment_amount_krw - redemption.points_requested, 0)
+                totals["redemption_count"] += 1
+                totals["redemptions"].append(redemption)
+            extra_context["booking_day_report"] = {
+                "day": selected_day,
+                "bookings": bookings,
+                "booking_count": bookings.count(),
+                "partners": sorted(partner_totals.values(), key=lambda item: item["partner"].name),
+            }
+            for report in extra_context["booking_day_report"]["partners"]:
+                report["payment_total_display"] = f'{report["payment_total"]:,}'
+                report["redemption_gross_display"] = f'{report["redemption_gross"]:,}'
+                report["redemption_net_display"] = f'{report["redemption_net"]:,}'
+                report["earned_display"] = f'{report["earned"]:,}'
+                report["spent_display"] = f'{report["spent"]:,}'
+                report["refunded_display"] = f'{report["refunded"]:,}'
+        return super().changelist_view(request, extra_context=extra_context)
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related(

@@ -596,3 +596,8 @@ html[data-theme="auto"] td, html[data-theme="auto"] .mini-menu-link { color: var
 .partner-service-category-add [role="status"] {
   color: var(--body-quiet-color);
 }
+
+.admin-mini-calendar-count.booking-cancelled {
+  color: #b3213b;
+  font-weight: 800;
+}

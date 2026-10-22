@@ -44,6 +44,58 @@
 
 {% block content %}
   {% mini_admin_calendar cl %}
+  {% if booking_day_report %}
+    <section class="booking-day-report" aria-label="{{ booking_day_report.day|date:'Y년 n월 j일' }} 예약 및 매출 상세">
+      <header class="booking-day-report-heading">
+        <div>
+          <p class="partner-calendar-eyebrow">선택 날짜 상세</p>
+          <h2>{{ booking_day_report.day|date:"Y년 n월 j일" }} 예약·정비·포인트 내역</h2>
+          <p>예약 {{ booking_day_report.booking_count }}건 · 인증 정비 결제 금액은 업체가 등록한 정비기록 기준입니다.</p>
+        </div>
+      </header>
+
+      <h3>예약 상세</h3>
+      {% for booking in booking_day_report.bookings %}
+        <article class="booking-day-card">
+          <header><strong>{{ booking.scheduled_at|date:"H:i" }} · {{ booking.partner.name }}{% if booking.partner.branch_label %} {{ booking.partner.branch_label }}{% endif %}</strong><span>{{ booking.get_status_display }}</span></header>
+          <dl>
+            <div><dt>회원</dt><dd>{% if booking.customer.naver_identity.cafe_nickname %}{{ booking.customer.naver_identity.cafe_nickname }}{% elif booking.customer.apple_identity.cafe_nickname %}{{ booking.customer.apple_identity.cafe_nickname }}{% else %}회원 #{{ booking.customer_id }}{% endif %}</dd></div>
+            <div><dt>차량</dt><dd>{% if booking.vehicle %}{{ booking.vehicle.plate_number|default:"번호 미등록" }} · {{ booking.vehicle.model_name }}{% else %}차량 정보 없음{% endif %}</dd></div>
+            <div><dt>연락처</dt><dd>{{ booking.contact_phone|default:"미등록" }}</dd></div>
+            <div><dt>요청 정비</dt><dd>{{ booking.service_type }}</dd></div>
+            <div><dt>회원 요청</dt><dd>{{ booking.customer_note|default:"요청 사항 없음" }}</dd></div>
+            <div><dt>업체 메모</dt><dd>{{ booking.partner_note|default:"업체 메모 없음" }}</dd></div>
+            {% if booking.status == "cancelled" %}<div class="booking-day-cancelled"><dt>취소 사유</dt><dd>{{ booking.cancellation_reason|default:"사유 미입력(이전 취소)" }}</dd></div>{% endif %}
+          </dl>
+        </article>
+      {% empty %}<p class="booking-day-empty">선택한 날짜에 예약이 없습니다.</p>{% endfor %}
+
+      <h3>업체별 인증 정비·포인트 실적</h3>
+      {% for report in booking_day_report.partners %}
+        <article class="booking-day-card booking-finance-card">
+          <header><strong>{{ report.partner.name }}{% if report.partner.branch_label %} · {{ report.partner.branch_label }}{% endif %}</strong></header>
+          <div class="booking-finance-metrics">
+            <span>인증 정비 {{ report.service_count }}건</span>
+            <span>인증 정비 등록액 {{ report.payment_total_display }}원</span>
+            <span>포인트 결제 {{ report.redemption_count }}건 · 총 {{ report.redemption_gross_display }}원</span>
+            <span>포인트 사용 후 결제액 {{ report.redemption_net_display }}원</span>
+            <span>포인트 적립 {{ report.earned_display }}P</span>
+            <span>포인트 사용 {{ report.spent_display }}P</span>
+            <span>사용 취소·환급 {{ report.refunded_display }}P</span>
+          </div>
+          {% if report.entries %}<details><summary>인증 정비 기록 {{ report.entries|length }}건 보기</summary><ul>
+            {% for entry in report.entries %}<li>{{ entry.created_at|date:"H:i" }} · {{ entry.vehicle.plate_number|default:"차량번호 미등록" }} · {{ entry.vehicle.model_name }} · {{ entry.description|default:entry.get_kind_display }} · {{ entry.amount_krw }}원</li>{% endfor %}
+          </ul></details>{% endif %}
+          {% if report.redemptions %}<details><summary>포인트 결제 {{ report.redemptions|length }}건 보기</summary><ul>
+            {% for redemption in report.redemptions %}<li>{{ redemption.completed_at|date:"H:i" }} · {{ redemption.member_display }} · 총 {{ redemption.gross_payment_display }}원 · {{ redemption.points_requested_display }}P 사용 · 결제액 {{ redemption.cash_payment_display }}원</li>{% endfor %}
+          </ul></details>{% endif %}
+          {% if report.transactions %}<details><summary>포인트 거래 {{ report.transactions|length }}건 보기</summary><ul>
+            {% for transaction in report.transactions %}<li>{{ transaction.created_at|date:"H:i" }} · {{ transaction.member_display }} · {{ transaction.get_transaction_type_display }} · {% if transaction.points_delta > 0 %}+{% endif %}{{ transaction.points_delta }}P · {{ transaction.memo|default:"내용 없음" }}</li>{% endfor %}
+          </ul></details>{% endif %}
+        </article>
+      {% empty %}<p class="booking-day-empty">선택한 날짜에 업체 인증 정비 또는 포인트 거래가 없습니다.</p>{% endfor %}
+    </section>
+  {% endif %}
   <div id="content-main">
     {% block object-tools %}
         <ul class="object-tools">

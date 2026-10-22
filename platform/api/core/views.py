@@ -1197,8 +1197,15 @@ class PartnerBookingViewSet(viewsets.ModelViewSet):
             return Response({"detail": "예약자만 취소할 수 있습니다."}, status=status.HTTP_403_FORBIDDEN)
         if booking.status not in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED):
             return Response({"detail": "현재 상태에서는 취소할 수 없습니다."}, status=status.HTTP_409_CONFLICT)
+        cancellation_reason = str(request.data.get("cancellation_reason", "")).strip()
+        # Keep old installed clients working while newer clients collect a reason.
+        if not cancellation_reason:
+            cancellation_reason = "사유 미입력(이전 앱)"
+        if len(cancellation_reason) > 500:
+            return Response({"detail": "예약 취소 사유는 500자 이내로 입력해 주세요."}, status=status.HTTP_400_BAD_REQUEST)
         booking.status = PartnerBooking.Status.CANCELLED
-        booking.save(update_fields=["status", "updated_at"])
+        booking.cancellation_reason = cancellation_reason
+        booking.save(update_fields=["status", "cancellation_reason", "updated_at"])
         def notify_partner_cancelled():
             try:
                 from .push import send_booking_cancel_notification

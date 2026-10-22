@@ -260,9 +260,28 @@ class ApiAccessTests(TestCase):
         accepted = shop_client.post(f"/api/bookings/{booking.pk}/respond/", {"status": "confirmed"}, format="json")
         self.assertEqual(accepted.status_code, 200, accepted.data)
         self.assertEqual(booking.__class__.objects.get(pk=booking.pk).status, PartnerBooking.Status.CONFIRMED)
-        cancelled = self.client.post(f"/api/bookings/{booking.pk}/cancel/", {}, format="json")
+        cancelled = self.client.post(f"/api/bookings/{booking.pk}/cancel/", {
+            "cancellation_reason": "일정이 변경되어 취소합니다.",
+        }, format="json")
         self.assertEqual(cancelled.status_code, 200)
-        self.assertEqual(booking.__class__.objects.get(pk=booking.pk).status, PartnerBooking.Status.CANCELLED)
+        cancelled_booking = booking.__class__.objects.get(pk=booking.pk)
+        self.assertEqual(cancelled_booking.status, PartnerBooking.Status.CANCELLED)
+        self.assertEqual(cancelled_booking.cancellation_reason, "일정이 변경되어 취소합니다.")
+
+    def test_legacy_booking_cancellation_without_reason_stays_compatible(self):
+        partner = Partner.objects.create(name="취소 사유 업체", is_active=True)
+        booking = PartnerBooking.objects.create(
+            customer=self.member, partner=partner,
+            scheduled_at=timezone.now() + timedelta(days=1), service_type="정비",
+            status=PartnerBooking.Status.CONFIRMED,
+        )
+
+        response = self.client.post(f"/api/bookings/{booking.pk}/cancel/", {}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, PartnerBooking.Status.CANCELLED)
+        self.assertEqual(booking.cancellation_reason, "사유 미입력(이전 앱)")
 
     def test_same_company_name_can_have_independent_branch_staff_and_bookings(self):
         seongsu = Partner.objects.create(name="아이모터스랩", branch_label="성수점", region="서울 성동구", is_active=True)
@@ -313,9 +332,12 @@ class ApiAccessTests(TestCase):
              patch("core.push.messaging.send_each_for_multicast") as send, \
              self.captureOnCommitCallbacks(execute=True):
             send.return_value.success_count = 1
-            response = self.client.post(f"/api/bookings/{booking.pk}/cancel/", {}, format="json")
+            response = self.client.post(f"/api/bookings/{booking.pk}/cancel/", {
+                "cancellation_reason": "방문 일정을 변경합니다.",
+            }, format="json")
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["status"], PartnerBooking.Status.CANCELLED)
+        self.assertEqual(response.data["cancellation_reason"], "방문 일정을 변경합니다.")
         self.assertEqual(send.call_count, 1)
         message = send.call_args.args[0]
         self.assertEqual(message.tokens, ["cancel-push-token"])
