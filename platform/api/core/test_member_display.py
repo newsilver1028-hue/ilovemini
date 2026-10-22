@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from .models import (
     AttendanceCheckin,
+    LedgerEntry,
     MemberPreference,
     NaverIdentity,
     Partner,
@@ -13,6 +14,7 @@ from .models import (
     PointTransaction,
     PushDevice,
     RecordCorrectionRequest,
+    Vehicle,
     VehicleOwnership,
     VehiclePlateHistory,
     VehicleTransferCode,
@@ -123,3 +125,31 @@ class MemberDisplayTests(TestCase):
         self.assertContains(response, "포인트 사용 업체")
         self.assertContains(response, "정비 결제 포인트 사용")
         self.assertNotContains(response, self.member.username)
+
+    def test_point_transaction_list_renders_linked_ledger_amount_without_500(self):
+        partner = Partner.objects.create(name="연결 정비 업체", branch_label="성수점")
+        vehicle = Vehicle.objects.create(
+            model_name="MINI Cooper", plate_number="12가3456",
+        )
+        entry = LedgerEntry.objects.create(
+            vehicle=vehicle,
+            kind=LedgerEntry.Kind.SERVICE,
+            amount_krw=125000,
+            odometer_km=45000,
+            partner=partner,
+            source=LedgerEntry.Source.PARTNER,
+        )
+        PointTransaction.objects.create(
+            user=self.member,
+            partner=partner,
+            ledger_entry=entry,
+            transaction_type=PointTransaction.Type.SERVICE_EARN,
+            points_delta=1250,
+            memo="정비 적립",
+        )
+
+        response = self.client.get(reverse("admin:core_pointtransaction_changelist"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "125,000원")
+        self.assertContains(response, "45,000km")
