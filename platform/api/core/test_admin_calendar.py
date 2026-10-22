@@ -60,6 +60,21 @@ class AdminCalendarPageTests(TestCase):
         vehicle_response = self.client.get(reverse("admin:core_vehicle_changelist"))
         self.assert_single_mini_calendar(vehicle_response)
 
+    def test_read_only_model_lists_use_clean_titles(self):
+        self.client.force_login(self.admin_user)
+        for route in (
+            "admin:core_vehicleownership_changelist",
+            "admin:core_attendancecheckin_changelist",
+            "admin:core_pointtransaction_changelist",
+            "admin:core_pointredemptionrequest_changelist",
+            "admin:core_recordcorrectionrequest_changelist",
+        ):
+            with self.subTest(route=route):
+                response = self.client.get(reverse(route))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["title"], response.context["cl"].opts.verbose_name_plural)
+                self.assertNotIn("보기위한", response.context["title"])
+
     def test_dashboard_shows_policy_page_links(self):
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse("admin:index"))
