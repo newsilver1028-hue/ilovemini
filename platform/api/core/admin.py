@@ -167,7 +167,9 @@ class PartnerAdminForm(forms.ModelForm):
         help_text="앱의 업체 상세 → ‘업체 정보’에 표시됩니다. 방문·주차·이용 안내 등을 작성하세요.",
         widget=forms.Textarea(attrs={"rows": 5, "cols": 70}))
     storefront_photo_url = forms.URLField(label="대표 사진 주소 (선택)", required=False,
-        help_text="사진 파일 첨부는 아래 ‘매장 사진’에서 가능합니다. 주소가 있는 대표 사진만 이곳에 입력하세요.")
+        help_text="사진 파일 첨부는 아래 ‘매장 사진’에서 가능합니다. 권장 1200×900px(4:3), 최소 800×600px. 주소가 있는 대표 사진만 입력하세요.")
+    representative_photo_url = forms.URLField(label="대표자 사진 주소", required=False,
+        help_text="권장 800×800px(1:1) 정사각형, 최소 400×400px. 얼굴이 중앙에 오도록 준비해 주세요.")
     service_categories = forms.MultipleChoiceField(
         label="서비스 분야",
         required=False,
@@ -391,7 +393,7 @@ class NoticeAdmin(AdminCalendarMixin, admin.ModelAdmin):
 
 class PartnerImageAdminForm(forms.ModelForm):
     upload = forms.FileField(label="소개 이미지 첨부", required=False,
-        help_text="PNG, JPEG, WebP 파일을 선택하세요. 최대 5MB. 기존 이미지를 바꾸려면 새 파일을 선택하세요.",
+        help_text="권장 1200×900px(4:3), 최소 800×600px. PNG, JPEG, WebP 파일, 최대 5MB. 기존 이미지를 바꾸려면 새 파일을 선택하세요.",
         widget=forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/webp"}))
 
     class Meta:
@@ -806,8 +808,22 @@ User._meta.verbose_name_plural = "가입 회원 목록"
 User._meta.get_field("id").verbose_name = "회원 번호"
 Group._meta.get_field("id").verbose_name = "번호"
 
+class SeasonBannerAdminForm(forms.ModelForm):
+    class Meta:
+        model = SeasonBanner
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["image_url"].help_text = (
+            "앱 시작 시즌 배너용 권장 1080×1920px(9:16 세로형). "
+            "제목·중요 문구는 가장자리에서 10% 안쪽에 배치하세요. 공개 HTTPS 이미지 주소를 입력합니다."
+        )
+
+
 @admin.register(SeasonBanner)
 class SeasonBannerAdmin(AdminCalendarMixin, admin.ModelAdmin):
+    form = SeasonBannerAdminForm
     list_display = ("title", "is_active", "starts_at", "ends_at", "duration_seconds", "priority")
     list_editable = ("is_active", "priority")
     list_filter = ("is_active",)
@@ -815,8 +831,22 @@ class SeasonBannerAdmin(AdminCalendarMixin, admin.ModelAdmin):
     date_hierarchy = "starts_at"
     save_on_top = True
 
+class AppContentAdminForm(forms.ModelForm):
+    class Meta:
+        model = AppContent
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["image_url"].help_text = (
+            "권장 1200×1200px(1:1 정사각형), 최소 800×800px. "
+            "앱 카드에서 잘리지 않도록 주요 피사체를 중앙에 두세요. 공개 HTTPS 이미지 주소를 입력합니다."
+        )
+
+
 @admin.register(AppContent)
 class AppContentAdmin(AdminCalendarMixin, admin.ModelAdmin):
+    form = AppContentAdminForm
     list_display = ("title", "kind", "category", "is_active", "display_order", "starts_at", "ends_at")
     list_editable = ("is_active", "display_order")
     list_filter = ("kind", "category", "is_active")
