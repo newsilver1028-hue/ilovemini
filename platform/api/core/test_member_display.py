@@ -153,3 +153,41 @@ class MemberDisplayTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "125,000원")
         self.assertContains(response, "45,000km")
+
+
+    def test_member_detail_shows_point_totals_and_full_transaction_history(self):
+        partner = Partner.objects.create(name="회원 포인트 업체", branch_label="성수점")
+        PointTransaction.objects.create(
+            user=self.member,
+            transaction_type=PointTransaction.Type.ATTENDANCE,
+            points_delta=1000,
+            memo="출석 체크 적립",
+        )
+        PointTransaction.objects.create(
+            user=self.member,
+            partner=partner,
+            transaction_type=PointTransaction.Type.SERVICE_EARN,
+            points_delta=750,
+            memo="정비 결제 적립",
+        )
+        PointTransaction.objects.create(
+            user=self.member,
+            partner=partner,
+            transaction_type=PointTransaction.Type.REDEMPTION,
+            points_delta=-500,
+            memo="업체 결제 포인트 사용",
+        )
+
+        response = self.client.get(reverse("admin:auth_user_change", args=[self.member.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "포인트 요약")
+        self.assertContains(response, "누적 적립")
+        self.assertContains(response, "1,750P")
+        self.assertContains(response, "누적 사용")
+        self.assertContains(response, "500P")
+        self.assertContains(response, "전체 포인트 거래 내역")
+        self.assertContains(response, "출석 체크 적립")
+        self.assertContains(response, "정비 결제 적립")
+        self.assertContains(response, "업체 결제 포인트 사용")
+        self.assertContains(response, "회원 포인트 업체")
