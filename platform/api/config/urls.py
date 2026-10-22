@@ -3,6 +3,8 @@ from core.app_views import AppContentView, ShoppingSearchView, MemberPreferenceV
 from rest_framework_simplejwt.views import TokenRefreshView
 from django.contrib import admin
 from django.urls import include, path
+from django.http import HttpResponseRedirect
+from django.conf import settings
 from django.views.generic import RedirectView
 from rest_framework.routers import DefaultRouter
 from core.views import HealthView, CafeSearchView, CafeLatestView, CafeAnswerView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet, PartnerPointRedemptionView, PartnerPointBalanceView, MemberPointRedemptionView
@@ -20,8 +22,18 @@ router.register("notices", NoticeViewSet, basename="notice")
 router.register("partners", PartnerViewSet, basename="partner")
 router.register("offers", OfferViewSet, basename="offer")
 router.register("bookings", PartnerBookingViewSet, basename="booking")
+
+
+def public_home(request):
+    host = request.get_host().split(":", 1)[0].lower()
+    if host == settings.ADMIN_CUSTOM_DOMAIN:
+        return HttpResponseRedirect("/partner-admin/login/")
+    return HttpResponseRedirect("/privacy/")
+
+
 urlpatterns = [
-    path("", RedirectView.as_view(url="/privacy/", permanent=False), name="public_home"),
+    path("", public_home, name="public_home"),
+    path("partner/", RedirectView.as_view(url="/partner-admin/login/", permanent=False), name="partner_admin_shortcut"),
     path("privacy/", privacy_policy, name="privacy_policy"),
     path("terms/", terms_of_service, name="terms_of_service"),
     path("api/app/content/", AppContentView.as_view(), name="app_content"),
