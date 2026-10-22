@@ -141,6 +141,8 @@ class AdminCalendarMixin:
 
     def changelist_view(self, request, extra_context=None):
         context = dict(extra_context or {})
+        if not self.has_change_permission(request):
+            context.setdefault("title", str(self.model._meta.verbose_name_plural))
         context.update(self._calendar_context(request))
         return super().changelist_view(request, extra_context=context)
 
