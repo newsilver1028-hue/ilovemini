@@ -5,7 +5,8 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
-from .models import AppContent, AppRelease, SeasonBanner, Vehicle, VehicleOwnership, Partner, PartnerStaff, NaverIdentity, LedgerEntry, RecordCorrectionRequest, PushDevice
+from .models import AppContent, AppRelease, SeasonBanner, Vehicle, VehicleOwnership, Partner, PartnerStaff, NaverIdentity, LedgerEntry, RecordCorrectionRequest, PushDevice, Notice, Offer, MemberPreference
+from .admin import MemberPreferenceAdminForm
 from .integrity import ledger_record_hash
 from . import push  # Ensure patch targets resolve before notification tests run.
 
@@ -33,6 +34,45 @@ class AppContentTests(TestCase):
         self.assertEqual(response.data['products'][0]['price_krw'], 32000)
         self.assertEqual(response.data['banners'], [])
         self.assertEqual(response['Cache-Control'], 'no-store')
+
+    def test_admin_release_edits_are_returned_on_next_app_request(self):
+        AppRelease.objects.create(platform='ios', version='1.0', build_number=343,
+            is_active=True, download_url='https://apps.apple.com/app/id1', notes='심사 수정')
+        response = self.client.get('/api/app/content/')
+        self.assertEqual(response.data['releases'], [{
+            'platform': 'ios', 'version': '1.0', 'build_number': 343,
+            'download_url': 'https://apps.apple.com/app/id1', 'notes': '심사 수정',
+        }])
+
+    def test_notice_and_offer_edits_are_uncached_for_next_app_request(self):
+        notice = Notice.objects.create(title='공지', body='수정 전', is_published=True)
+        partner = Partner.objects.create(name='정비업체', is_active=True)
+        offer = Offer.objects.create(partner=partner, title='혜택', description='수정 전', is_active=True)
+        notice.body = '관리자에서 수정'; notice.save(update_fields=['body'])
+        offer.description = '관리자에서 수정'; offer.save(update_fields=['description'])
+
+        notices = self.client.get('/api/notices/')
+        offers = self.client.get('/api/offers/')
+        self.assertEqual(notices['Cache-Control'], 'private, no-cache, no-store, must-revalidate')
+        self.assertEqual(offers['Cache-Control'], 'private, no-cache, no-store, must-revalidate')
+        self.assertEqual(notices.data[0]['body'], '관리자에서 수정')
+        self.assertEqual(offers.data[0]['description'], '관리자에서 수정')
+
+    def test_member_preference_admin_only_offers_members_own_active_vehicles(self):
+        member = User.objects.create_user(username='preference-member')
+        other = User.objects.create_user(username='other-preference-member')
+        own_vehicle = Vehicle.objects.create(model_name='MINI JCW')
+        VehicleOwnership.objects.create(vehicle=own_vehicle, user=member)
+        foreign_vehicle = Vehicle.objects.create(model_name='MINI Cooper')
+        VehicleOwnership.objects.create(vehicle=foreign_vehicle, user=other)
+        preference = MemberPreference.objects.create(user=member, primary_vehicle=own_vehicle)
+
+        form = MemberPreferenceAdminForm(instance=preference)
+        self.assertEqual(list(form.fields['primary_vehicle'].queryset), [own_vehicle])
+
+        form = MemberPreferenceAdminForm(data={'user': member.pk, 'primary_vehicle': foreign_vehicle.pk}, instance=preference)
+        self.assertFalse(form.is_valid())
+        self.assertIn('primary_vehicle', form.errors)
 
     def test_publish_requires_https_and_valid_dates(self):
         for row in [AppContent(kind='product', title='주소 없음', is_active=True),

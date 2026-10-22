@@ -1088,6 +1088,12 @@ class PushDeviceView(APIView):
 class NoticeViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = NoticeSerializer
     permission_classes = [SafeMethodsOrStaff]
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        if request.method == "GET":
+            response["Cache-Control"] = "private, no-cache, no-store, must-revalidate"
+        return response
+
     def get_queryset(self):
         now = timezone.now()
         return Notice.objects.filter(is_published=True, published_at__lte=now).filter(
@@ -1145,6 +1151,12 @@ class PartnerViewSet(viewsets.ReadOnlyModelViewSet):
 class OfferViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = OfferSerializer
     permission_classes = [SafeMethodsOrStaff]
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        if request.method == "GET":
+            response["Cache-Control"] = "private, no-cache, no-store, must-revalidate"
+        return response
+
     def get_queryset(self):
         now = timezone.now()
         return Offer.objects.filter(is_active=True, partner__is_active=True).filter(

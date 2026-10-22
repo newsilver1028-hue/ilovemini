@@ -761,27 +761,50 @@ Group._meta.get_field("id").verbose_name = "번호"
 @admin.register(SeasonBanner)
 class SeasonBannerAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("title", "is_active", "starts_at", "ends_at", "duration_seconds", "priority")
+    list_editable = ("is_active", "priority")
     list_filter = ("is_active",)
     search_fields = ("title", "subtitle")
     date_hierarchy = "starts_at"
+    save_on_top = True
+
 @admin.register(AppContent)
 class AppContentAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("title", "kind", "category", "is_active", "display_order", "starts_at", "ends_at")
+    list_editable = ("is_active", "display_order")
     list_filter = ("kind", "category", "is_active")
     search_fields = ("title", "description", "compatible_models")
     date_hierarchy = "starts_at"
+    save_on_top = True
+
 @admin.register(AppRelease)
 class AppReleaseAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("platform", "version", "build_number", "is_active")
+    list_editable = ("is_active",)
+    search_fields = ("version", "notes")
+    save_on_top = True
+
+class MemberPreferenceAdminForm(forms.ModelForm):
+    class Meta:
+        model = MemberPreference
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        user_id = self.data.get("user") or self.initial.get("user") or getattr(self.instance, "user_id", None)
+        self.fields["primary_vehicle"].queryset = Vehicle.objects.filter(
+            status="active", ownerships__user_id=user_id, ownerships__ended_at__isnull=True,
+        ).distinct() if user_id else Vehicle.objects.none()
+
 @admin.register(MemberPreference)
 class MemberPreferenceAdmin(AdminCalendarMixin, admin.ModelAdmin):
+    form = MemberPreferenceAdminForm
     list_display = ("member", "primary_vehicle")
     list_select_related = ("user__naver_identity", "user__apple_identity", "primary_vehicle")
-    readonly_fields = ("user", "primary_vehicle")
+    readonly_fields = ("user",)
     @admin.display(description="회원")
     def member(self, obj): return member_nickname(obj.user)
     def has_add_permission(self, request): return False
-    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False
 @admin.register(RecordCorrectionRequest)
 class RecordCorrectionRequestAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("entry", "member", "reason", "created_at", "resolved_at")
