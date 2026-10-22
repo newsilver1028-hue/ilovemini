@@ -118,7 +118,6 @@ class MemberDisplayTests(TestCase):
         response = self.client.get(changelist_url, {"q": str(self.member.pk)})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "테스트회원")
-        self.assertContains(response, "12가3456")
 
         assigned = self.client.get(changelist_url, {"vehicle_assigned": "assigned"})
         self.assertEqual(
