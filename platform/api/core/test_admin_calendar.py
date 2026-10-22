@@ -4,11 +4,12 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.conf import settings
 from django.db import models
-from django.test import RequestFactory, SimpleTestCase, TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
+from .models import PartnerBooking
 
 
-class AdminCalendarTests(SimpleTestCase):
+class AdminCalendarTests(TestCase):
     def test_editable_date_fields_in_registered_admins_have_calendar_widgets(self):
         request = RequestFactory().get("/admin/")
         request.user = AnonymousUser()
@@ -60,6 +61,19 @@ class AdminCalendarPageTests(TestCase):
 
         vehicle_response = self.client.get(reverse("admin:core_vehicle_changelist"))
         self.assert_single_mini_calendar(vehicle_response)
+
+    def test_central_partner_booking_menu_is_available_and_calendarized(self):
+        self.client.force_login(self.admin_user)
+        dashboard = self.client.get(reverse("admin:index"))
+        self.assertContains(dashboard, reverse("admin:core_partnerbooking_changelist"))
+
+        response = self.client.get(reverse("admin:core_partnerbooking_changelist"))
+        self.assert_single_mini_calendar(response)
+        model_admin = admin.site._registry[PartnerBooking]
+        request = RequestFactory().get("/admin/")
+        request.user = self.admin_user
+        self.assertFalse(model_admin.has_add_permission(request))
+        self.assertFalse(model_admin.has_delete_permission(request))
 
     def test_read_only_model_lists_use_clean_titles(self):
         self.client.force_login(self.admin_user)

@@ -1,5 +1,5 @@
 from datetime import date, datetime, time, timedelta
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.utils.html import format_html
 from django import forms
 from django.contrib import admin
@@ -7,7 +7,7 @@ from django.contrib.admin.widgets import AdminDateWidget, AdminSplitDateTime
 from django.contrib.auth.models import Group
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
-from django.db import models
+from django.db import models, transaction
 from django.db.models import IntegerField, OuterRef, Subquery, Sum, Value
 from django.db.models import Count
 from django.db.models.functions import Coalesce, TruncDate
@@ -20,7 +20,7 @@ from .models import (
     LedgerEntry, Notice, Offer, Partner, PartnerImage, PartnerReview, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
     VehicleOwnership, VehicleTransferCode, AttendanceCheckin, PointTransaction, PointRedemptionRequest,
     SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest, AppReviewAccount, AppleIdentity,
-    PartnerServiceCategoryOption,
+    PartnerServiceCategoryOption, PartnerBooking,
 )
 
 
@@ -580,6 +580,107 @@ class PartnerServiceCategoryOptionAdmin(admin.ModelAdmin):
     list_editable = ("is_active", "display_order")
     search_fields = ("name",)
     ordering = ("display_order", "name")
+
+
+class PartnerBookingStatusFilter(admin.SimpleListFilter):
+    title = "예약 상태"
+    parameter_name = "status"
+
+    def lookups(self, request, model_admin):
+        return PartnerBooking.Status.choices
+
+    def queryset(self, request, queryset):
+        return queryset.filter(status=self.value()) if self.value() else queryset
+
+
+@admin.register(PartnerBooking)
+class PartnerBookingAdmin(AdminCalendarMixin, admin.ModelAdmin):
+    """Central operator view; partner staff remain scoped to their own bookings."""
+    list_display = (
+        "scheduled_at", "partner", "vehicle_plate", "vehicle_model",
+        "member", "contact_phone", "service_type", "status",
+    )
+    list_filter = (PartnerBookingStatusFilter, "partner")
+    search_fields = (
+        "partner__name", "partner__branch_label", "vehicle__plate_number",
+        "vehicle__model_name", "contact_phone", "service_type",
+        "customer__naver_identity__cafe_nickname", "customer__naver_identity__nickname",
+        "customer__apple_identity__cafe_nickname",
+    )
+    date_hierarchy = "scheduled_at"
+    ordering = ("-scheduled_at", "-pk")
+    list_select_related = (
+        "partner", "vehicle", "customer__naver_identity", "customer__apple_identity",
+    )
+    fields = (
+        "partner_name", "member_name", "vehicle_registration", "contact_phone",
+        "requested_at", "scheduled_at", "service_type", "customer_note",
+        "status", "partner_note",
+    )
+    readonly_fields = (
+        "partner_name", "member_name", "vehicle_registration", "contact_phone",
+        "requested_at", "scheduled_at", "service_type", "customer_note",
+    )
+    actions = None
+    save_on_top = True
+
+    @admin.display(description="협력업체", ordering="partner__name")
+    def partner_name(self, obj):
+        return obj.partner.name
+
+    @admin.display(description="회원 닉네임")
+    def member(self, obj):
+        return member_nickname(obj.customer)
+
+    @admin.display(description="회원 닉네임")
+    def member_name(self, obj):
+        return member_nickname(obj.customer)
+
+    @admin.display(description="차량번호 / 차량")
+    def vehicle_registration(self, obj):
+        if not obj.vehicle:
+            return "차량 정보 없음"
+        return f"{obj.vehicle.plate_number or '차량번호 미등록'} · {obj.vehicle.model_name}"
+
+    @admin.display(description="차량번호", ordering="vehicle__plate_number")
+    def vehicle_plate(self, obj):
+        return obj.vehicle.plate_number if obj.vehicle and obj.vehicle.plate_number else "미등록"
+
+    @admin.display(description="차량", ordering="vehicle__model_name")
+    def vehicle_model(self, obj):
+        return obj.vehicle.model_name if obj.vehicle else "차량 정보 없음"
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related(
+            "partner", "vehicle", "customer__naver_identity", "customer__apple_identity"
+        )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def save_model(self, request, obj, form, change):
+        previous_status = PartnerBooking.objects.filter(pk=obj.pk).values_list("status", flat=True).first() if change else None
+        allowed = {
+            PartnerBooking.Status.REQUESTED: {PartnerBooking.Status.CONFIRMED, PartnerBooking.Status.REJECTED},
+            PartnerBooking.Status.CONFIRMED: {PartnerBooking.Status.COMPLETED},
+        }
+        if change and obj.status != previous_status and obj.status not in allowed.get(previous_status, set()):
+            raise PermissionDenied("현재 예약 상태에서 선택할 수 없는 변경입니다.")
+        super().save_model(request, obj, form, change)
+        if change and obj.status != previous_status:
+            def notify_customer():
+                try:
+                    from .push import send_booking_status_notification
+                    send_booking_status_notification(obj)
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception(
+                        "Admin booking status notification failed (booking_id=%s)", obj.pk
+                    )
+            transaction.on_commit(notify_customer)
 
 
 @admin.register(PartnerReview)

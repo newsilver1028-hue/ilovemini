@@ -17,7 +17,6 @@ def mini_admin_calendar(context, cl):
     if (
         not model_admin
         or not field_name
-        or cl.opts.model_name == "partnerbooking"
         or getattr(resolver_match, "namespace", None) == "partner_admin"
     ):
         return {"show_calendar": False}
