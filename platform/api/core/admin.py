@@ -383,10 +383,11 @@ class PointTransactionAdmin(AdminCalendarMixin, admin.ModelAdmin):
         vehicle = entry.vehicle
         title = f"{entry.entry_date:%Y-%m-%d} · {vehicle.plate_number or '번호 미등록'} · {entry.get_kind_display()}"
         odometer = f"{entry.odometer_km:,}" if entry.odometer_km is not None else "주행거리 미등록"
+        amount = f"{entry.amount_krw:,}"
         return format_html(
-            '<a href="{}">{} · {:,}원 · {}km</a>',
+            '<a href="{}">{} · {}원 · {}km</a>',
             reverse("admin:core_ledgerentry_change", args=[entry.pk]),
-            title, entry.amount_krw, odometer,
+            title, amount, odometer,
         )
 
     @admin.display(description="포인트 사용 요청 상세")
