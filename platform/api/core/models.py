@@ -572,8 +572,8 @@ class MemberPreference(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, verbose_name="회원", on_delete=models.CASCADE, related_name="app_preference")
     primary_vehicle = models.ForeignKey(Vehicle, verbose_name="대표 차량", on_delete=models.SET_NULL, null=True, blank=True)
     class Meta:
-        verbose_name = "회원 대표 차량"
-        verbose_name_plural = "회원 대표 차량"
+        verbose_name = "회원 앱 설정"
+        verbose_name_plural = "회원 앱 설정"
 
 class RecordCorrectionRequest(models.Model):
     entry = models.ForeignKey(LedgerEntry, verbose_name="원본 기록", on_delete=models.PROTECT, related_name="correction_requests")

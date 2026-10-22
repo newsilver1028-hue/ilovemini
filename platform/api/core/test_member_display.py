@@ -3,6 +3,7 @@ from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from .models import (
+    AppleIdentity,
     AttendanceCheckin,
     LedgerEntry,
     MemberPreference,
@@ -104,6 +105,47 @@ class MemberDisplayTests(TestCase):
         for model, column in expected.items():
             with self.subTest(model=model.__name__):
                 self.assertIn(column, admin.site._registry[model].list_display)
+
+    def test_member_preference_admin_search_filter_and_vehicle_label(self):
+        vehicle = Vehicle.objects.create(
+            model_name="MINI Cooper S", plate_number="12가3456",
+        )
+        VehicleOwnership.objects.create(vehicle=vehicle, user=self.member)
+        preference = MemberPreference.objects.create(user=self.member, primary_vehicle=vehicle)
+        MemberPreference.objects.create(user=self.root)
+
+        changelist_url = reverse("admin:core_memberpreference_changelist")
+        response = self.client.get(changelist_url, {"q": str(self.member.pk)})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "테스트회원")
+
+        assigned = self.client.get(changelist_url, {"vehicle_assigned": "assigned"})
+        self.assertEqual(
+            [row.pk for row in assigned.context["cl"].result_list],
+            [preference.pk],
+        )
+        unassigned = self.client.get(changelist_url, {"vehicle_assigned": "unassigned"})
+        self.assertEqual(
+            [row.user_id for row in unassigned.context["cl"].result_list],
+            [self.root.pk],
+        )
+
+        change = self.client.get(reverse("admin:core_memberpreference_change", args=[preference.pk]))
+        self.assertContains(change, "12가3456 · MINI Cooper S")
+
+    def test_member_detail_shows_readonly_apple_login_identity(self):
+        AppleIdentity.objects.create(
+            user=self.member,
+            subject="apple-scoped-subject-987",
+            email="private-relay@example.com",
+            cafe_nickname="애플회원",
+        )
+        response = self.client.get(reverse("admin:auth_user_change", args=[self.member.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Apple 로그인 정보")
+        self.assertContains(response, "애플회원")
+        self.assertContains(response, "private-relay@example.com")
+        self.assertContains(response, "apple-scoped-subject-987")
 
     def test_point_transaction_detail_uses_nickname_instead_of_login_username(self):
         partner = Partner.objects.create(name="포인트 사용 업체", branch_label="성수점", is_active=True)
