@@ -191,3 +191,11 @@ class MemberDisplayTests(TestCase):
         self.assertContains(response, "정비 결제 적립")
         self.assertContains(response, "업체 결제 포인트 사용")
         self.assertContains(response, "회원 포인트 업체")
+
+
+    def test_point_transaction_calendar_uses_created_transaction_time(self):
+        response = self.client.get(reverse("admin:core_pointtransaction_changelist"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["show_calendar"])
+        self.assertEqual(response.context["calendar_field_label"], "등록 시각")
