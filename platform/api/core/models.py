@@ -346,6 +346,20 @@ class Partner(models.Model):
         return f"{self.name} · {self.branch_label}" if self.branch_label else self.name
 
 
+class PartnerServiceCategoryOption(models.Model):
+    name = models.CharField("서비스 분야", max_length=80, unique=True)
+    is_active = models.BooleanField("사용", default=True)
+    display_order = models.PositiveSmallIntegerField("표시 순서", default=100)
+
+    class Meta:
+        ordering = ["display_order", "name"]
+        verbose_name = "업체 서비스 분야"
+        verbose_name_plural = "업체 서비스 분야"
+
+    def __str__(self):
+        return self.name
+
+
 class PartnerImage(models.Model):
     partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="introduction_images")
     caption = models.CharField("이미지 설명", max_length=160, blank=True)

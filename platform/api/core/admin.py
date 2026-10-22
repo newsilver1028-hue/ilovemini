@@ -11,7 +11,8 @@ from django.db import models
 from django.db.models import IntegerField, OuterRef, Subquery, Sum, Value
 from django.db.models import Count
 from django.db.models.functions import Coalesce, TruncDate
-from django.urls import path
+from django.http import JsonResponse
+from django.urls import path, reverse
 from django.utils import timezone
 from .member_display import member_nickname, member_label, MemberAutocompleteView, MemberAutocompleteSelect
 
@@ -19,6 +20,7 @@ from .models import (
     LedgerEntry, Notice, Offer, Partner, PartnerImage, PartnerReview, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
     VehicleOwnership, VehicleTransferCode, AttendanceCheckin, PointTransaction, PointRedemptionRequest,
     SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest, AppReviewAccount,
+    PartnerServiceCategoryOption,
 )
 
 
@@ -166,9 +168,11 @@ class PartnerAdminForm(forms.ModelForm):
         widget=forms.Textarea(attrs={"rows": 5, "cols": 70}))
     storefront_photo_url = forms.URLField(label="대표 사진 주소 (선택)", required=False,
         help_text="사진 파일 첨부는 아래 ‘매장 사진’에서 가능합니다. 주소가 있는 대표 사진만 이곳에 입력하세요.")
-    service_categories = forms.CharField(
+    service_categories = forms.MultipleChoiceField(
+        label="서비스 분야",
         required=False,
-        help_text="여러 항목은 쉼표로 구분해 입력하세요. 예: 정비, 튜닝, 부품",
+        help_text="분야를 선택하세요. 아래 ‘+ 분야 추가’에서 새 선택 항목을 등록할 수 있습니다.",
+        widget=forms.CheckboxSelectMultiple(attrs={"class": "partner-service-categories"}),
     )
 
     class Meta:
@@ -177,13 +181,18 @@ class PartnerAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        categories = self.initial.get("service_categories", [])
-        if isinstance(categories, list):
-            self.initial["service_categories"] = ", ".join(categories)
+        existing = self.initial.get("service_categories", [])
+        options = list(PartnerServiceCategoryOption.objects.filter(is_active=True).values_list("name", flat=True))
+        if isinstance(existing, list):
+            options = list(dict.fromkeys([*options, *existing]))
+            self.fields["service_categories"].initial = existing
+        self.fields["service_categories"].choices = [(name, name) for name in options]
 
     def clean_service_categories(self):
-        value = self.cleaned_data["service_categories"]
-        return list(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))
+        return list(dict.fromkeys(self.cleaned_data["service_categories"]))
+
+    class Media:
+        js = ("core/partner_service_categories.js",)
 
 
 class OfferAdminForm(forms.ModelForm):
@@ -456,6 +465,45 @@ class PartnerAdmin(AdminCalendarMixin, admin.ModelAdmin):
         ("연락처 및 연결", {"fields": ("address", "phone", "hours", "cafe_url", "map_url")}),
         ("앱 노출 설정", {"fields": ("is_active", "is_sponsored", "display_order")}),
     )
+
+    def get_urls(self):
+        custom = [
+            path(
+                "add-service-category/",
+                self.admin_site.admin_view(self.add_service_category),
+                name="core_partner_add_service_category",
+            ),
+        ]
+        return custom + super().get_urls()
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        form.base_fields["service_categories"].widget.attrs["data-add-url"] = reverse(
+            "admin:core_partner_add_service_category"
+        )
+        return form
+
+    def add_service_category(self, request):
+        if request.method != "POST" or not self.has_change_permission(request):
+            return JsonResponse({"detail": "권한이 없거나 요청 방식이 올바르지 않습니다."}, status=403)
+        name = " ".join(request.POST.get("name", "").split())
+        if not name or len(name) > 80:
+            return JsonResponse({"detail": "서비스 분야를 1~80자로 입력해 주세요."}, status=400)
+        option, _ = PartnerServiceCategoryOption.objects.get_or_create(
+            name=name, defaults={"display_order": 100}
+        )
+        if not option.is_active:
+            option.is_active = True
+            option.save(update_fields=["is_active"])
+        return JsonResponse({"value": option.name, "label": option.name})
+
+
+@admin.register(PartnerServiceCategoryOption)
+class PartnerServiceCategoryOptionAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active", "display_order")
+    list_editable = ("is_active", "display_order")
+    search_fields = ("name",)
+    ordering = ("display_order", "name")
 
 
 @admin.register(PartnerReview)

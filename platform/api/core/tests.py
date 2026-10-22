@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.test import override_settings
 from django.core.management import call_command
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 from datetime import date, timedelta
@@ -11,7 +12,7 @@ from unittest.mock import patch
 import json
 from urllib.parse import unquote
 from .admin import NoticeAdminForm, OfferAdminForm, PartnerAdminForm
-from .models import LedgerEntry, Reminder, Vehicle, VehicleOwnership, VehiclePlateHistory, Partner, PartnerStaff, Notice, PushDevice, AttendanceCheckin, PartnerBooking, PointTransaction
+from .models import LedgerEntry, Reminder, Vehicle, VehicleOwnership, VehiclePlateHistory, Partner, PartnerStaff, Notice, PushDevice, AttendanceCheckin, PartnerBooking, PointTransaction, PartnerServiceCategoryOption
 from . import push  # Ensure patch targets resolve before notification tests run.
 
 User = get_user_model()
@@ -835,16 +836,49 @@ class NaverLoginTests(TestCase):
 
 
 class AdminContentFormTests(TestCase):
-    def test_partner_categories_are_entered_as_comma_separated_text(self):
+    def test_partner_categories_are_selected_from_managed_options(self):
+        PartnerServiceCategoryOption.objects.create(name="정비")
+        PartnerServiceCategoryOption.objects.create(name="튜닝")
         form = PartnerAdminForm(data={
             "name": "테스트 MINI 업체",
             "display_order": 0,
-            "service_categories": "정비, 튜닝, 정비, ",
+            "service_categories": ["정비", "튜닝", "정비"],
             "is_active": True,
             "is_sponsored": False,
         })
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["service_categories"], ["정비", "튜닝"])
+
+    def test_existing_partner_categories_remain_selectable(self):
+        partner = Partner.objects.create(
+            name="기존 분야 업체",
+            service_categories=["기존 사용자 분야"],
+        )
+        form = PartnerAdminForm(instance=partner)
+        self.assertIn(
+            ("기존 사용자 분야", "기존 사용자 분야"),
+            list(form.fields["service_categories"].choices),
+        )
+
+    def test_admin_can_add_a_service_category_from_partner_form(self):
+        admin_user = get_user_model().objects.create_superuser(
+            username="service-category-admin",
+            email="admin@example.test",
+            password="test-password-9246!",
+        )
+        self.client.force_login(admin_user)
+        form_response = self.client.get(reverse("admin:core_partner_add"))
+        self.assertEqual(form_response.status_code, 200)
+        self.assertContains(form_response, "partner_service_categories.js")
+        self.assertContains(form_response, reverse("admin:core_partner_add_service_category"))
+
+        response = self.client.post(
+            reverse("admin:core_partner_add_service_category"),
+            {"name": "클래식 MINI"},
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["value"], "클래식 MINI")
+        self.assertTrue(PartnerServiceCategoryOption.objects.filter(name="클래식 MINI").exists())
 
     def test_notice_expiry_must_follow_publication_time(self):
         form = NoticeAdminForm(data={

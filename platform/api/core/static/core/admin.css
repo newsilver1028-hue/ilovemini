@@ -565,3 +565,34 @@ html[data-theme="auto"] td, html[data-theme="auto"] .mini-menu-link { color: var
 .admin-mini-calendar .partner-calendar-heading h2 { margin: 0; }
 .admin-mini-calendar-day { text-decoration: none; }
 .admin-mini-calendar-count { display: block; margin-top: 3px; font-size: 11px; font-weight: 700; }
+/* Partner service-category choices and quick-add control. */
+.partner-service-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  max-width: 820px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.partner-service-categories > div {
+  min-width: 125px;
+}
+
+.partner-service-category-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.partner-service-category-add input {
+  min-width: 220px;
+  padding: 8px 10px;
+}
+
+.partner-service-category-add [role="status"] {
+  color: var(--body-quiet-color);
+}
