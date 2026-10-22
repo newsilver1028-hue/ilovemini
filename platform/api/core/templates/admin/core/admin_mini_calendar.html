@@ -15,9 +15,13 @@
   <div class="partner-calendar-grid" role="grid">
     {% for weekday in calendar_weekdays %}<div class="partner-weekday">{{ weekday }}</div>{% endfor %}
     {% for week in calendar_weeks %}{% for cell in week %}
-      <a class="partner-day-cell admin-mini-calendar-day{% if not cell.in_month %} is-outside{% endif %}{% if cell.is_today %} is-today{% endif %}{% if cell.count %} has-events{% endif %}" href="{{ cell.url }}" role="gridcell" aria-label="{{ cell.date|date:'Y년 n월 j일' }} {{ cell.count }}건">
+      <a class="partner-day-cell admin-mini-calendar-day{% if not cell.in_month %} is-outside{% endif %}{% if cell.is_today %} is-today{% endif %}{% if cell.count %} has-events{% endif %}" href="{{ cell.url }}" role="gridcell" aria-label="{{ cell.date|date:'Y년 n월 j일' }} {{ cell.count }}건{% if cell.points %}, {{ cell.points.earned_display }}, {{ cell.points.spent_display }}{% endif %}">
         <time class="partner-day-number" datetime="{{ cell.date|date:'Y-m-d' }}">{{ cell.date|date:"j" }}<span>{{ cell.date|date:"n월 j일" }}</span></time>
-        {% if cell.count %}<span class="admin-mini-calendar-count">{{ cell.count }}건</span>{% endif %}
+        {% if cell.points %}
+          {% if cell.points.earned %}<span class="admin-mini-calendar-count">{{ cell.points.earned_display }}</span>{% endif %}
+          {% if cell.points.spent %}<span class="admin-mini-calendar-count">{{ cell.points.spent_display }}</span>{% endif %}
+          {% if not cell.points.earned and not cell.points.spent and cell.count %}<span class="admin-mini-calendar-count">{{ cell.count }}건</span>{% endif %}
+        {% elif cell.count %}<span class="admin-mini-calendar-count">{{ cell.count }}건</span>{% endif %}
       </a>
     {% endfor %}{% endfor %}
   </div>

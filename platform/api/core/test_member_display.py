@@ -193,9 +193,24 @@ class MemberDisplayTests(TestCase):
         self.assertContains(response, "회원 포인트 업체")
 
 
-    def test_point_transaction_calendar_uses_created_transaction_time(self):
+    def test_point_transaction_calendar_shows_daily_earned_and_spent_totals(self):
+        PointTransaction.objects.create(
+            user=self.member,
+            transaction_type=PointTransaction.Type.ATTENDANCE,
+            points_delta=1750,
+            memo="날짜별 적립 합계 테스트",
+        )
+        PointTransaction.objects.create(
+            user=self.member,
+            transaction_type=PointTransaction.Type.REDEMPTION,
+            points_delta=-500,
+            memo="날짜별 사용 합계 테스트",
+        )
         response = self.client.get(reverse("admin:core_pointtransaction_changelist"))
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context["show_calendar"])
         self.assertEqual(response.context["calendar_field_label"], "등록 시각")
+        self.assertContains(response, "1,750P 적립")
+        self.assertContains(response, "500P 사용")
+        self.assertEqual(response.content.decode().count("class=\\\"partner-calendar partner-calendar--mini admin-mini-calendar\\\""), 1)

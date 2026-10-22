@@ -1,7 +1,7 @@
 from datetime import date, datetime, time, timedelta
 
 from django import template
-from django.db.models import Count
+from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 
@@ -42,15 +42,37 @@ def mini_admin_calendar(context, cl):
             upper = timezone.make_aware(datetime.combine(next_month, time.min))
         else:
             lower, upper = month_start, next_month
-        counts = (
+        grouped = (
             cl.queryset.filter(**{f"{field_name}__gte": lower, f"{field_name}__lt": upper})
+            .order_by()
             .annotate(_calendar_day=TruncDate(field_name))
             .values("_calendar_day")
-            .annotate(_count=Count("pk"))
         )
+        annotations = {"_count": Count("pk")}
+        if cl.opts.model_name == "pointtransaction":
+            annotations.update({
+                "_earned": Sum("points_delta", filter=Q(points_delta__gt=0)),
+                "_spent": Sum("points_delta", filter=Q(points_delta__lt=0)),
+            })
+        counts = grouped.annotate(**annotations)
     else:
         return {"show_calendar": False}
-    counts_by_day = {row["_calendar_day"]: row["_count"] for row in counts if row["_calendar_day"]}
+    counts_by_day = {}
+    points_by_day = {}
+    for row in counts:
+        day = row["_calendar_day"]
+        if not day:
+            continue
+        counts_by_day[day] = row["_count"]
+        if "_earned" in row:
+            earned = row["_earned"] or 0
+            spent = abs(row["_spent"] or 0)
+            points_by_day[day] = {
+                "earned": earned,
+                "spent": spent,
+                "earned_display": f"{earned:,}P 적립",
+                "spent_display": f"{spent:,}P 사용",
+            }
 
     remove = [f"{field_name}__year", f"{field_name}__month", f"{field_name}__day"]
 
@@ -77,6 +99,7 @@ def mini_admin_calendar(context, cl):
                 "in_month": current.month == month_start.month,
                 "is_today": current == today,
                 "count": counts_by_day.get(current, 0),
+                "points": points_by_day.get(current),
                 "url": query_for(current),
             })
             current += timedelta(days=1)
