@@ -549,13 +549,18 @@ class CafePage extends StatelessWidget {
   const CafePage({required this.api, super.key});
   final ApiClient api;
   @override
-  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.fromLTRB(20, 14, 20, 28), children: [
-    const SizedBox(height: 8),
-    CafeKnowledgeSearch(api: api),
-    const SizedBox(height: 12),
-    CafeLatestFeed(api: api),
-    const SizedBox(height: 12),
-    const RecommendedCafeItemsCarousel(),
+  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(20), children: [
+    const Text('카페', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
+    const SizedBox(height: 20),
+    ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.forum_outlined),
+      title: const Text('아이러브미니 네이버 카페'),
+      subtitle: const Text('네이버 카페에서 게시글을 확인하세요'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => _openCafeNotice(context, naverCafeMobileUrl),
+    ),
+    const Divider(),
   ]);
 }
 
@@ -672,142 +677,6 @@ class _RecommendedCafeItemsCarouselState extends State<RecommendedCafeItemsCarou
       Text('실제 등록 전 상품명과 적용 차종을 확인할 예정입니다.', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
     ]);
   }
-}
-
-class CafeKnowledgeSearch extends StatefulWidget {
-  const CafeKnowledgeSearch({required this.api, super.key});
-  final ApiClient api;
-  @override
-  State<CafeKnowledgeSearch> createState() => _CafeKnowledgeSearchState();
-}
-
-class _CafeKnowledgeSearchState extends State<CafeKnowledgeSearch> {
-  final queryController = TextEditingController();
-  String? searchError;
-
-  Future<void> search([String? value]) => _openSearch(value: value);
-
-  Future<void> searchNaver() => _openSearch(cafe: true);
-
-  Future<void> _openSearch({String? value, bool cafe = false}) async {
-    final query = (value ?? queryController.text).trim();
-    if (query.length < 2 || query.length > 120) {
-      setState(() => searchError = '질문을 2~120자로 입력해 주세요.');
-      return;
-    }
-    queryController.text = query;
-    setState(() => searchError = null);
-    final uri = cafe
-        ? Uri.https('m.cafe.naver.com', '/ca-fe/web/cafes/13071593/search', {
-            'q': query, 'mi': '0', 'ta': 'SUBJECT', 'pc': 'ALL', 'od': 'NEW',
-          })
-        : Uri.https('search.naver.com', '/search.naver', {
-            'query': query, 'qvt': '0', 'ssc': 'tab.ait.all',
-          });
-    try {
-      // Native iOS/Android delegates HTTPS to the system, outside the app WebView.
-      // The web build navigates the top-level window instead of creating a popup.
-      final opened = await launchUrl(uri,
-        mode: LaunchMode.externalApplication,
-        webOnlyWindowName: '_top',
-      );
-      if (!opened) throw Exception('외부 검색 화면을 열지 못했습니다.');
-    } catch (_) {
-      if (mounted) setState(() => searchError = '네이버 검색을 열지 못했습니다. 다시 시도해 주세요.');
-    }
-  }
-
-  @override
-  void dispose() { queryController.dispose(); super.dispose(); }
-
-  @override
-  Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(10), child: Column(children: [
-    Row(children: [
-      Expanded(child: TextField(controller: queryController,
-        style: const TextStyle(fontSize: 14),
-        maxLength: 120,
-        textInputAction: TextInputAction.search,
-        onSubmitted: search,
-        decoration: const InputDecoration(
-          hintText: '검색어 입력', counterText: '', isDense: true,
-          prefixIcon: Icon(Icons.search_rounded, size: 19),
-          prefixIconConstraints: BoxConstraints(minWidth: 38),
-          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 11),
-        ),
-      )),
-      const SizedBox(width: 6),
-      SizedBox(height: 42, child: FilledButton(
-        style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-        onPressed: () => search(),
-        child: const Text('AI 검색', maxLines: 1, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-      )),
-      const SizedBox(width: 5),
-      SizedBox(height: 42, child: OutlinedButton(
-        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 9), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-        onPressed: searchNaver,
-        child: const Text('카페 검색', maxLines: 1, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-      )),
-    ]),
-    if (searchError != null) Padding(padding: const EdgeInsets.only(top: 6, left: 4), child: Text(searchError!, style: const TextStyle(fontSize: 12, color: brandRed))),
-  ])));
-}
-
-class CafeLatestFeed extends StatefulWidget {
-  const CafeLatestFeed({required this.api, super.key});
-  final ApiClient api;
-  @override
-  State<CafeLatestFeed> createState() => _CafeLatestFeedState();
-}
-
-class _CafeLatestFeedState extends State<CafeLatestFeed> {
-  late Future<Map<String, dynamic>> posts;
-  @override
-  void initState() { super.initState(); posts = widget.api.latestCafePosts(); }
-  void reload() => setState(() => posts = widget.api.latestCafePosts());
-
-  Future<void> openPost(Map<String, dynamic> post) async {
-    final uri = Uri.tryParse((post['link'] ?? '').toString());
-    if (uri == null || uri.scheme != 'https' || uri.host != 'cafe.naver.com') return;
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('카페 글을 열지 못했습니다.')));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.fromLTRB(14, 10, 14, 6), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Row(children: [
-      const Expanded(child: SectionHeading(title: '아이러브미니 최신글', subtitle: '네이버 카페 · 최신순')),
-      IconButton(tooltip: '최신글 새로고침', onPressed: reload, icon: const Icon(Icons.refresh_rounded)),
-    ]),
-    FutureBuilder<Map<String, dynamic>>(
-      future: posts,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) return const Padding(padding: EdgeInsets.symmetric(vertical: 22), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
-        if (snapshot.hasError) return Padding(padding: const EdgeInsets.only(bottom: 10), child: Row(children: [
-          Expanded(child: Text('최신글을 불러오지 못했어요. 네이버 API 설정을 확인해 주세요.', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.error))),
-          TextButton(onPressed: reload, child: const Text('다시 시도')),
-        ]));
-        final rows = (snapshot.data?['items'] as List?)?.whereType<Map>().map((row) => Map<String, dynamic>.from(row)).take(10).toList() ?? const <Map<String, dynamic>>[];
-        if (rows.isEmpty) return const Padding(padding: EdgeInsets.only(bottom: 12), child: Text('네이버 API에서 확인되는 공개 최신글이 없습니다.', style: TextStyle(fontSize: 12)));
-        return Column(children: rows.map((post) => InkWell(
-          onTap: () => openPost(post),
-          child: Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Padding(padding: EdgeInsets.only(top: 6, right: 9), child: Icon(Icons.circle, size: 6, color: brandRed)),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text((post['title'] ?? '아이러브미니 카페 게시글').toString(), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, height: 1.35)),
-              if ((post['description'] ?? '').toString().isNotEmpty) ...[
-                const SizedBox(height: 3),
-                Text(post['description'].toString(), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.35)),
-              ],
-              const SizedBox(height: 3),
-              Text('${post['cafe_name'] ?? '아이러브미니'} · 네이버 카페', style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-            ])),
-            const Icon(Icons.open_in_new_rounded, size: 15),
-          ])),
-        )).toList());
-      },
-    ),
-  ])));
 }
 
 class AttendanceCheckinCard extends StatefulWidget {
