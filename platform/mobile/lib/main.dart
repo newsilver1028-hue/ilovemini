@@ -2440,6 +2440,7 @@ class _PartnerRecordPageState extends State<PartnerRecordPage> {
   final description = TextEditingController();
   final odometer = TextEditingController();
   final amount = TextEditingController(text: '0');
+  String paymentMethod = 'card';
   final partNumber = TextEditingController();
   final evidenceUrl = TextEditingController();
   final corrects = TextEditingController();
@@ -2530,6 +2531,7 @@ class _PartnerRecordPageState extends State<PartnerRecordPage> {
         'entry_date': DateTime.now().toIso8601String().substring(0, 10),
         'odometer_km': int.parse(odometer.text),
         'amount_krw': int.parse(amount.text),
+        'payment_method': paymentMethod,
         'description': description.text.trim(),
         'part_number': partNumber.text.trim(),
         'evidence_url': evidenceUrl.text.trim(),
@@ -2593,7 +2595,13 @@ class _PartnerRecordPageState extends State<PartnerRecordPage> {
           ], onChanged: (value) => setState(() => kind = value ?? 'service')),
           TextFormField(controller: description, decoration: const InputDecoration(labelText: '작업내용 *', hintText: '예: 엔진마운트 교환'), validator: (value) => value == null || value.trim().isEmpty ? '작업내용을 입력해 주세요.' : null),
           TextFormField(controller: odometer, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '작업 당시 주행거리 km *'), validator: (value) => int.tryParse(value ?? '') == null ? '주행거리를 숫자로 입력해 주세요.' : null),
-          TextFormField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '결제금액 원 *'), validator: (value) => int.tryParse(value ?? '') == null ? '금액을 숫자로 입력해 주세요.' : null),
+          TextFormField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '포인트 차감 전 정비 총액 원 *', helperText: '회원 포인트를 사용한 경우 차감 전 전체 금액을 입력해 주세요.'), validator: (value) => int.tryParse(value ?? '') == null ? '금액을 숫자로 입력해 주세요.' : null),
+          DropdownButtonFormField<String>(initialValue: paymentMethod, decoration: const InputDecoration(labelText: '결제 수단'), items: const [
+            DropdownMenuItem(value: 'card', child: Text('카드')), DropdownMenuItem(value: 'cash', child: Text('현금')),
+            DropdownMenuItem(value: 'transfer', child: Text('계좌이체')), DropdownMenuItem(value: 'easy_pay', child: Text('간편결제')),
+            DropdownMenuItem(value: 'mixed', child: Text('복합결제')), DropdownMenuItem(value: 'points_only', child: Text('포인트 전액')),
+            DropdownMenuItem(value: 'other', child: Text('기타')),
+          ], onChanged: (value) => setState(() => paymentMethod = value ?? 'card')),
           TextFormField(controller: partNumber, decoration: const InputDecoration(labelText: '부품번호 (선택)')),
           TextFormField(controller: corrects, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '정정 대상 기록 번호 (정정 시 입력)'), validator: (value) => value == null || value.trim().isEmpty || int.tryParse(value.trim()) != null ? null : '기록 번호를 숫자로 입력해 주세요.'),
           TextFormField(controller: correctionReason, decoration: const InputDecoration(labelText: '정정 사유 (정정 시 필수)'), validator: (value) => corrects.text.trim().isEmpty || (value?.trim().isNotEmpty ?? false) ? null : '정정 사유를 입력해 주세요.'),

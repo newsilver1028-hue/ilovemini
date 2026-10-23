@@ -59,7 +59,7 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
     class Meta:
         model = LedgerEntry
         fields = [
-            "id", "vehicle", "kind", "entry_date", "odometer_km", "amount_krw", "description",
+            "id", "vehicle", "kind", "entry_date", "odometer_km", "amount_krw", "gross_amount_krw", "payment_method", "description",
             "quantity_liters", "source", "partner_name", "verified_at", "part_number", "evidence_url",
             "corrects", "correction_reason", "is_corrected", "trust_label", "integrity_valid", "created_at", "evidence_images",
         ]
@@ -80,7 +80,7 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
             # Free text, parts text and source documents have not been reviewed
             # for personal data. Expose only structured facts after a handover.
             data.update(description=instance.get_kind_display(), evidence_url="", evidence_images=[],
-                        correction_reason="", part_number="", amount_krw=None,
+                        correction_reason="", part_number="", amount_krw=None, gross_amount_krw=None, payment_method="",
                         quantity_liters=None)
         return data
 

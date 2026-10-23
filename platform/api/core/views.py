@@ -797,6 +797,7 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
         entry_date = serializers.DateField(default=timezone.localdate)
         odometer_km = serializers.IntegerField(min_value=0)
         amount_krw = serializers.IntegerField(min_value=0, default=0)
+        payment_method = serializers.ChoiceField(choices=LedgerEntry.PaymentMethod.choices, required=False, allow_blank=True)
         description = serializers.CharField(max_length=160)
         quantity_liters = serializers.DecimalField(max_digits=7, decimal_places=2, required=False, allow_null=True)
         part_number = serializers.CharField(max_length=120, required=False, allow_blank=True)
@@ -942,6 +943,8 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
                 entry_date=data.validated_data["entry_date"],
                 odometer_km=data.validated_data["odometer_km"],
                 amount_krw=actual_payment_amount,
+                gross_amount_krw=data.validated_data["amount_krw"],
+                payment_method=data.validated_data.get("payment_method", ""),
                 description=data.validated_data["description"],
                 quantity_liters=data.validated_data.get("quantity_liters"),
                 source=LedgerEntry.Source.PARTNER,

@@ -25,6 +25,10 @@ def ledger_record_payload(entry):
     if entry.corrects_id is not None or entry.correction_reason:
         payload["corrects_id"] = entry.corrects_id
         payload["correction_reason"] = entry.correction_reason
+    # Keep hashes generated before payment details were added verifiable.
+    if entry.gross_amount_krw is not None or entry.payment_method:
+        payload["gross_amount_krw"] = entry.gross_amount_krw
+        payload["payment_method"] = entry.payment_method
     return payload
 
 

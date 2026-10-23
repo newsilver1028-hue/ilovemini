@@ -50,7 +50,7 @@
         <div>
           <p class="partner-calendar-eyebrow">선택 날짜 상세</p>
           <h2>{{ booking_day_report.day|date:"Y년 n월 j일" }} 예약·정비·포인트 내역</h2>
-          <p>예약 {{ booking_day_report.booking_count }}건 · 인증 정비 결제 금액은 업체가 등록한 정비기록 기준입니다.</p>
+          <p>예약 {{ booking_day_report.booking_count }}건 · 결제·정비 합계는 업체가 등록한 기록 기준입니다. 이전 앱 기록은 결제 수단이 표시되지 않을 수 있습니다.</p>
         </div>
       </header>
 
@@ -76,7 +76,9 @@
           <header><strong>{{ report.partner.name }}{% if report.partner.branch_label %} · {{ report.partner.branch_label }}{% endif %}</strong></header>
           <div class="booking-finance-metrics">
             <span>인증 정비 {{ report.service_count }}건</span>
-            <span>인증 정비 등록액 {{ report.payment_total_display }}원</span>
+            <span>정비 총액(포인트 포함) {{ report.gross_total_display }}원</span>
+            <span>실제 결제액 {{ report.payment_total_display }}원</span>
+            <span>정비에서 사용된 포인트 {{ report.points_offset_total_display }}P</span>
             <span>포인트 결제 {{ report.redemption_count }}건 · 총 {{ report.redemption_gross_display }}원</span>
             <span>포인트 사용 후 결제액 {{ report.redemption_net_display }}원</span>
             <span>포인트 적립 {{ report.earned_display }}P</span>
@@ -84,7 +86,7 @@
             <span>사용 취소·환급 {{ report.refunded_display }}P</span>
           </div>
           {% if report.entries %}<details><summary>인증 정비 기록 {{ report.entries|length }}건 보기</summary><ul>
-            {% for entry in report.entries %}<li>{{ entry.created_at|date:"H:i" }} · {{ entry.vehicle.plate_number|default:"차량번호 미등록" }} · {{ entry.vehicle.model_name }} · {{ entry.description|default:entry.get_kind_display }} · {{ entry.amount_krw }}원</li>{% endfor %}
+            {% for entry in report.entries %}<li>{{ entry.created_at|date:"H:i" }} · {{ entry.vehicle.plate_number|default:"차량번호 미등록" }} · {{ entry.vehicle.model_name }} · {{ entry.description|default:entry.get_kind_display }} · 총 {{ entry.gross_amount_display }}원 · 실제 결제 {{ entry.actual_payment_display }}원 · 포인트 {{ entry.points_used_display }}P 사용 · {{ entry.payment_method_display }}</li>{% endfor %}
           </ul></details>{% endif %}
           {% if report.redemptions %}<details><summary>포인트 결제 {{ report.redemptions|length }}건 보기</summary><ul>
             {% for redemption in report.redemptions %}<li>{{ redemption.completed_at|date:"H:i" }} · {{ redemption.member_display }} · 총 {{ redemption.gross_payment_display }}원 · {{ redemption.points_requested_display }}P 사용 · 결제액 {{ redemption.cash_payment_display }}원</li>{% endfor %}

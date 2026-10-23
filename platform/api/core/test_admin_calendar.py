@@ -100,6 +100,8 @@ class AdminCalendarPageTests(TestCase):
             kind=LedgerEntry.Kind.SERVICE,
             entry_date=selected_day,
             amount_krw=120000,
+            gross_amount_krw=120000,
+            payment_method=LedgerEntry.PaymentMethod.CARD,
             description="엔진오일 교환",
         )
         PointTransaction.objects.create(
@@ -129,7 +131,10 @@ class AdminCalendarPageTests(TestCase):
         self.assertIsNotNone(response.context.get("booking_day_report"), response.wsgi_request.GET)
         self.assertContains(response, "회원 사정으로 일정 취소")
         self.assertContains(response, "취소 1건")
-        self.assertContains(response, "인증 정비 등록액 120,000원")
+        self.assertContains(response, "정비 총액(포인트 포함) 120,000원")
+        self.assertContains(response, "실제 결제액 120,000원")
+        self.assertContains(response, "총 120,000원 · 실제 결제 120,000원")
+        self.assertContains(response, "카드")
         self.assertContains(response, "포인트 적립 1,200P")
         self.assertContains(response, "포인트 사용 500P")
         self.assertContains(response, "포인트 결제 1건 · 총 50,000원")

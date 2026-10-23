@@ -292,10 +292,19 @@ class VehicleOwnershipAdmin(AdminCalendarMixin, admin.ModelAdmin):
 
 @admin.register(LedgerEntry)
 class LedgerEntryAdmin(AdminCalendarMixin, admin.ModelAdmin):
-    list_display = ("entry_date", "vehicle", "kind", "source", "partner", "amount_krw", "odometer_km", "description")
+    list_display = ("entry_date", "vehicle", "kind", "source", "partner", "gross_amount_display", "amount_krw", "payment_method_display", "odometer_km", "description")
     list_filter = ("source", "partner", "kind", "entry_date")
     search_fields = ("vehicle__model_name", "vehicle__nickname", "description", "part_number")
     date_hierarchy = "entry_date"
+
+    @admin.display(description="정비 총액(원)", ordering="gross_amount_krw")
+    def gross_amount_display(self, obj):
+        amount = obj.gross_amount_krw if obj.gross_amount_krw is not None else obj.amount_krw
+        return f"{amount:,}"
+
+    @admin.display(description="결제 수단")
+    def payment_method_display(self, obj):
+        return obj.get_payment_method_display() if obj.payment_method else "미기록(이전 앱)"
 
     def get_readonly_fields(self, request, obj=None):
         if obj and obj.source == LedgerEntry.Source.PARTNER:
@@ -694,40 +703,24 @@ class PartnerBookingAdmin(AdminCalendarMixin, admin.ModelAdmin):
             bookings = self.get_queryset(request).filter(
                 scheduled_at__gte=day_start, scheduled_at__lt=day_end,
             ).order_by("scheduled_at", "partner__name", "pk")
-            entries = LedgerEntry.objects.filter(
+            entries = list(LedgerEntry.objects.filter(
                 source=LedgerEntry.Source.PARTNER,
                 entry_date=selected_day,
                 partner__isnull=False,
-            ).select_related("partner", "vehicle").order_by("partner__name", "-created_at")
+            ).select_related("partner", "vehicle").order_by("partner__name", "-created_at"))
             transactions = PointTransaction.objects.filter(
                 partner__isnull=False,
                 created_at__gte=day_start,
                 created_at__lt=day_end,
             ).select_related("partner", "user").order_by("partner__name", "-created_at")
             partner_totals = {}
-            for entry in entries:
-                totals = partner_totals.setdefault(entry.partner_id, {
-                    "partner": entry.partner,
+
+            def partner_report(partner):
+                return partner_totals.setdefault(partner.pk, {
+                    "partner": partner,
                     "payment_total": 0,
-                    "service_count": 0,
-                "redemption_gross": 0,
-                "redemption_net": 0,
-                "redemption_count": 0,
-                    "earned": 0,
-                    "spent": 0,
-                "refunded": 0,
-                    "transactions": [],
-                "redemptions": [],
-                    "entries": [],
-                })
-                totals["payment_total"] += entry.amount_krw
-                totals["service_count"] += 1
-                totals["entries"].append(entry)
-            for transaction_record in transactions:
-                transaction_record.member_display = member_nickname(transaction_record.user)
-                totals = partner_totals.setdefault(transaction_record.partner_id, {
-                    "partner": transaction_record.partner,
-                    "payment_total": 0,
+                    "gross_total": 0,
+                    "points_offset_total": 0,
                     "service_count": 0,
                     "redemption_gross": 0,
                     "redemption_net": 0,
@@ -739,6 +732,34 @@ class PartnerBookingAdmin(AdminCalendarMixin, admin.ModelAdmin):
                     "redemptions": [],
                     "entries": [],
                 })
+
+            linked_redemptions = {
+                redemption.transaction.ledger_entry_id: redemption
+                for redemption in PointRedemptionRequest.objects.filter(
+                    transaction__ledger_entry__in=entries,
+                    status=PointRedemptionRequest.Status.COMPLETED,
+                ).select_related("transaction")
+                if redemption.transaction and redemption.transaction.ledger_entry_id
+            }
+            for entry in entries:
+                totals = partner_report(entry.partner)
+                linked_redemption = linked_redemptions.get(entry.pk)
+                gross = entry.gross_amount_krw
+                if gross is None:
+                    gross = linked_redemption.payment_amount_krw if linked_redemption else entry.amount_krw
+                points_used = max(gross - entry.amount_krw, 0)
+                entry.gross_amount_display = f"{gross:,}"
+                entry.actual_payment_display = f"{entry.amount_krw:,}"
+                entry.points_used_display = f"{points_used:,}"
+                entry.payment_method_display = entry.get_payment_method_display() if entry.payment_method else "미기록(이전 앱)"
+                totals["payment_total"] += entry.amount_krw
+                totals["gross_total"] += gross
+                totals["points_offset_total"] += points_used
+                totals["service_count"] += 1
+                totals["entries"].append(entry)
+            for transaction_record in transactions:
+                transaction_record.member_display = member_nickname(transaction_record.user)
+                totals = partner_report(transaction_record.partner)
                 if transaction_record.points_delta > 0 and transaction_record.transaction_type == PointTransaction.Type.SERVICE_EARN:
                     totals["earned"] += transaction_record.points_delta
                 elif transaction_record.transaction_type == PointTransaction.Type.REDEMPTION and transaction_record.points_delta < 0:
@@ -756,20 +777,7 @@ class PartnerBookingAdmin(AdminCalendarMixin, admin.ModelAdmin):
                 redemption.cash_payment_display = f'{max(redemption.payment_amount_krw - redemption.points_requested, 0):,}'
                 redemption.gross_payment_display = f'{redemption.payment_amount_krw:,}'
                 redemption.points_requested_display = f'{redemption.points_requested:,}'
-                totals = partner_totals.setdefault(redemption.partner_id, {
-                    "partner": redemption.partner,
-                    "payment_total": 0,
-                    "service_count": 0,
-                    "redemption_gross": 0,
-                    "redemption_net": 0,
-                    "redemption_count": 0,
-                    "earned": 0,
-                    "spent": 0,
-                    "refunded": 0,
-                    "transactions": [],
-                    "redemptions": [],
-                    "entries": [],
-                })
+                totals = partner_report(redemption.partner)
                 totals["redemption_gross"] += redemption.payment_amount_krw
                 totals["redemption_net"] += max(redemption.payment_amount_krw - redemption.points_requested, 0)
                 totals["redemption_count"] += 1
@@ -782,6 +790,8 @@ class PartnerBookingAdmin(AdminCalendarMixin, admin.ModelAdmin):
             }
             for report in extra_context["booking_day_report"]["partners"]:
                 report["payment_total_display"] = f'{report["payment_total"]:,}'
+                report["gross_total_display"] = f'{report["gross_total"]:,}'
+                report["points_offset_total_display"] = f'{report["points_offset_total"]:,}'
                 report["redemption_gross_display"] = f'{report["redemption_gross"]:,}'
                 report["redemption_net_display"] = f'{report["redemption_net"]:,}'
                 report["earned_display"] = f'{report["earned"]:,}'

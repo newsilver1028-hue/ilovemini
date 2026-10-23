@@ -754,10 +754,12 @@ class ApiAccessTests(TestCase):
         verified_record = partner_client.post("/api/ledger/partner-verified/", {
             "vehicle_public_id": str(self.mine.public_id), "plate_number": self.mine.plate_number,
             "partner": partner.pk, "kind": "service", "odometer_km": 42000,
-            "amount_krw": 50000, "description": "포인트 사용 후 정비", "point_redemption_id": created.data["id"],
+            "amount_krw": 50000, "payment_method": "card", "description": "포인트 사용 후 정비", "point_redemption_id": created.data["id"],
         }, format="json")
         self.assertEqual(verified_record.status_code, 201, verified_record.data)
         self.assertEqual(verified_record.data["amount_krw"], 49600)
+        self.assertEqual(verified_record.data["gross_amount_krw"], 50000)
+        self.assertEqual(verified_record.data["payment_method"], "card")
         self.assertEqual(LedgerEntry.objects.get(pk=verified_record.data["id"]).amount_krw, 49600)
         self.assertFalse(PointTransaction.objects.filter(
             ledger_entry_id=verified_record.data["id"],

@@ -199,7 +199,9 @@ class PartnerAdminSite(AdminSite):
                 entry.odometer_km,
                 entry.get_kind_display(),
                 " / ".join(item_values),
+                entry.gross_amount_krw if entry.gross_amount_krw is not None else entry.amount_krw,
                 entry.amount_krw,
+                entry.get_payment_method_display() if entry.payment_method else "미기록(이전 앱)",
                 entry.description,
                 entry.evidence_images.count(),
                 member_nickname(verified_by) if verified_by else "",
@@ -207,7 +209,7 @@ class PartnerAdminSite(AdminSite):
         return self._excel_response(
             f"ilovemini-maintenance-records-{timezone.localdate():%Y%m%d}.xlsx",
             "정비 관리대장",
-            ["정비 일자", "등록 일시", "업체", "차량", "차량번호", "주행거리(km)", "작업 종류", "항목별 금액", "총액(원)", "정비 내용", "첨부 사진 수", "등록 담당자"],
+            ["정비 일자", "등록 일시", "업체", "차량", "차량번호", "주행거리(km)", "작업 종류", "항목별 금액", "정비 총액(포인트 차감 전, 원)", "실제 결제액(원)", "결제 수단", "정비 내용", "첨부 사진 수", "등록 담당자"],
             rows,
         )
 

@@ -151,11 +151,21 @@ class LedgerEntry(models.Model):
     class Source(models.TextChoices):
         OWNER = "owner", "차주 입력"
         PARTNER = "partner", "협력업체 인증"
+    class PaymentMethod(models.TextChoices):
+        CARD = "card", "카드"
+        CASH = "cash", "현금"
+        TRANSFER = "transfer", "계좌이체"
+        EASY_PAY = "easy_pay", "간편결제"
+        MIXED = "mixed", "복합결제"
+        POINTS_ONLY = "points_only", "포인트 전액"
+        OTHER = "other", "기타"
     vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name="ledger_entries")
     kind = models.CharField(max_length=16, choices=Kind.choices)
     entry_date = models.DateField(default=timezone.localdate)
     odometer_km = models.PositiveIntegerField(null=True, blank=True)
     amount_krw = models.PositiveIntegerField(default=0, validators=[MinValueValidator(0)])
+    gross_amount_krw = models.PositiveIntegerField("정비 총액(포인트 차감 전, 원)", null=True, blank=True)
+    payment_method = models.CharField("결제 수단", max_length=16, choices=PaymentMethod.choices, blank=True, default="")
     description = models.CharField(max_length=160, blank=True)
     line_items = models.JSONField("정비 항목별 금액", default=list, blank=True)
     quantity_liters = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)
