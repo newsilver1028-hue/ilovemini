@@ -542,7 +542,7 @@ class AppContent(models.Model):
     category = models.CharField("상품 분류", max_length=24, default="recommended", choices=[("recommended", "추천 상품"), ("groupbuy", "공동 구매"), ("benefits", "회원 혜택")])
     description = models.TextField("설명", blank=True)
     image_url = models.URLField("공개 HTTPS 이미지", max_length=2048, blank=True)
-    asset_key = models.CharField("내장 이미지", max_length=40, blank=True, choices=[("mini-october", "MINI 10월 프로모션"), ("phone-holder", "거치대"), ("grille-parts", "그릴 부품"), ("shift-knob", "기어 노브")])
+    asset_key = models.CharField("내장 이미지", max_length=40, blank=True, choices=[("partner-kumho", "금호타이어 · 타이어프로 제휴 배너"), ("partner-deutsch", "도이치모터스 MINI 제휴 배너"), ("partner-printtrap", "프린트랩 제휴 배너"), ("mini-october", "MINI 10월 프로모션"), ("phone-holder", "거치대"), ("grille-parts", "그릴 부품"), ("shift-knob", "기어 노브")])
     action_url = models.URLField("구매·안내 HTTPS 주소", max_length=2048, blank=True)
     price_krw = models.PositiveIntegerField("판매 금액(원)", null=True, blank=True)
     compatible_models = models.CharField("호환 차량", max_length=240, blank=True)
