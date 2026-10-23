@@ -10,6 +10,10 @@
   {% if user.is_authenticated %}
     <p class="errornote">현재 계정에는 협력업체 담당자 권한이 없습니다.</p>
   {% endif %}
+  {% if request.GET.naver_error == "cancelled" %}<p class="errornote">네이버 로그인이 취소되었습니다. 다시 시도해 주세요.</p>{% endif %}
+  {% if request.GET.naver_error == "provider" %}<p class="errornote">네이버 인증을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.</p>{% endif %}
+  {% if request.GET.naver_error == "not_registered" %}<p class="errornote">등록된 협력업체 담당자 계정이 아닙니다. 운영자에게 권한을 확인해 주세요.</p>{% endif %}
+  {% if request.GET.naver_error == "expired" or request.GET.naver_error == "invalid" %}<p class="errornote">로그인 요청이 만료되었거나 이미 사용되었습니다. 다시 시작해 주세요.</p>{% endif %}
   <div id="content-main">
     <p>등록된 협력업체 담당자는 네이버 계정으로 로그인할 수 있습니다.</p>
     <a class="button" href="{% url 'partner_naver_start' %}">네이버 아이디로 협력업체 로그인</a>

@@ -1,5 +1,7 @@
 from unittest.mock import patch
 from io import BytesIO
+from urllib.parse import parse_qs, urlparse
+import re
 
 from django.contrib.auth import get_user_model
 from django.test import Client, RequestFactory, TestCase, override_settings
@@ -73,15 +75,33 @@ class PartnerPortalTests(TestCase):
             response = client.get(reverse("partner_naver_start"))
             self.assertEqual(response.status_code, 302)
             self.assertIn("nid.naver.com/oauth2.0/authorize", response["Location"])
-            state = client.session["partner_admin_naver_state"]
+            state = parse_qs(urlparse(response["Location"]).query)["state"][0]
+            callback_client = Client()
             with patch("core.auth_views.exchange_code", return_value="access-token"), patch(
                 "core.auth_views.get_profile", return_value={"id": "naver-subject-1", "nickname": "업체 담당자"}
             ):
-                response = client.get(reverse("naver_callback") + f"?state={state}&code=authorization-code")
+                response = callback_client.get(reverse("naver_callback") + f"?state={state}&code=authorization-code")
 
+        self.assertEqual(response.status_code, 200)
+        match = re.search(rb"name='ticket' value='([^']+)'", response.content)
+        self.assertIsNotNone(match)
+        ticket = match.group(1).decode()
+        response = client.post(
+            reverse("partner_naver_complete"), {"ticket": ticket},
+            HTTP_HOST="admin.ilovemini.co.kr",
+        )
         self.assertRedirects(response, reverse("partner_admin:index"), fetch_redirect_response=False)
         self.assertEqual(str(client.session["_auth_user_id"]), str(self.user.pk))
-        self.assertEqual(client.get(reverse("partner_admin:index")).status_code, 200)
+        self.assertEqual(client.get(reverse("partner_admin:index"), HTTP_HOST="admin.ilovemini.co.kr").status_code, 200)
+        replay = Client().post(
+            reverse("partner_naver_complete"), {"ticket": ticket},
+            HTTP_HOST="admin.ilovemini.co.kr",
+        )
+        self.assertRedirects(
+            replay,
+            "https://admin.ilovemini.co.kr/partner-admin/login/?naver_error=expired",
+            fetch_redirect_response=False,
+        )
 
     def test_oauth_does_not_create_unregistered_partner_users(self):
         client = Client()
@@ -90,13 +110,17 @@ class PartnerPortalTests(TestCase):
             NAVER_CLIENT_SECRET="client-secret",
             NAVER_REDIRECT_URI="https://example.test/api/auth/naver/callback/",
         ):
-            client.get(reverse("partner_naver_start"))
-            state = client.session["partner_admin_naver_state"]
+            start_response = client.get(reverse("partner_naver_start"))
+            state = parse_qs(urlparse(start_response["Location"]).query)["state"][0]
             with patch("core.auth_views.exchange_code", return_value="access-token"), patch(
                 "core.auth_views.get_profile", return_value={"id": "unknown-subject"}
             ):
                 response = client.get(reverse("naver_callback") + f"?state={state}&code=authorization-code")
-        self.assertRedirects(response, reverse("partner_admin:login"), fetch_redirect_response=False)
+        self.assertRedirects(
+            response,
+            "https://admin.ilovemini.co.kr/partner-admin/login/?naver_error=not_registered",
+            fetch_redirect_response=False,
+        )
         self.assertFalse(get_user_model().objects.filter(username__startswith="naver_").exclude(pk=self.user.pk).exists())
 
     def test_partner_staff_sees_only_own_partner_and_cannot_delete(self):

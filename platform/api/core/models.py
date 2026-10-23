@@ -511,6 +511,11 @@ class AppReviewAccount(models.Model):
         return self.username
 
 class NaverOAuthAttempt(models.Model):
+    class Flow(models.TextChoices):
+        APP = "app", "앱 로그인"
+        PARTNER_ADMIN = "partner_admin", "협력업체 관리자 로그인"
+
+    flow = models.CharField(max_length=20, choices=Flow.choices, default=Flow.APP)
     state_digest = models.CharField(max_length=64, unique=True)
     ticket_digest = models.CharField(max_length=64, unique=True, null=True, blank=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.CASCADE)
