@@ -1022,11 +1022,26 @@ class MemberUserAdmin(AdminCalendarMixin, UserAdmin):
     date_hierarchy = "date_joined"
     ordering = ("-date_joined", "-id")
     list_filter = ("is_active", "is_staff", "is_superuser", "groups")
-    readonly_fields = (*UserAdmin.readonly_fields, "display_nickname", "id", "display_workplaces", "display_points_earned", "display_points_used", "display_points_balance")
+    readonly_fields = (*UserAdmin.readonly_fields, "display_nickname", "id", "display_workplaces", "display_points_earned", "display_points_used", "display_points_balance", "member_activity")
     fieldsets = (
         ("회원 식별 정보", {"fields": ("id", "display_nickname", "display_workplaces")}),
+        ("회원 통합 이력", {"fields": ("member_activity",)}),
         ("포인트 요약", {"fields": ("display_points_earned", "display_points_used", "display_points_balance")}),
     ) + UserAdmin.fieldsets
+
+    @admin.display(description="예약·정비·포인트 최근 이력")
+    def member_activity(self, obj):
+        from django.utils.html import format_html_join
+        events = []
+        for row in PartnerBooking.objects.filter(customer=obj).select_related("partner").order_by("-requested_at")[:50]:
+            events.append((row.requested_at, "예약", f"{row.partner.name} · {row.get_status_display()} · {row.service_type} · 취소사유: {row.cancellation_reason or '없음'}", reverse("admin:core_partnerbooking_change", args=[row.pk])))
+        for row in PointTransaction.objects.filter(user=obj).select_related("partner").order_by("-created_at")[:50]:
+            events.append((row.created_at, "포인트", f"{row.points_delta:+,}P · {row.partner.name if row.partner else '업체 거래 아님'} · {row.get_transaction_type_display()} · {row.memo}", reverse("admin:core_pointtransaction_change", args=[row.pk])))
+        vehicle_ids = VehicleOwnership.objects.filter(user=obj).values_list("vehicle_id", flat=True)
+        for row in LedgerEntry.objects.filter(vehicle_id__in=vehicle_ids).select_related("vehicle", "partner").order_by("-created_at")[:50]:
+            events.append((row.created_at, "차량 기록", f"{row.vehicle.plate_number} · {row.description} · {row.amount_krw:,}원 · {row.partner.name if row.partner else '차주 입력'}", reverse("admin:core_ledgerentry_change", args=[row.pk])))
+        events.sort(key=lambda event: event[0], reverse=True)
+        return format_html_join("", '<p>{} · <b>{}</b> · <a href="{}">{}</a></p>', ((timezone.localtime(at).strftime("%Y-%m-%d %H:%M"), kind, link, detail) for at, kind, detail, link in events[:100])) or "이력이 없습니다."
 
     @admin.display(description="휴대전화번호")
     def display_mobile(self, obj):
