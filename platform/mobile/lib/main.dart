@@ -1017,7 +1017,7 @@ class _VehicleOverviewState extends State<VehicleOverview> {
           TextButton(onPressed: widget.onGarage, child: const Text('차량 관리')),
         ]),
         if (vehicle != null && (hasMiniVehiclePhoto(vehicle) || hasBmwVehiclePhoto(vehicle) || hasMaybachPhoto(vehicle)))
-          VehiclePhoto(vehicle: vehicle, height: 132),
+          VehiclePhoto(vehicle: vehicle, height: 100),
         Text(vehicleTitle, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -.5)),
         const SizedBox(height: 4),
         Text(subtitle, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
