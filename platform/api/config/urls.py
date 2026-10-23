@@ -16,6 +16,7 @@ from core.privacy_views import privacy_policy, terms_of_service
 from core.partner_push_views import web_push_subscribe, web_push_unsubscribe, partner_service_worker
 
 router = DefaultRouter()
+from core.app_sync import AppSyncView, MemberPointHistoryView
 router.register("maintenance-recommendations", RecommendationViewSet, basename="maintenance-recommendation")
 router.register("service-estimates", EstimateViewSet, basename="service-estimate")
 router.register("vehicles", VehicleViewSet, basename="vehicle")
@@ -40,6 +41,8 @@ urlpatterns = [
     path("privacy/", privacy_policy, name="privacy_policy"),
     path("terms/", terms_of_service, name="terms_of_service"),
     path("api/app/content/", AppContentView.as_view(), name="app_content"),
+    path("api/app/sync/", AppSyncView.as_view(), name="app_sync"),
+    path("api/points/history/", MemberPointHistoryView.as_view(), name="member_point_history"),
     path("api/shopping/search/", ShoppingSearchView.as_view(), name="shopping_search"),
     path("api/me/preferences/", MemberPreferenceView.as_view(), name="member_preferences"),
     path("api/me/overview/", MemberOverviewView.as_view(), name="member_overview"),

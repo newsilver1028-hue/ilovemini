@@ -20,13 +20,22 @@ from .models import (
     LedgerEntry, Notice, Offer, Partner, PartnerImage, PartnerReview, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
     VehicleOwnership, VehicleTransferCode, AttendanceCheckin, PointTransaction, PointRedemptionRequest,
     SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest, AppReviewAccount, AppleIdentity,
-    PartnerServiceCategoryOption, PartnerBooking,
+    PartnerServiceCategoryOption, PartnerBooking, AppRuntimeSettings,
 )
 
 
 admin.site.site_header = "아이러브미니 운영 관리"
 admin.site.site_title = "ILOVEMINI 운영자"
 admin.site.index_title = "앱 콘텐츠와 회원 데이터 관리"
+
+@admin.register(AppRuntimeSettings)
+class AppRuntimeSettingsAdmin(admin.ModelAdmin):
+    fields = ('refresh_interval_seconds','show_demo_products')
+    list_display = ('__str__','refresh_interval_seconds','show_demo_products')
+    def has_add_permission(self, request):
+        return not AppRuntimeSettings.objects.exists() and super().has_add_permission(request)
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class AdminCalendarMixin:

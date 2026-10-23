@@ -190,29 +190,12 @@ List<Map<String, dynamic>> alignPartnerDirectory(
 }
 
 String _partnerRegionGroup(String region) {
-  if (RegExp(r'부산|경남|경북|충남|충북|전남|전북|대전|광주|울산|세종|논산')
-      .hasMatch(region)) {
+  if (RegExp(r'부산|경남|경북|충남|충북|전남|전북|대전|광주|울산|세종|논산').hasMatch(region)) {
     return '전라/경상/충청 협력업체';
   }
   return '서울/경기 협력업체';
 }
 
 List<Map<String, dynamic>> sortAccidentRepairPartners(
-    List<Map<String, dynamic>> source) {
-  int order(Map<String, dynamic> partner) {
-    final name = '${partner['name'] ?? ''}';
-    final branch =
-        '${partner['branch_label'] ?? ''} ${partner['region'] ?? ''}';
-    if (name == '아이모터스랩' && branch.contains('성수')) return 0;
-    if (name == '아이모터스랩' && branch.contains('죽전')) return 1;
-    if (name == '리본모터스') return 2;
-    if (name == '랩스타모터스' || name == '랩스타') return 3;
-    return 100;
-  }
-
-  return [...source]..sort((a, b) {
-      final byRequestedOrder = order(a).compareTo(order(b));
-      if (byRequestedOrder != 0) return byRequestedOrder;
-      return '${a['name'] ?? ''}'.compareTo('${b['name'] ?? ''}');
-    });
-}
+        List<Map<String, dynamic>> source) =>
+    [...source];

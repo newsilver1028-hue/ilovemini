@@ -135,7 +135,7 @@ class PartnerPortalTests(TestCase):
         self.assertFalse(ledger_admin.has_change_permission(request))
         self.assertEqual(
             {model._meta.model_name for model in partner_admin_site._registry},
-            {"partnerbooking", "ledgerentry"},
+            {"partnerbooking", "ledgerentry", "maintenancerecommendation", "serviceestimate"},
         )
 
     def test_direct_delete_url_is_denied_for_partner_user(self):

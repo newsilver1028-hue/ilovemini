@@ -86,19 +86,21 @@ void main() {
     expect(find.text('검색어 입력'), findsNothing);
     expect(find.text('AI 검색'), findsNothing);
     expect(find.text('카페 검색'), findsNothing);
-    expect(find.textContaining('핸드폰 거치대'), findsOneWidget);
+    expect(find.textContaining('핸드폰 거치대'), findsNothing);
+    expect(find.byType(Image), findsOneWidget);
     expect(find.text('말자동차에서 보기'), findsNothing);
-    expect(find.text('업데이트 예정'), findsOneWidget);
+    expect(find.text('업데이트예정'), findsOneWidget);
     expect(find.textContaining('최대 거치 사이즈'), findsNothing);
     expect(find.byType(GridView), findsNothing);
     expect(find.byType(ListView), findsOneWidget);
 
     await tester.tap(find.text('공동구매'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('컵홀더'), findsOneWidget);
+    expect(find.textContaining('컵홀더'), findsNothing);
+    expect(find.byType(Image), findsOneWidget);
     expect(find.textContaining('아이스티 머그'), findsNothing);
     expect(find.text('말자동차에서 보기'), findsNothing);
-    expect(find.text('업데이트 예정'), findsOneWidget);
+    expect(find.text('업데이트예정'), findsOneWidget);
 
     expect(find.text('제휴혜택'), findsNothing);
   });
@@ -157,7 +159,7 @@ void main() {
         api.resolvePublicImageUrl('http://insecure.example/item.png'), isNull);
   });
 
-  testWidgets('MY hides completed and elapsed partner bookings',
+  testWidgets('MY includes completed and elapsed booking history',
       (tester) async {
     final api = ApiClient(client: MockClient((request) async {
       expect(request.url.path, '/api/bookings/');
@@ -197,8 +199,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('예정 업체'), findsOneWidget);
-    expect(find.textContaining('완료 업체'), findsNothing);
-    expect(find.textContaining('지난 업체'), findsNothing);
+    expect(find.textContaining('완료 업체'), findsOneWidget);
+    expect(find.textContaining('지난 업체'), findsOneWidget);
   });
 
   testWidgets('attendance button becomes disabled after successful check-in',
@@ -365,14 +367,14 @@ void main() {
             body: CatalogPage(api: api, path: 'partners', title: '업체'))));
     await tester.pumpAndSettle();
     expect(find.text('23곳'), findsWidgets);
-    await tester.scrollUntilVisible(find.text('정비 전문').first, 200,
+    await tester.scrollUntilVisible(find.text('경정비').first, 200,
         scrollable: find.byType(Scrollable).first);
     await tester.pumpAndSettle();
-    await Scrollable.ensureVisible(tester.element(find.text('정비 전문').first),
+    await Scrollable.ensureVisible(tester.element(find.text('경정비').first),
         alignment: 0.5, duration: Duration.zero);
     await tester.pumpAndSettle();
-    expect(find.text('정비 전문').first.hitTestable(), findsOneWidget);
-    await tester.tap(find.text('정비 전문').first);
+    expect(find.text('경정비').first.hitTestable(), findsOneWidget);
+    await tester.tap(find.text('경정비').first);
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('업체 22'), 300,
         scrollable: find.byType(Scrollable).first);

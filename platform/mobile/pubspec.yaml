@@ -1,7 +1,7 @@
 name: ilovemini
 publish_to: 'none'
 description: ILOVEMINI owner app
-version: 1.0.0+360
+version: 1.0.0+361
 environment:
   sdk: '>=3.6.0 <4.0.0'
 dependencies:

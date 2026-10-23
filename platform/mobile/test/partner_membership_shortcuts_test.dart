@@ -75,19 +75,30 @@ void main() {
     expect(find.textContaining('아이러브미니에서 승인한 MINI 회원'), findsOneWidget);
     expect(find.textContaining('아이러브미니에서 등록된 협력업체 담당자'), findsOneWidget);
   });
-  testWidgets('general account page has no unscoped partner registration button',
+  testWidgets(
+      'general account page has no unscoped partner registration button',
       (tester) async {
     final api = ApiClient(client: MockClient((request) async {
       final list = request.url.path.endsWith('/vehicles/') ||
-          request.url.path.contains('bookings') || request.url.path.contains('ledger');
+          request.url.path.contains('bookings') ||
+          request.url.path.contains('ledger') ||
+          request.url.path.contains('maintenance-recommendations') ||
+          request.url.path.contains('service-estimates');
       return http.Response(jsonEncode(list ? [] : {'grade': 'general'}), 200,
           headers: {'content-type': 'application/json; charset=utf-8'});
     }));
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: AccountPage(
-      api: api, signedIn: true, pushEnabled: false,
-      onPushChanged: (_) {}, onLogin: () {}, onLogout: () {},
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: AccountPage(
+      api: api,
+      signedIn: true,
+      pushEnabled: false,
+      onPushChanged: (_) {},
+      onLogin: () {},
+      onLogout: () {},
       onManageVehicles: () {},
     ))));
+
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView).first, const Offset(0, -1800));
     await tester.pumpAndSettle();
@@ -95,5 +106,4 @@ void main() {
     expect(find.text('협력업체 정비 인증기록 등록'), findsNothing);
     expect(find.text('회원 차량 QR 스캔'), findsNothing);
   });
-
 }

@@ -561,8 +561,6 @@ class AppContent(models.Model):
             value = getattr(self, field)
             if value and not value.startswith("https://"):
                 errors[field] = "공개 HTTPS 주소를 입력해 주세요."
-        if self.is_active and self.kind == self.Kind.PRODUCT and not self.action_url:
-            errors["action_url"] = "실제 구매·안내 주소를 입력해야 상품을 공개할 수 있습니다."
         if self.ends_at and self.starts_at and self.ends_at <= self.starts_at:
             errors["ends_at"] = "종료는 시작보다 늦어야 합니다."
         if errors: raise ValidationError(errors)
@@ -634,3 +632,14 @@ class ServiceEstimate(models.Model):
         verbose_name = '정비 견적'
         verbose_name_plural = '정비 견적'
         constraints = [models.UniqueConstraint(fields=['booking','revision'], name='unique_booking_estimate_revision')]
+
+class AppRuntimeSettings(models.Model):
+    refresh_interval_seconds = models.PositiveSmallIntegerField('사용 중 변경 확인 주기(초)', default=15,
+        validators=[MinValueValidator(10), MaxValueValidator(120)])
+    show_demo_products = models.BooleanField('상품 미등록 시 데모 이미지 표시', default=True)
+    public_revision = models.PositiveBigIntegerField(default=1, editable=False)
+    member_revision = models.PositiveBigIntegerField(default=1, editable=False)
+    class Meta:
+        verbose_name = '앱 연동 설정'
+        verbose_name_plural = '앱 연동 설정'
+    def __str__(self): return '앱 자동 갱신·데모 표시 설정'

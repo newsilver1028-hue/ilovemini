@@ -119,7 +119,8 @@ void main() {
     expect(aligned.single['region_group'], '전라/경상/충청 협력업체');
   });
 
-  test('accident repair partners use requested labels and order', () {
+  test('partner labels are normalized while server list order is preserved',
+      () {
     final aligned = alignPartnerDirectory([
       {
         'name': '랩스타모터스',
@@ -157,7 +158,7 @@ void main() {
           .map((partner) =>
               '${partner['name']}${partner['branch_label'] == null ? '' : ' · ${partner['branch_label']}'}')
           .toList(),
-      ['아이모터스랩 · 성수점', '아이모터스랩 · 죽전점', '리본모터스', '랩스타모터스'],
+      ['랩스타모터스', '리본모터스', '아이모터스랩 · 죽전점', '아이모터스랩 · 성수점'],
     );
     expect(
       accidentPartners

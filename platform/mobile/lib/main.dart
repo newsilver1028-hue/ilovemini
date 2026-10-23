@@ -16,6 +16,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'api_client.dart';
+import 'admin_managed_widgets.dart';
+import 'app_refresh.dart';
+import 'maintenance_requests.dart';
 import 'vehicle_catalog_picker.dart';
 import 'vehicle_photo_support.dart';
 import 'brand_loading.dart';
@@ -889,7 +892,8 @@ Future<void> showVehiclePassportQr(
 }
 
 class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+  const MainShell({this.api, super.key});
+  final ApiClient? api;
   @override
   State<MainShell> createState() => _MainShellState();
 }
@@ -910,7 +914,28 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         : (vehicle['model_name'] ?? '등록 차량').toString();
   }
 
-  final api = ApiClient();
+  late final api = widget.api ?? ApiClient();
+  late final AppRefreshController _appRefresh;
+  int _contentRevision = 0;
+  bool _pendingRefresh = false;
+  void _requestDataRefresh() {
+    _pendingRefresh = true;
+    _applyDataRefresh();
+  }
+
+  void _applyDataRefresh() {
+    if (!mounted ||
+        !_pendingRefresh ||
+        _membershipCardExpanded ||
+        ModalRoute.of(context)?.isCurrent == false) return;
+    final focus = FocusManager.instance.primaryFocus?.context;
+    if (focus?.findAncestorWidgetOfExactType<EditableText>() != null) return;
+    setState(() {
+      _pendingRefresh = false;
+      _contentRevision++;
+    });
+  }
+
   StreamSubscription<String>? tokenSubscription;
   StreamSubscription<RemoteMessage>? messageSubscription;
   StreamSubscription<RemoteMessage>? openedSubscription;
@@ -923,6 +948,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _appRefresh =
+        AppRefreshController(api, _requestDataRefresh, _applyDataRefresh);
+    _appRefresh.start();
     ApiClient.sessionExpired.addListener(_onSessionExpired);
     _loadSession();
     if (firebaseReady) {
@@ -966,6 +994,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _appRefresh.start();
+    } else {
+      _appRefresh.stop();
+    }
     if (state == AppLifecycleState.resumed && signedIn) {
       _checkPendingPointRedemption();
       _startPointRequestPolling();
@@ -1281,80 +1314,94 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               ),
               if (_membershipCardExpanded)
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        if (_membershipVehicles.length > 1)
-                          DropdownButtonHideUnderline(
-                            child: DropdownButton<Map<String, dynamic>>(
-                              value: selected,
-                              isExpanded: true,
-                              alignment: Alignment.center,
-                              dropdownColor:
-                                  Theme.of(context).colorScheme.surface,
-                              style: Theme.of(context).textTheme.titleMedium,
-                              selectedItemBuilder: (context) =>
-                                  _membershipVehicles
-                                      .map((vehicle) => Center(
-                                            child: Text(
-                                              _membershipVehicleLabel(vehicle),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              textAlign: TextAlign.center,
+                  child: SingleChildScrollView(
+                    physics: const NeverScrollableScrollPhysics(),
+                    child: SizedBox(
+                      height: (MediaQuery.sizeOf(context).height * .47)
+                              .clamp(340.0, 410.0)
+                              .toDouble() -
+                          72,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (_membershipVehicles.length > 1)
+                              DropdownButtonHideUnderline(
+                                child: DropdownButton<Map<String, dynamic>>(
+                                  value: selected,
+                                  isExpanded: true,
+                                  alignment: Alignment.center,
+                                  dropdownColor:
+                                      Theme.of(context).colorScheme.surface,
+                                  style:
+                                      Theme.of(context).textTheme.titleMedium,
+                                  selectedItemBuilder: (context) =>
+                                      _membershipVehicles
+                                          .map((vehicle) => Center(
+                                                child: Text(
+                                                  _membershipVehicleLabel(
+                                                      vehicle),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  textAlign: TextAlign.center,
+                                                ),
+                                              ))
+                                          .toList(),
+                                  items: _membershipVehicles
+                                      .map((vehicle) => DropdownMenuItem<
+                                              Map<String, dynamic>>(
+                                            value: vehicle,
+                                            child: Center(
+                                              child: Text(
+                                                _membershipVehicleLabel(
+                                                    vehicle),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: TextAlign.center,
+                                              ),
                                             ),
                                           ))
                                       .toList(),
-                              items: _membershipVehicles
-                                  .map((vehicle) =>
-                                      DropdownMenuItem<Map<String, dynamic>>(
-                                        value: vehicle,
-                                        child: Center(
-                                          child: Text(
-                                            _membershipVehicleLabel(vehicle),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            textAlign: TextAlign.center,
-                                          ),
-                                        ),
-                                      ))
-                                  .toList(),
-                              onChanged: (vehicle) {
-                                if (vehicle != null) {
-                                  setState(() => _membershipVehicle = vehicle);
-                                }
-                              },
-                            ),
-                          ),
-                        if (publicId != null && publicId.isNotEmpty)
-                          Flexible(
-                            child: LayoutBuilder(
-                              builder: (context, constraints) {
-                                final qrSize = constraints.maxHeight
-                                    .clamp(0.0, 196.0)
-                                    .toDouble();
-                                return Center(
-                                  child: QrImageView(
-                                      data: 'ilovemini://vehicle/$publicId',
-                                      size: qrSize,
-                                      backgroundColor: Colors.white),
-                                );
-                              },
-                            ),
-                          )
-                        else
-                          const Flexible(
-                            child: Center(
-                              child: Text('차량 QR 정보를 불러오지 못했습니다.',
-                                  style: TextStyle(color: Colors.white)),
-                            ),
-                          ),
-                        const SizedBox(height: 8),
-                        const Text('승인된 협력업체 담당자에게 이 QR을 보여주세요.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.white)),
-                      ],
+                                  onChanged: (vehicle) {
+                                    if (vehicle != null) {
+                                      setState(
+                                          () => _membershipVehicle = vehicle);
+                                    }
+                                  },
+                                ),
+                              ),
+                            if (publicId != null && publicId.isNotEmpty)
+                              Flexible(
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final qrSize = constraints.maxHeight
+                                        .clamp(0.0, 196.0)
+                                        .toDouble();
+                                    return Center(
+                                      child: QrImageView(
+                                          data: 'ilovemini://vehicle/$publicId',
+                                          size: qrSize,
+                                          backgroundColor: Colors.white),
+                                    );
+                                  },
+                                ),
+                              )
+                            else
+                              const Flexible(
+                                child: Center(
+                                  child: Text('차량 QR 정보를 불러오지 못했습니다.',
+                                      style: TextStyle(color: Colors.white)),
+                                ),
+                              ),
+                            const SizedBox(height: 8),
+                            const Text('승인된 협력업체 담당자에게 이 QR을 보여주세요.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.white)),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1406,36 +1453,39 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                           : ThemeMode.dark;
                 })
           ]),
-      body: switch (tab) {
-        0 => HomePage(
-            api: api,
-            signedIn: signedIn,
-            onOpenGarage: () => setState(() => tab = 1),
-            onLogin: _login),
-        1 => GaragePage(
-            key: ValueKey('garage-$signedIn'),
-            api: api,
-            signedIn: signedIn,
-            onLogin: _login),
-        2 => CatalogPage(api: api, path: 'partners', title: 'ILOVEMINI 협력업체'),
-        3 => CafePage(api: api),
-        _ => AccountPage(
-            api: api,
-            signedIn: signedIn,
-            pushEnabled: pushEnabled,
-            onPushChanged: _setPushEnabled,
-            onLogin: _login,
-            onLogout: () async {
-              await _removePushInstallation();
-              await api.logout();
-              if (mounted)
-                setState(() {
-                  signedIn = false;
-                  pushEnabled = false;
-                });
-            },
-            onManageVehicles: () => setState(() => tab = 1)),
-      },
+      body: KeyedSubtree(
+          key: ValueKey('tab-$tab-revision-$_contentRevision'),
+          child: switch (tab) {
+            0 => HomePage(
+                api: api,
+                signedIn: signedIn,
+                onOpenGarage: () => setState(() => tab = 1),
+                onLogin: _login),
+            1 => GaragePage(
+                key: ValueKey('garage-$signedIn'),
+                api: api,
+                signedIn: signedIn,
+                onLogin: _login),
+            2 =>
+              CatalogPage(api: api, path: 'partners', title: 'ILOVEMINI 협력업체'),
+            3 => CafePage(api: api),
+            _ => AccountPage(
+                api: api,
+                signedIn: signedIn,
+                pushEnabled: pushEnabled,
+                onPushChanged: _setPushEnabled,
+                onLogin: _login,
+                onLogout: () async {
+                  await _removePushInstallation();
+                  await api.logout();
+                  if (mounted)
+                    setState(() {
+                      signedIn = false;
+                      pushEnabled = false;
+                    });
+                },
+                onManageVehicles: () => setState(() => tab = 1)),
+          }),
       bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
         _membershipPopupBar(context),
         NavigationBar(
@@ -1471,6 +1521,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _appRefresh.stop();
     WidgetsBinding.instance.removeObserver(this);
     _pointRequestPoller?.cancel();
     ApiClient.sessionExpired.removeListener(_onSessionExpired);
@@ -1481,56 +1532,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 }
 
-class SeasonLaunch extends StatefulWidget {
+class SeasonLaunch extends StatelessWidget {
   const SeasonLaunch({required this.home, super.key});
   final Widget home;
   @override
-  State<SeasonLaunch> createState() => _SeasonLaunchState();
-}
-
-class _SeasonLaunchState extends State<SeasonLaunch> {
-  Timer? _timer;
-  bool _bannerReady = false;
-  bool _finished = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer(const Duration(milliseconds: 850), () {
-      if (!mounted) return;
-      setState(() => _bannerReady = true);
-      _timer = Timer(const Duration(milliseconds: 2200), () {
-        if (mounted) setState(() => _finished = true);
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_finished) return widget.home;
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: SizedBox.expand(
-        child: _bannerReady
-            ? Center(
-                child: Image.asset(
-                  'assets/images/season/mini-october.png',
-                  width: double.infinity,
-                  height: double.infinity,
-                  fit: BoxFit.cover,
-                  alignment: Alignment.center,
-                ),
-              )
-            : const Center(child: MiniDriveLoader(label: '함께하는 즐거운 드라이브')),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => ManagedSeasonLaunch(home: home);
 }
 
 class HomePage extends StatelessWidget {
@@ -1553,7 +1559,13 @@ class HomePage extends StatelessWidget {
             signedIn: signedIn,
             onGarage: onOpenGarage),
         const SizedBox(height: 16),
-        const AffiliateBannerCarousel(),
+        ManagedNotices(
+            api: api,
+            onOpen: (notice) => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => CatalogDetailPage(
+                    api: api, path: 'notices', item: notice)))),
+        ManagedBanners(api: api),
+        ManagedUpdateNotice(api: api),
       ]);
 }
 
@@ -1642,83 +1654,26 @@ class _CafePageState extends State<CafePage> {
     } catch (_) {}
   }
 
-  String? _assetPath(String key) => switch (key) {
-        'mini-october' => 'assets/images/season/mini-october.png',
-        'phone-holder' =>
-          'assets/images/mini-recommended-items/item-01-phone-holder.png',
-        'interior-brackets' =>
-          'assets/images/mini-recommended-items/item-02-interior-brackets.png',
-        'grille-parts' =>
-          'assets/images/mini-recommended-items/item-03-grille-parts.png',
-        'shift-knob' =>
-          'assets/images/mini-recommended-items/item-04-shift-knob.png',
-        'partner-deutsch' => 'assets/images/partner-banner-deutsch.webp',
-        'partner-printtrap' => 'assets/images/partner-banner-printtrap.webp',
-        _ => null,
-      };
+  Widget _productCard(Map<String, dynamic> item, {bool compact = false}) =>
+      Card(
+          clipBehavior: Clip.antiAlias,
+          child: Column(children: [
+            Expanded(child: managedImage(item)),
+            const Padding(padding: EdgeInsets.all(10), child: Text('업데이트예정')),
+          ]));
 
-  Widget _productImage(Map<String, dynamic> item) {
-    final imageUrl =
-        widget.api.resolvePublicImageUrl('${item['image_url'] ?? ''}');
-    final assetPath = _assetPath('${item['asset_key'] ?? ''}');
-    Widget fallbackImage() => assetPath == null
-        ? const Icon(Icons.shopping_bag_outlined, size: 52, color: brandRed)
-        : Image.asset(assetPath,
-            width: double.infinity,
-            height: double.infinity,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => const Icon(
-                Icons.shopping_bag_outlined,
-                size: 52,
-                color: brandRed));
-    if (imageUrl != null) {
-      return Image.network(imageUrl,
-          width: double.infinity,
-          height: double.infinity,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => fallbackImage());
-    }
-    return fallbackImage();
-  }
-
-  Widget _productCard(Map<String, dynamic> item, {required bool compact}) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        SizedBox(
-          height: compact ? 138 : 220,
-          child: ColoredBox(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            child: _productImage(item),
-          ),
-        ),
-        Padding(
-          padding: EdgeInsets.all(compact ? 10 : 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text('${item['title'] ?? ''}',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w800)),
-              ),
-              const SizedBox(width: 8),
-              const Text('업데이트 예정',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-            ],
-          ),
-        ),
-      ]),
-    );
-  }
-
-  Widget _productList(List<Map<String, dynamic>> products, String category) {
+  Widget _productList(
+      List<Map<String, dynamic>> products, String category, bool showDemo) {
     final items = products
         .where((item) => '${item['category'] ?? 'recommended'}' == category)
         .toList();
     final fallbackItems = switch (category) {
-      'recommended' => malautoRecommendedProducts,
-      'groupbuy' => malautoGroupbuyProducts,
+      'recommended' => <Map<String, dynamic>>[
+          {'asset_key': 'grille-parts'}
+        ],
+      'groupbuy' => <Map<String, dynamic>>[
+          {'asset_key': 'shift-knob'}
+        ],
       'benefits' => shoppingBenefitFallback
           .map((item) => <String, dynamic>{
                 'title': item['title'],
@@ -1728,13 +1683,11 @@ class _CafePageState extends State<CafePage> {
           .toList(),
       _ => <Map<String, dynamic>>[],
     };
-    final sourceItems = category == 'recommended'
-        ? malautoRecommendedProducts
-        : category == 'groupbuy'
-            ? malautoGroupbuyProducts
-            : items.isEmpty
-                ? fallbackItems
-                : items;
+    final sourceItems = items.isNotEmpty
+        ? items
+        : showDemo
+            ? fallbackItems
+            : <Map<String, dynamic>>[];
     final visibleItems = category == 'recommended' || category == 'groupbuy'
         ? sourceItems.take(1).toList()
         : sourceItems;
@@ -1849,8 +1802,18 @@ class _CafePageState extends State<CafePage> {
                 child: RefreshIndicator(
                   onRefresh: reload,
                   child: TabBarView(children: [
-                    _productList(products, 'recommended'),
-                    _productList(products, 'groupbuy'),
+                    _productList(
+                        products,
+                        'recommended',
+                        (snapshot.data?['configuration']
+                                as Map?)?['show_demo_products'] !=
+                            false),
+                    _productList(
+                        products,
+                        'groupbuy',
+                        (snapshot.data?['configuration']
+                                as Map?)?['show_demo_products'] !=
+                            false),
                   ]),
                 ),
               ),
@@ -2805,10 +2768,12 @@ class _CatalogPageState extends State<CatalogPage> {
   }
 
   bool matches(Map<String, dynamic> item) {
-    final categories = (item['service_categories'] as List? ?? []).join(' ');
+    final categories = (item['service_categories'] as List? ?? [])
+        .join(' ')
+        .replaceAll('휠.타이어', '휠·타이어');
     final text = '${item['name']} ${item['region']} $categories'.toLowerCase();
     final categoryMatch = switch (filter) {
-      '정비' => categories.contains('정비') || categories.contains('수입차'),
+      '정비' || '경정비' => categories.contains('정비') || categories.contains('수입차'),
       '사고수리' => categories.contains('사고') || categories.contains('판금'),
       '차량유리' => categories.contains('유리'),
       '오디오' => categories.contains('오디오'),
@@ -2817,7 +2782,8 @@ class _CatalogPageState extends State<CatalogPage> {
           categories.contains('튜닝') ||
           categories.contains('전장'),
       '신차패키지' => _partnerSpecialty(item) == '신차패키지',
-      _ => true,
+      _ => filter == '전체' ||
+          categories.contains(filter.replaceAll('휠.타이어', '휠·타이어')),
     };
     return categoryMatch &&
         (regionFilter == '전체 지역' ||
@@ -2828,7 +2794,11 @@ class _CatalogPageState extends State<CatalogPage> {
   void openItem(Map<String, dynamic> item) {
     Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => widget.path == 'partners'
-            ? PartnerDetailPage(api: widget.api, partner: item)
+            ? LivePartnerView(
+                api: widget.api,
+                initial: item,
+                builder: (fresh) =>
+                    PartnerDetailPage(api: widget.api, partner: fresh))
             : CatalogDetailPage(
                 api: widget.api, path: widget.path, item: item)));
   }
@@ -2856,43 +2826,23 @@ class _CatalogPageState extends State<CatalogPage> {
     return '정비 전문';
   }
 
-  bool _partnerHasSpecialty(Map<String, dynamic> item, String specialty) {
-    final compactName = '${item['name'] ?? ''}'.replaceAll(RegExp(r'\s+'), '');
-    if (compactName.contains('에이블모터스') && specialty == '사고수리 전문') {
-      return true;
+  String _managedPartnerGroup(Map<String, dynamic> item) {
+    final categories = (item['service_categories'] as List? ?? [])
+        .map((e) => '$e'.replaceAll('휠.타이어', '휠·타이어'))
+        .toList();
+    for (final category in widget.api.serviceCategories) {
+      final normalized = category.replaceAll('휠.타이어', '휠·타이어');
+      if (categories.contains(normalized) ||
+          (category == '경정비' && categories.any((e) => e.contains('정비'))))
+        return category;
     }
-    final text =
-        '${item['category'] ?? ''} ${(item['service_categories'] as List? ?? []).join(' ')}';
-    return switch (specialty) {
-      '사고수리 전문' => text.contains('사고') || text.contains('판금'),
-      '차량유리 전문' => text.contains('유리'),
-      '전장류 전문' => RegExp(r'전장|오디오').hasMatch(text),
-      '휠·타이어 전문' => RegExp(r'휠|타이어').hasMatch(text),
-      '브랜드홍보' => text.contains('브랜드홍보'),
-      '사고수리·정비 전문' => (text.contains('사고') || text.contains('판금')) &&
-              RegExp(r'정비|수리|서비스|디젤').hasMatch(text) ||
-          compactName.contains('에이블모터스'),
-      '부품·튜닝 전문' => text.contains('부품') ||
-          (text.contains('튜닝') && !RegExp(r'전장|오디오').hasMatch(text)),
-      '정비 전문' => RegExp(r'정비|서비스|디젤').hasMatch(text) ||
-          (text.contains('수리') && !RegExp(r'사고|판금|도색|휠').hasMatch(text)),
-      _ => _partnerSpecialty(item) == specialty,
-    };
+    return '기타';
   }
 
   List<Widget> _partnerGroupTiles(List<Map<String, dynamic>> items) {
     final showNestedCounts =
         query.trim().isEmpty && filter == '전체' && regionFilter == '전체 지역';
-    const groups = [
-      '사고수리 전문',
-      '차량유리 전문',
-      '전장류 전문',
-      '휠·타이어 전문',
-      '부품·튜닝 전문',
-      '정비 전문',
-      '신차패키지',
-      '브랜드홍보'
-    ];
+    final groups = [...widget.api.serviceCategories, '기타'];
     return ['서울/경기 협력업체', '전라/경상/충청 협력업체', '신차패키지', '기타 협력업체'].expand((region) {
       final shops = items
           .where((item) => region == '신차패키지'
@@ -2901,11 +2851,7 @@ class _CatalogPageState extends State<CatalogPage> {
                   _partnerRegionGroup(item) == region)
           .toList();
       if (shops.isEmpty) return <Widget>[];
-      final headings = region == '전라/경상/충청 협력업체'
-          ? ['사고수리·정비 전문']
-          : region == '신차패키지'
-              ? ['신차패키지']
-              : groups;
+      final headings = groups;
       return <Widget>[
         Padding(
             padding: const EdgeInsets.symmetric(vertical: 16),
@@ -2925,8 +2871,7 @@ class _CatalogPageState extends State<CatalogPage> {
             ])),
         ...headings.map((group) {
           final matching = shops
-              .where((item) =>
-                  group == '사고수리·정비 전문' || _partnerHasSpecialty(item, group))
+              .where((item) => _managedPartnerGroup(item) == group)
               .toList();
           final list = group == '사고수리 전문'
               ? sortAccidentRepairPartners(matching)
@@ -3112,13 +3057,7 @@ class _CatalogPageState extends State<CatalogPage> {
                         runSpacing: 8,
                         children: [
                           '전체',
-                          '정비',
-                          '사고수리',
-                          '오디오',
-                          '차량유리',
-                          '휠·타이어',
-                          '전장튜닝',
-                          '신차패키지',
+                          ...widget.api.serviceCategories,
                         ]
                             .map((name) => ChoiceChip(
                                 label: Text(name),
@@ -4459,6 +4398,7 @@ class PartnerDetailPage extends StatelessWidget {
                           icon: const Icon(Icons.map_outlined),
                           label: const Text('지도보기'))),
               ]),
+            PartnerExtraInformation(partner: partner),
             if (infoPending)
               const InfoCard(
                   text:
@@ -6090,8 +6030,7 @@ class _CafeNicknameSectionState extends State<CafeNicknameSection> {
               onPressed: () => Navigator.pop(dialogContext),
               child: const Text('취소')),
           FilledButton(
-            onPressed: () =>
-                Navigator.pop(dialogContext, draft.trim()),
+            onPressed: () => Navigator.pop(dialogContext, draft.trim()),
             child: const Text('저장'),
           ),
         ],
@@ -6217,8 +6156,10 @@ class AccountPage extends StatelessWidget {
           throw Exception('Apple 본인 확인을 완료하지 못했습니다. 다시 시도해 주세요.');
         }
       }
-      await api.deleteAccount(appleIdentityToken: appleToken,
-          appleNonce: appleNonce, appleAuthorizationCode: appleCode);
+      await api.deleteAccount(
+          appleIdentityToken: appleToken,
+          appleNonce: appleNonce,
+          appleAuthorizationCode: appleCode);
       if (!context.mounted) return;
       onLogout();
       if (context.mounted) {
@@ -6235,7 +6176,8 @@ class AccountPage extends StatelessWidget {
     } catch (error) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+          SnackBar(
+              content: Text(error.toString().replaceFirst('Exception: ', ''))),
         );
       }
     }
@@ -6244,154 +6186,166 @@ class AccountPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       ListView(padding: const EdgeInsets.all(20), children: [
-        const Text('MY',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
-        const SizedBox(height: 16),
-        MembershipSummaryCard(
-          api: api,
-          signedIn: signedIn,
-          onLogin: onLogin,
-          nicknameSection: signedIn && !ApiClient.demoMode
-              ? CafeNicknameSection(api: api)
-              : null,
-        ),
-        if (signedIn && !ApiClient.demoMode) ...[
-          const SizedBox(height: 12),
-          MaintenanceReceiptSection(api: api),
-        ],
-        if (signedIn && !ApiClient.demoMode) ...[
-          const SizedBox(height: 12),
-          BookingListSection(api: api),
-        ],
-        const SizedBox(height: 20),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          const Text('내 차량',
-              style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900)),
-          TextButton.icon(
-              onPressed: onManageVehicles,
-              icon: const Icon(Icons.add),
-              label: const Text('차량 추가')),
-        ]),
-        if (!signedIn && !ApiClient.demoMode)
-          const InfoCard(text: '로그인 후 MINI와 다른 차종을 함께 등록할 수 있어요.')
-        else
-          FutureBuilder<List<Map<String, dynamic>>>(
-              future: api.list('vehicles'),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting)
-                  return const Center(child: MiniDriveLoader(compact: true));
-                if (snapshot.hasError)
-                  return const InfoCard(text: '차량 목록을 불러오지 못했습니다.');
-                final vehicles = snapshot.data ?? [];
-                if (vehicles.isEmpty)
-                  return const InfoCard(text: '등록된 차량이 없습니다. 차량을 추가해 주세요.');
-                return Column(
-                    children: vehicles.map((vehicle) {
-                  final name =
-                      (vehicle['nickname']?.toString().trim().isNotEmpty ??
-                              false)
-                          ? vehicle['nickname'].toString()
-                          : (vehicle['model_name'] ?? '등록 차량').toString();
-                  final details = [
-                    if (vehicle['generation'] != null &&
-                        vehicle['generation'].toString().isNotEmpty)
-                      vehicle['generation'],
-                    if (vehicle['model_year'] != null)
-                      '${vehicle['model_year']}년형',
-                    if (vehicle['current_odometer_km'] != null)
-                      '${formatKilometers(vehicle['current_odometer_km'])} km',
-                  ].join(' · ');
-                  return Card(
-                      child: InkWell(
-                          borderRadius: BorderRadius.circular(14),
-                          onTap: onManageVehicles,
-                          child: Padding(
-                            padding: const EdgeInsets.all(14),
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(children: [
-                                    Expanded(
-                                        child: Text(name,
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.w800))),
-                                    const Icon(Icons.chevron_right)
+        Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('MY',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 16),
+          MembershipSummaryCard(
+            api: api,
+            signedIn: signedIn,
+            onLogin: onLogin,
+            nicknameSection: signedIn && !ApiClient.demoMode
+                ? CafeNicknameSection(api: api)
+                : null,
+          ),
+          if (signedIn && !ApiClient.demoMode) ...[
+            const SizedBox(height: 12),
+            MaintenanceRequests(api: api),
+            ListTile(
+                leading: const Icon(Icons.history),
+                title: const Text('포인트 적립·사용 내역'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => MemberPointHistoryPage(api: api)))),
+            MaintenanceReceiptSection(api: api),
+          ],
+          if (signedIn && !ApiClient.demoMode) ...[
+            const SizedBox(height: 12),
+            BookingListSection(api: api),
+          ],
+          const SizedBox(height: 20),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            const Text('내 차량',
+                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900)),
+            TextButton.icon(
+                onPressed: onManageVehicles,
+                icon: const Icon(Icons.add),
+                label: const Text('차량 추가')),
+          ]),
+          if (!signedIn && !ApiClient.demoMode)
+            const InfoCard(text: '로그인 후 MINI와 다른 차종을 함께 등록할 수 있어요.')
+          else
+            FutureBuilder<List<Map<String, dynamic>>>(
+                future: api.list('vehicles'),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    return const Center(child: MiniDriveLoader(compact: true));
+                  if (snapshot.hasError)
+                    return const InfoCard(text: '차량 목록을 불러오지 못했습니다.');
+                  final vehicles = snapshot.data ?? [];
+                  if (vehicles.isEmpty)
+                    return const InfoCard(text: '등록된 차량이 없습니다. 차량을 추가해 주세요.');
+                  return Column(
+                      children: vehicles.map((vehicle) {
+                    final name =
+                        (vehicle['nickname']?.toString().trim().isNotEmpty ??
+                                false)
+                            ? vehicle['nickname'].toString()
+                            : (vehicle['model_name'] ?? '등록 차량').toString();
+                    final details = [
+                      if (vehicle['generation'] != null &&
+                          vehicle['generation'].toString().isNotEmpty)
+                        vehicle['generation'],
+                      if (vehicle['model_year'] != null)
+                        '${vehicle['model_year']}년형',
+                      if (vehicle['current_odometer_km'] != null)
+                        '${formatKilometers(vehicle['current_odometer_km'])} km',
+                    ].join(' · ');
+                    return Card(
+                        child: InkWell(
+                            borderRadius: BorderRadius.circular(14),
+                            onTap: onManageVehicles,
+                            child: Padding(
+                              padding: const EdgeInsets.all(14),
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(children: [
+                                      Expanded(
+                                          child: Text(name,
+                                              style: const TextStyle(
+                                                  fontWeight:
+                                                      FontWeight.w800))),
+                                      const Icon(Icons.chevron_right)
+                                    ]),
+                                    if (hasFavouredF66Photo(vehicle) ||
+                                        hasMaybachPhoto(vehicle) ||
+                                        hasMiniVehiclePhoto(vehicle) ||
+                                        hasBmwVehiclePhoto(vehicle))
+                                      VehiclePhoto(
+                                          vehicle: vehicle, height: 104),
+                                    if (details.isNotEmpty)
+                                      Text(details,
+                                          style: TextStyle(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant)),
                                   ]),
-                                  if (hasFavouredF66Photo(vehicle) ||
-                                      hasMaybachPhoto(vehicle) ||
-                                      hasMiniVehiclePhoto(vehicle) ||
-                                      hasBmwVehiclePhoto(vehicle))
-                                    VehiclePhoto(vehicle: vehicle, height: 104),
-                                  if (details.isNotEmpty)
-                                    Text(details,
-                                        style: TextStyle(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .onSurfaceVariant)),
-                                ]),
-                          )));
-                }).toList());
-              }),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: () => _openCafeNotice(context, partnerInquiryUrl),
-          icon: const Icon(Icons.storefront_outlined),
-          label: const Text('협력업체 입점 문의'),
-        ),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-            onPressed: () => showDialog<void>(
-                context: context,
-                builder: (dialogContext) => AlertDialog(
-                      title: const Text('이용약관 · 개인정보 안내'),
-                      content: const Text(
-                          '아이러브미니 서비스 이용약관과 개인정보 처리방침은 최신 웹 문서에서 확인할 수 있습니다.'),
-                      actions: [
-                        TextButton(
-                            onPressed: () {
-                              Navigator.pop(dialogContext);
-                              launchUrl(Uri.https(
-                                  'ilovemini.onrender.com', '/terms/'));
-                            },
-                            child: const Text('이용약관 보기')),
-                        TextButton(
-                            onPressed: () {
-                              Navigator.pop(dialogContext);
-                              launchUrl(Uri.https(
-                                  'ilovemini.onrender.com', '/privacy/'));
-                            },
-                            child: const Text('개인정보 처리방침')),
-                        TextButton(
-                            onPressed: () => Navigator.pop(dialogContext),
-                            child: const Text('닫기'))
-                      ],
-                    )),
-            icon: const Icon(Icons.description_outlined),
-            label: const Text('이용약관 · 개인정보 안내')),
-        if (signedIn && !ApiClient.demoMode)
-          SwitchListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14),
-            value: pushEnabled,
-            onChanged: onPushChanged,
-            title: const Text('정비 푸시 알림'),
-            subtitle: const Text('설정한 날짜 또는 주행거리에 도달하면 알림을 받아요.'),
-            secondary: const Icon(Icons.notifications_active_outlined),
-          ),
-        const SizedBox(height: 12),
-        if (!ApiClient.demoMode)
-          FilledButton(
-              onPressed: signedIn ? onLogout : onLogin,
-              child: Text(signedIn ? '로그아웃' : '로그인 / 가입')),
-        if (signedIn && !ApiClient.demoMode) ...[
+                            )));
+                  }).toList());
+                }),
           const SizedBox(height: 8),
-          TextButton(
-            onPressed: () => _deleteAccount(context),
-            style: TextButton.styleFrom(foregroundColor: brandRed),
-            child: const Text('회원 계정 삭제'),
+          OutlinedButton.icon(
+            onPressed: () => _openCafeNotice(context, partnerInquiryUrl),
+            icon: const Icon(Icons.storefront_outlined),
+            label: const Text('협력업체 입점 문의'),
           ),
-        ],
-        const SizedBox(height: 20),
-        const AppVersionLabel(),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+              onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (dialogContext) => AlertDialog(
+                        title: const Text('이용약관 · 개인정보 안내'),
+                        content: const Text(
+                            '아이러브미니 서비스 이용약관과 개인정보 처리방침은 최신 웹 문서에서 확인할 수 있습니다.'),
+                        actions: [
+                          TextButton(
+                              onPressed: () {
+                                Navigator.pop(dialogContext);
+                                launchUrl(Uri.https(
+                                    'ilovemini.onrender.com', '/terms/'));
+                              },
+                              child: const Text('이용약관 보기')),
+                          TextButton(
+                              onPressed: () {
+                                Navigator.pop(dialogContext);
+                                launchUrl(Uri.https(
+                                    'ilovemini.onrender.com', '/privacy/'));
+                              },
+                              child: const Text('개인정보 처리방침')),
+                          TextButton(
+                              onPressed: () => Navigator.pop(dialogContext),
+                              child: const Text('닫기'))
+                        ],
+                      )),
+              icon: const Icon(Icons.description_outlined),
+              label: const Text('이용약관 · 개인정보 안내')),
+          if (signedIn && !ApiClient.demoMode)
+            SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+              value: pushEnabled,
+              onChanged: onPushChanged,
+              title: const Text('정비 푸시 알림'),
+              subtitle: const Text('설정한 날짜 또는 주행거리에 도달하면 알림을 받아요.'),
+              secondary: const Icon(Icons.notifications_active_outlined),
+            ),
+          const SizedBox(height: 12),
+          if (!ApiClient.demoMode)
+            FilledButton(
+                onPressed: signedIn ? onLogout : onLogin,
+                child: Text(signedIn ? '로그아웃' : '로그인 / 가입')),
+          if (signedIn && !ApiClient.demoMode) ...[
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => _deleteAccount(context),
+              style: TextButton.styleFrom(foregroundColor: brandRed),
+              child: const Text('회원 계정 삭제'),
+            ),
+          ],
+          const SizedBox(height: 20),
+          ManagedUpdateNotice(api: api),
+          const AppVersionLabel(),
+        ]),
       ]);
 }
 
@@ -7249,14 +7203,10 @@ class _BookingListSectionState extends State<BookingListSection> {
             return const Center(child: MiniDriveLoader(compact: true));
           if (snapshot.hasError)
             return const InfoCard(text: '예약 목록을 불러오지 못했습니다.');
-          final now = DateTime.now();
           final rows = (snapshot.data ?? []).where((row) {
             final status = row['status']?.toString();
-            if (status != 'requested' && status != 'confirmed') return false;
-            final scheduledAt =
-                DateTime.tryParse(row['scheduled_at']?.toString() ?? '')
-                    ?.toLocal();
-            return scheduledAt == null || scheduledAt.isAfter(now);
+            if (status == null) return false;
+            return true;
           }).toList();
           if (rows.isEmpty) return const SizedBox.shrink();
           return Card(
@@ -7298,14 +7248,22 @@ class _BookingListSectionState extends State<BookingListSection> {
                                     style: const TextStyle(
                                         fontWeight: FontWeight.w800)),
                                 subtitle: Text(
-                                    '$when · ${row['service_type']} · ${row['status_label']}\n${(row['partner_note'] ?? row['customer_note'] ?? '').toString()}'),
+                                    '$when · ${row['service_type']} · ${row['status_label']}\n${row['status'] == 'cancelled' ? '취소 사유: ${row['cancellation_reason'] ?? '이전 기록에 사유 없음'}' : (row['partner_note'] ?? row['customer_note'] ?? '').toString()}'),
                                 trailing: owner &&
                                         (status == 'requested' ||
                                             status == 'confirmed')
                                     ? TextButton(
-                                        onPressed: () => act(() => widget.api
-                                            .cancelPartnerBooking(
-                                                row['id'] as int)),
+                                        onPressed: () async {
+                                          final reason =
+                                              await askBookingCancellationReason(
+                                                  context);
+                                          if (reason == null || !mounted)
+                                            return;
+                                          await act(() => widget.api
+                                              .cancelPartnerBooking(
+                                                  row['id'] as int,
+                                                  reason: reason));
+                                        },
                                         child: const Text('취소'))
                                     : null),
                             if (manager && status == 'requested')

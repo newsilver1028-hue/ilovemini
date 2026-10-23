@@ -6,3 +6,4 @@ class CoreConfig(AppConfig):
 
     def ready(self):
         from . import phase_one_notifications  # noqa: F401
+        from . import app_sync  # noqa: F401

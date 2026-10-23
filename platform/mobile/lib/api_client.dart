@@ -4,6 +4,40 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
+  List<String> serviceCategories = [
+    '경정비',
+    '사고수리',
+    '오디오',
+    '차량유리',
+    '휠.타이어',
+    '전장튜닝',
+    '신차패키지',
+    '썬팅',
+    'PPF',
+    '디테일링'
+  ];
+  Future<Map<String, dynamic>> getMap(String path) async {
+    final token = await _storage.read(key: 'access_token');
+    final response = await _client.get(_uri(path), headers: {
+      'Cache-Control': 'no-cache',
+      if (token != null) 'Authorization': 'Bearer $token',
+    });
+    if (response.statusCode != 200) throw Exception(_message(response));
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> syncStatus() async {
+    final data = await getMap('app/sync');
+    final categories = (data['service_categories'] as List? ?? [])
+        .map((e) => '$e')
+        .where((e) => e.isNotEmpty)
+        .toList();
+    serviceCategories = categories;
+    return data;
+  }
+
+  Future<Map<String, dynamic>> seasonBanner() => getMap('app/season-banner');
+  Future<Map<String, dynamic>> memberPreference() => getMap('me/preferences');
   ApiClient(
       {http.Client? client,
       Duration requestTimeout = const Duration(seconds: 90)})
@@ -176,7 +210,9 @@ class ApiClient {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  Future<void> deleteAccount({String? appleIdentityToken, String? appleNonce,
+  Future<void> deleteAccount(
+      {String? appleIdentityToken,
+      String? appleNonce,
       String? appleAuthorizationCode}) async {
     final token = await _storage.read(key: 'access_token');
     final response = await _client.delete(_uri('me/account'),
@@ -185,14 +221,17 @@ class ApiClient {
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          if (appleIdentityToken != null) 'apple_identity_token': appleIdentityToken,
+          if (appleIdentityToken != null)
+            'apple_identity_token': appleIdentityToken,
           if (appleNonce != null) 'apple_nonce': appleNonce,
-          if (appleAuthorizationCode != null) 'apple_authorization_code': appleAuthorizationCode,
+          if (appleAuthorizationCode != null)
+            'apple_authorization_code': appleAuthorizationCode,
         }));
     if (response.statusCode != 204) throw Exception(_message(response));
     await _storage.deleteAll();
     sessionExpired.value++;
   }
+
   Future<bool> get isSignedIn async =>
       (await _storage.read(key: 'access_token')) != null;
   Future<bool> get pushNotificationsEnabled async =>
@@ -325,7 +364,8 @@ class ApiClient {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  Future<void> cancelPartnerBooking(int bookingId) async {
+  Future<void> cancelPartnerBooking(int bookingId,
+      {required String reason}) async {
     final token = await _storage.read(key: 'access_token');
     if (token == null) throw Exception('로그인이 필요합니다.');
     final response = await _client.post(_uri('bookings/$bookingId/cancel'),
@@ -333,7 +373,7 @@ class ApiClient {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({}));
+        body: jsonEncode({'cancellation_reason': reason}));
     if (response.statusCode != 200) throw Exception(_message(response));
   }
 
@@ -491,6 +531,15 @@ class ApiClient {
       rows.addAll((decoded['results'] as List).cast<Map<String, dynamic>>());
       final nextLink = decoded['next'] as String?;
       next = nextLink == null ? null : uri.resolve(nextLink);
+    }
+    if (path == 'vehicles' && await isSignedIn) {
+      try {
+        final preferred = (await memberPreference())['primary_vehicle_id'];
+        final index = rows.indexWhere((row) => row['id'] == preferred);
+        if (index > 0) rows.insert(0, rows.removeAt(index));
+      } catch (_) {
+        /* Older server or temporary preference failure must not hide vehicles. */
+      }
     }
     return rows;
   }

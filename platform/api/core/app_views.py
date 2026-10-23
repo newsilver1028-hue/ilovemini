@@ -34,11 +34,12 @@ class AppContentView(APIView):
                 'image_url': item.image_url if item.image_url.startswith('https://') else '', 'asset_key': item.asset_key,
                 'action_url': item.action_url if item.action_url.startswith('https://') else '',
                 'price_krw': item.price_krw, 'compatible_models': item.compatible_models}
-        products = [public(item) for item in items if item.kind == 'product' and item.action_url.startswith('https://')]
+        products = [public(item) for item in items if item.kind == 'product']
         banners = [public(item) for item in items if item.kind == 'banner']
         releases = [{'platform': item.platform, 'version': item.version, 'build_number': item.build_number,
             'download_url': item.download_url, 'notes': item.notes} for item in AppRelease.objects.filter(is_active=True) if item.download_url.startswith('https://')]
-        response = Response({'banners': banners, 'products': products, 'releases': releases})
+        from .app_sync import runtime_configuration
+        response = Response({'banners': banners, 'products': products, 'releases': releases, 'configuration': runtime_configuration()})
         response['Cache-Control'] = 'no-store'
         return response
 

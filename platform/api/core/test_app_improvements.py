@@ -19,7 +19,7 @@ class AppContentTests(TestCase):
         SeasonBanner.objects.all().delete()
         self.client = APIClient()
 
-    def test_publication_period_and_real_purchase_links(self):
+    def test_publication_period_and_optional_safe_links(self):
         now = timezone.now()
         AppContent.objects.create(kind='product', title='비공개')
         AppContent.objects.create(kind='banner', title='종료', is_active=True, ends_at=now-timedelta(seconds=1))
@@ -30,7 +30,9 @@ class AppContentTests(TestCase):
             action_url='https://example.test/item', price_krw=32000)
         response = self.client.get('/api/app/content/')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([row['id'] for row in response.data['products']], [live.pk])
+        self.assertEqual(len(response.data['products']),3)
+        self.assertEqual(response.data['products'][0]['id'],live.pk)
+        self.assertTrue(all(not row['action_url'] or row['action_url'].startswith('https://') for row in response.data['products']))
         self.assertEqual(response.data['products'][0]['price_krw'], 32000)
         self.assertEqual(response.data['banners'], [])
         self.assertEqual(response['Cache-Control'], 'no-store')
@@ -75,7 +77,7 @@ class AppContentTests(TestCase):
         self.assertIn('primary_vehicle', form.errors)
 
     def test_publish_requires_https_and_valid_dates(self):
-        for row in [AppContent(kind='product', title='주소 없음', is_active=True),
+        for row in [
                     AppContent(kind='banner', title='HTTP', image_url='http://example.test/a.png'),
                     AppContent(kind='banner', title='날짜', starts_at=timezone.now(), ends_at=timezone.now()-timedelta(days=1))]:
             with self.assertRaises(ValidationError): row.full_clean()
