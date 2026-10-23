@@ -2061,10 +2061,12 @@ class AccountPage extends StatelessWidget {
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(20), children: [
     const Text('MY', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
     const SizedBox(height: 16),
-    InfoCard(text: ApiClient.demoMode
+    if (ApiClient.demoMode || !signedIn) ...[
+      InfoCard(text: ApiClient.demoMode
         ? '데모 계정으로 체험 중입니다. 차계부와 알림 변경 사항은 앱을 종료하면 초기화됩니다.'
-        : signedIn ? '로그인되어 있습니다. 정비 예정일과 목표 주행거리 알림을 관리할 수 있어요.' : '로그인해 차량을 등록하고 기록을 관리하세요.'),
-    const SizedBox(height: 10),
+        : '로그인해 차량을 등록하고 기록을 관리하세요.'),
+      const SizedBox(height: 10),
+    ],
     MembershipSummaryCard(api: api, signedIn: signedIn),
     AttendanceCheckinCard(api: api, signedIn: signedIn, onLogin: onLogin),
     if (signedIn && !ApiClient.demoMode) ...[
