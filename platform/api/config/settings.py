@@ -74,7 +74,8 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework_simplejwt.authentication.JWTAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticatedOrReadOnly"],
     "DEFAULT_THROTTLE_RATES": {
-        "naver_start": "5/minute", "naver_complete": "10/minute", "apple_login": "10/minute",
+        "naver_start": "5/minute", "partner_naver_start": "5/minute",
+        "naver_complete": "10/minute", "apple_login": "10/minute",
         "vehicle_transfer": "5/minute", "verified_record": "10/minute",
         "attendance": "30/minute",
         "cafe_search": "20/minute",

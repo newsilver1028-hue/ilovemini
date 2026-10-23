@@ -12,10 +12,13 @@ from django.contrib.auth import login
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password
 from django.db import models, transaction
-from django.http import HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import redirect
 from django.utils import timezone
+from django.utils.html import escape
 from django.views import View
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -37,14 +40,23 @@ class NaverAppRedirect(HttpResponseRedirect):
     allowed_schemes = ["ilovemini"]
 
 
-class PartnerNaverLoginStartView(View):
+class PartnerNaverLoginStartView(APIView):
     """Start Naver OAuth for an existing, administrator-linked partner employee."""
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "partner_naver_start"
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
     def get(self, request):
         if not settings.NAVER_CLIENT_ID or not settings.NAVER_CLIENT_SECRET or not settings.NAVER_REDIRECT_URI:
             messages.error(request, "네이버 로그인 설정을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.")
             return redirect("partner_admin:login")
         state = secrets.token_urlsafe(32)
-        request.session["partner_admin_naver_state"] = state
+        NaverOAuthAttempt.objects.create(
+            flow=NaverOAuthAttempt.Flow.PARTNER_ADMIN,
+            state_digest=digest(state),
+            expires_at=timezone.now() + timedelta(minutes=10),
+        )
         query = urlencode({
             "response_type": "code",
             "client_id": settings.NAVER_CLIENT_ID,
@@ -54,39 +66,107 @@ class PartnerNaverLoginStartView(View):
         return redirect("https://nid.naver.com/oauth2.0/authorize?" + query)
 
 
-def complete_partner_naver_login(request, state, code):
-    expected_state = request.session.pop("partner_admin_naver_state", "")
-    if not expected_state or not hmac.compare_digest(expected_state, state or ""):
-        messages.error(request, "로그인 요청이 만료되었거나 올바르지 않습니다. 다시 시작해 주세요.")
-        return redirect("partner_admin:login")
-    if request.GET.get("error") or not code:
-        messages.error(request, "네이버 로그인이 취소되었거나 인증에 실패했습니다.")
-        return redirect("partner_admin:login")
-    try:
-        access_token = exchange_code(code, state)
-        profile = get_profile(access_token)
-    except NaverUnavailable:
-        messages.error(request, "네이버 인증 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.")
-        return redirect("partner_admin:login")
+def partner_login_redirect(error):
+    return redirect(settings.ADMIN_CUSTOM_ORIGIN + "/partner-admin/login/?naver_error=" + error)
 
+
+def partner_user_for_naver_profile(profile):
     identity = NaverIdentity.objects.select_related("user").filter(
         subject=str(profile.get("id", ""))
     ).first()
     if identity is None:
-        messages.error(request, "앱 회원으로 먼저 가입한 뒤 운영자에게 협력업체 담당자 등록을 요청해 주세요.")
-        return redirect("partner_admin:login")
+        return None
+    user = identity.user
     staff = PartnerStaff.objects.filter(
-        user=identity.user,
+        user=user,
         is_active=True,
         partner__is_active=True,
     ).filter(models.Q(can_manage_bookings=True) | models.Q(can_verify_records=True)).exists()
-    if not staff or not identity.user.is_active or identity.user.is_superuser:
-        messages.error(request, "활성화된 협력업체 담당자 계정이 아닙니다. 운영자에게 권한을 확인해 주세요.")
-        return redirect("partner_admin:login")
+    if not staff or not user.is_active or user.is_superuser:
+        return None
+    return identity, user
 
+
+def partner_naver_handoff(ticket):
+    action = escape(settings.ADMIN_CUSTOM_ORIGIN + "/partner-admin/naver/complete/")
+    safe_ticket = escape(ticket)
+    response = HttpResponse(
+        "<!doctype html><html lang='ko'><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<meta name='referrer' content='no-referrer'><title>로그인 확인 중</title>"
+        "<body><main><p>협력업체 계정을 확인하고 있습니다.</p>"
+        f"<form id='handoff' method='post' action='{action}'>"
+        f"<input type='hidden' name='ticket' value='{safe_ticket}'>"
+        "<button type='submit'>계속</button></form></main>"
+        "<script>document.getElementById('handoff').submit()</script></body></html>",
+        content_type="text/html; charset=utf-8",
+    )
+    response["Cache-Control"] = "no-store, private"
+    response["Referrer-Policy"] = "no-referrer"
+    response["Content-Security-Policy"] = (
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+        f"form-action {settings.ADMIN_CUSTOM_ORIGIN}; base-uri 'none'; frame-ancestors 'none'"
+    )
+    return response
+
+
+def complete_partner_naver_callback(attempt, state, code):
+    if not code:
+        attempt.delete()
+        return partner_login_redirect("cancelled")
+    try:
+        access_token = exchange_code(code, state)
+        profile = get_profile(access_token)
+    except NaverUnavailable:
+        attempt.delete()
+        return partner_login_redirect("provider")
+
+    match = partner_user_for_naver_profile(profile)
+    if match is None:
+        attempt.delete()
+        return partner_login_redirect("not_registered")
+    identity, user = match
     sync_identity(identity, profile)
-    login(request, identity.user, backend="django.contrib.auth.backends.ModelBackend")
-    return redirect("partner_admin:index")
+    ticket = secrets.token_urlsafe(32)
+    with transaction.atomic():
+        attempt = NaverOAuthAttempt.objects.select_for_update().get(pk=attempt.pk)
+        if attempt.consumed_at or attempt.expires_at <= timezone.now():
+            return partner_login_redirect("expired")
+        attempt.user = user
+        attempt.ticket_digest = digest(ticket)
+        attempt.consumed_at = timezone.now()
+        attempt.expires_at = timezone.now() + timedelta(minutes=3)
+        attempt.save(update_fields=["user", "ticket_digest", "consumed_at", "expires_at"])
+    return partner_naver_handoff(ticket)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class PartnerNaverLoginCompleteView(View):
+    """Consume a short-lived, one-use handoff on the admin host to establish its session."""
+    def post(self, request):
+        ticket = request.POST.get("ticket", "")
+        if not isinstance(ticket, str) or len(ticket) < 24:
+            return partner_login_redirect("invalid")
+        with transaction.atomic():
+            attempt = NaverOAuthAttempt.objects.select_for_update().filter(
+                flow=NaverOAuthAttempt.Flow.PARTNER_ADMIN,
+                ticket_digest=digest(ticket),
+                consumed_at__isnull=False,
+                expires_at__gt=timezone.now(),
+                user__isnull=False,
+            ).select_related("user").first()
+            if attempt is None:
+                return partner_login_redirect("expired")
+            user = attempt.user
+            staff = PartnerStaff.objects.filter(
+                user=user, is_active=True, partner__is_active=True,
+            ).filter(models.Q(can_manage_bookings=True) | models.Q(can_verify_records=True)).exists()
+            if not staff or not user.is_active or user.is_superuser:
+                attempt.delete()
+                return partner_login_redirect("not_registered")
+            attempt.delete()
+        login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+        return redirect("partner_admin:index")
 
 
 class NaverStartView(APIView):
@@ -109,16 +189,24 @@ class NaverCallbackView(APIView):
     def get(self, request):
         state = request.query_params.get("state", "")
         code = request.query_params.get("code", "")
-        http_request = getattr(request, "_request", request)
-        session = getattr(http_request, "session", None)
-        if session and session.get("partner_admin_naver_state"):
-            return complete_partner_naver_login(http_request, state, code)
-        if request.query_params.get("error") or not state or not code:
+        if not state:
             return Response({"detail": "네이버 로그인이 취소되었거나 인증에 실패했습니다."}, status=400)
         attempt = NaverOAuthAttempt.objects.filter(state_digest=digest(state), consumed_at__isnull=True,
                                                     expires_at__gt=timezone.now()).first()
         if not attempt:
+            expired_partner_attempt = NaverOAuthAttempt.objects.filter(
+                state_digest=digest(state), flow=NaverOAuthAttempt.Flow.PARTNER_ADMIN,
+            ).first()
+            if expired_partner_attempt:
+                return partner_login_redirect("expired")
             return Response({"detail": "만료되었거나 올바르지 않은 로그인 요청입니다."}, status=400)
+        if attempt.flow == NaverOAuthAttempt.Flow.PARTNER_ADMIN:
+            if request.query_params.get("error") or not code:
+                attempt.delete()
+                return partner_login_redirect("cancelled")
+            return complete_partner_naver_callback(attempt, state, code)
+        if request.query_params.get("error") or not code:
+            return Response({"detail": "네이버 로그인이 취소되었거나 인증에 실패했습니다."}, status=400)
         try:
             access_token = exchange_code(code, state)
             profile = get_profile(access_token)

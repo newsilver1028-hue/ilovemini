@@ -10,7 +10,7 @@ from django.views.generic import RedirectView
 from rest_framework.routers import DefaultRouter
 from core.views import HealthView, CafeSearchView, CafeLatestView, CafeAnswerView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet, PartnerPointRedemptionView, PartnerPointBalanceView, MemberPointRedemptionView
 from core.member_views import MemberGradeView
-from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView, AppleLoginView, AppReviewLoginView, AccountDeletionView, PartnerNaverLoginStartView
+from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView, AppleLoginView, AppReviewLoginView, AccountDeletionView, PartnerNaverLoginStartView, PartnerNaverLoginCompleteView
 from core.partner_admin import partner_admin_site
 from core.privacy_views import privacy_policy, terms_of_service
 from core.partner_push_views import web_push_subscribe, web_push_unsubscribe, partner_service_worker
@@ -50,6 +50,7 @@ urlpatterns = [
     path("api/app/season-banner/", SeasonBannerView.as_view(), name="season_banner"),
     path("admin/", admin.site.urls),
     path("partner-admin/naver/start/", PartnerNaverLoginStartView.as_view(), name="partner_naver_start"),
+    path("partner-admin/naver/complete/", PartnerNaverLoginCompleteView.as_view(), name="partner_naver_complete"),
     path("partner-admin/push/subscribe/", web_push_subscribe, name="partner_web_push_subscribe"),
     path("partner-admin/push/unsubscribe/", web_push_unsubscribe, name="partner_web_push_unsubscribe"),
     path("partner-admin/service-worker.js", partner_service_worker, name="partner_service_worker"),
