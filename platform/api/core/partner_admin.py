@@ -519,3 +519,8 @@ class PartnerLedgerEntryAdmin(admin.ModelAdmin):
                 for index, image in enumerate(images, start=1)
             ),
         )
+
+from .models import ServiceEstimate, MaintenanceRecommendation
+from .phase_one_admin import EstimateAdmin, RecommendationAdmin
+partner_admin_site.register(ServiceEstimate, EstimateAdmin)
+partner_admin_site.register(MaintenanceRecommendation, RecommendationAdmin)

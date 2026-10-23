@@ -1,3 +1,4 @@
+import 'maintenance_requests.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
@@ -2025,6 +2026,7 @@ class AccountPage extends StatelessWidget {
     AttendanceCheckinCard(api: api, signedIn: signedIn, onLogin: onLogin),
     if (signedIn && !ApiClient.demoMode) ...[
       const SizedBox(height: 12),
+      MaintenanceRequests(api: api),
       BookingListSection(api: api),
     ],
     const SizedBox(height: 20),

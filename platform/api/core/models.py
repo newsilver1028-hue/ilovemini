@@ -599,3 +599,33 @@ class RecordCorrectionRequest(models.Model):
         ordering = ["-created_at"]
         constraints = [models.UniqueConstraint(fields=["entry", "requested_by"], condition=models.Q(resolved_at__isnull=True), name="one_open_record_correction")]
     def __str__(self): return f"기록 {self.entry_id} · {'처리 완료' if self.resolved_at else '처리 대기'}"
+
+class MaintenanceRecommendation(models.Model):
+    entry = models.ForeignKey(LedgerEntry, on_delete=models.PROTECT, related_name='recommendations')
+    member = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    title = models.CharField('교체 항목', max_length=100)
+    due_date = models.DateField('권장 교체일', null=True, blank=True)
+    due_odometer_km = models.PositiveIntegerField('권장 교체 주행거리', null=True, blank=True)
+    status = models.CharField(max_length=12, choices=[('pending','회원 확인 대기'),('accepted','알림 등록'),('declined','거절')], default='pending')
+    reminder = models.OneToOneField(Reminder, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = '다음 교체 권장'
+        verbose_name_plural = '다음 교체 권장'
+
+class ServiceEstimate(models.Model):
+    booking = models.ForeignKey(PartnerBooking, on_delete=models.PROTECT, related_name='estimates')
+    revision = models.PositiveIntegerField('견적 버전', default=1)
+    items = models.JSONField('견적 항목', default=list)
+    total_krw = models.PositiveIntegerField('견적 총액', default=0)
+    note = models.TextField('안내사항', blank=True)
+    status = models.CharField(max_length=12, choices=[('draft','작성 중'),('sent','회원 동의 대기'),('accepted','회원 동의'),('declined','회원 거절'),('superseded','새 견적으로 대체')], default='draft')
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = '정비 견적'
+        verbose_name_plural = '정비 견적'
+        constraints = [models.UniqueConstraint(fields=['booking','revision'], name='unique_booking_estimate_revision')]

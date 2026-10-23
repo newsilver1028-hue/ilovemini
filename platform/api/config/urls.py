@@ -1,3 +1,4 @@
+from core.phase_one_views import RecommendationViewSet, EstimateViewSet
 from core.season_views import SeasonBannerView
 from core.app_views import AppContentView, ShoppingSearchView, MemberPreferenceView, MemberOverviewView, PassportPreviewView, RecordCorrectionView, ResolveCorrectionView, CompleteCorrectionView
 from rest_framework_simplejwt.views import TokenRefreshView
@@ -15,6 +16,8 @@ from core.privacy_views import privacy_policy, terms_of_service
 from core.partner_push_views import web_push_subscribe, web_push_unsubscribe, partner_service_worker
 
 router = DefaultRouter()
+router.register("maintenance-recommendations", RecommendationViewSet, basename="maintenance-recommendation")
+router.register("service-estimates", EstimateViewSet, basename="service-estimate")
 router.register("vehicles", VehicleViewSet, basename="vehicle")
 router.register("ledger", LedgerEntryViewSet, basename="ledger")
 router.register("reminders", ReminderViewSet, basename="reminder")

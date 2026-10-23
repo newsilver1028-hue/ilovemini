@@ -1344,3 +1344,8 @@ class RecordCorrectionRequestAdmin(AdminCalendarMixin, admin.ModelAdmin):
 
 # Register app review account management after the core admin models.
 from . import review_admin as _review_admin
+
+from .models import ServiceEstimate, MaintenanceRecommendation
+from .phase_one_admin import EstimateAdmin, RecommendationAdmin
+admin.site.register(ServiceEstimate, EstimateAdmin)
+admin.site.register(MaintenanceRecommendation, RecommendationAdmin)

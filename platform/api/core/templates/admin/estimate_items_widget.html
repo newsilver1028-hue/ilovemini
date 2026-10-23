@@ -1,0 +1,11 @@
+<div class="estimate-items-editor">
+<textarea name="{{ widget.name }}" id="{{ widget.attrs.id }}" hidden>{% if widget.value %}{{ widget.value }}{% else %}[]{% endif %}</textarea>
+<div class="estimate-item-rows"></div><button type="button" class="add-estimate-item">＋ 항목 추가</button>
+<p>항목별 금액은 부가세를 포함한 금액으로 입력하세요.</p>
+<script>
+(function(){const root=document.currentScript.parentElement,input=root.querySelector('textarea'),rows=root.querySelector('.estimate-item-rows');
+function sync(){input.value=JSON.stringify([...rows.children].map(row=>({title:row.querySelector('input[type=text]').value,amount_krw:Number(row.querySelector('input[type=number]').value)})));}
+function add(item={}){const row=document.createElement('div');row.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin:8px 0';const title=document.createElement('input');title.type='text';title.placeholder='정비 항목';title.setAttribute('aria-label','정비 항목');title.maxLength=160;title.required=true;title.value=item.title||'';const amount=document.createElement('input');amount.type='number';amount.min=0;amount.max=100000000;amount.step=1;amount.required=true;amount.placeholder='금액(원)';amount.setAttribute('aria-label','금액(원)');amount.value=item.amount_krw??'';const remove=document.createElement('button');remove.type='button';remove.textContent='항목 제거';remove.onclick=()=>{row.remove();sync();};row.append(title,amount,remove);row.oninput=sync;rows.append(row);}
+let items=[];try{items=JSON.parse(input.value);}catch(e){};(items.length?items:[{}]).forEach(add);root.querySelector('button.add-estimate-item').onclick=()=>{if(rows.children.length<50)add();};root.closest('form').addEventListener('submit',sync);
+})();
+</script></div>
