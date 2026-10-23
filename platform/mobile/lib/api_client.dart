@@ -43,6 +43,12 @@ class ApiClient {
     await _storage.write(key: 'refresh_token', value: tokens['refresh'] as String);
   }
 
+  Future<Map<String, dynamic>> appContent() async {
+    final response = await _client.get(_uri('app/content'));
+    if (response.statusCode != 200) throw Exception(_message(response));
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
   Future<void> logout() => _storage.deleteAll();
   Future<bool> get isSignedIn async => (await _storage.read(key: 'access_token')) != null;
   Future<bool> get pushNotificationsEnabled async => (await _storage.read(key: 'push_notifications_enabled')) == 'true';
@@ -121,7 +127,7 @@ class ApiClient {
       final yesterday = DateTime.parse(today).subtract(const Duration(days: 1)).toIso8601String().substring(0, 10);
       final prior = rows.where((row) => row['date'] == yesterday).firstOrNull;
       final streak = prior == null ? 1 : (prior['streak_days'] as int? ?? 0) + 1;
-      final points = 1000 + (streak % 7 == 0 ? 3000 : 0);
+      final points = 100;
       rows.insert(0, {'date': today, 'points': points, 'streak_days': streak});
       await _storage.write(key: 'demo_attendance_checkins', value: jsonEncode(rows));
       return _demoAttendancePayload(earned: points);
@@ -147,8 +153,8 @@ class ApiClient {
       var changed = false;
       for (final row in rows) {
         final oldPoints = (row['points'] as num?)?.toInt();
-        if (oldPoints == 10) { row['points'] = 1000; changed = true; }
-        if (oldPoints == 40) { row['points'] = 4000; changed = true; }
+        if (oldPoints == 10) { row['points'] = 100; changed = true; }
+        if (oldPoints == 40) { row['points'] = 100; changed = true; }
       }
       if (changed) await _storage.write(key: 'demo_attendance_checkins', value: jsonEncode(rows));
       return rows;

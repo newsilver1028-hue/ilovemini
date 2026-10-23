@@ -1,3 +1,7 @@
+import 'package:image_picker/image_picker.dart';
+import 'cafe_shopping_preview.dart';
+import 'dart:io';
+import 'vehicle_photo_support.dart';
 import 'maintenance_requests.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -232,30 +236,176 @@ bool hasFavouredF66Photo(Map<String, dynamic> vehicle) {
   return isF66 && isFavoured;
 }
 
+const miniVehiclePhotoAssets = <String, String>{
+  'R50': 'assets/images/mini-vehicles/mini_cooper_3door_r50.webp',
+  'R53': 'assets/images/mini-vehicles/mini_cooper_3door_r53.webp',
+  'R56': 'assets/images/mini-vehicles/mini_cooper_3door_r56.webp',
+  'F56': 'assets/images/mini-vehicles/mini_cooper_3door_f56.webp',
+  'F66': 'assets/images/mini-vehicles/mini_cooper_3door_f66.webp',
+  'F55': 'assets/images/mini-vehicles/mini_cooper_5door_f55.webp',
+  'F65': 'assets/images/mini-vehicles/mini_cooper_5door_f65.webp',
+  'F56 SE': 'assets/images/mini-vehicles/mini_cooper_electric_f56se.webp',
+  'J01': 'assets/images/mini-vehicles/mini_cooper_electric_j01.webp',
+  'R52': 'assets/images/mini-vehicles/mini_convertible_r52.webp',
+  'R57': 'assets/images/mini-vehicles/mini_convertible_r57.webp',
+  'F57': 'assets/images/mini-vehicles/mini_convertible_f57.webp',
+  'F67': 'assets/images/mini-vehicles/mini_convertible_f67.webp',
+  'R55': 'assets/images/mini-vehicles/mini_clubman_r55.webp',
+  'F54': 'assets/images/mini-vehicles/mini_clubman_f54.webp',
+  'R60': 'assets/images/mini-vehicles/mini_countryman_r60.webp',
+  'F60': 'assets/images/mini-vehicles/mini_countryman_f60.webp',
+  'U25': 'assets/images/mini-vehicles/mini_countryman_u25.webp',
+  'J05': 'assets/images/mini-vehicles/mini_aceman_j05.webp',
+  'R61': 'assets/images/mini-vehicles/mini_paceman_r61.webp',
+  'R58': 'assets/images/mini-vehicles/mini_coupe_r58.webp',
+  'R59': 'assets/images/mini-vehicles/mini_roadster_r59.webp',
+  'CLASSIC': 'assets/images/mini-vehicles/mini_classic.webp',
+};
+
+String? miniVehiclePhotoAsset(Map<String, dynamic> vehicle) {
+  final generation = '${vehicle['generation'] ?? ''}'.toUpperCase().trim();
+  for (final code in miniVehiclePhotoAssets.keys.toList()
+    ..sort((a, b) => b.length.compareTo(a.length))) {
+    if (generation.contains(code)) return miniVehiclePhotoAssets[code];
+  }
+  final name =
+      '${vehicle['model_name'] ?? ''} ${vehicle['trim'] ?? ''}'.toLowerCase();
+  if (!(name.contains('mini') || name.contains('미니')) && generation.isEmpty)
+    return null;
+  if (name.contains('클래식') || name.contains('classic'))
+    return miniVehiclePhotoAssets['CLASSIC'];
+  if (name.contains('에이스맨') || name.contains('aceman'))
+    return miniVehiclePhotoAssets['J05'];
+  if (name.contains('페이스맨') || name.contains('paceman'))
+    return miniVehiclePhotoAssets['R61'];
+  if (name.contains('로드스터') || name.contains('roadster'))
+    return miniVehiclePhotoAssets['R59'];
+  if (name.contains('쿠페') || name.contains('coupe'))
+    return miniVehiclePhotoAssets['R58'];
+  if (name.contains('컨버터블') || name.contains('convertible'))
+    return miniVehiclePhotoAssets['F67'];
+  if (name.contains('클럽맨') || name.contains('clubman'))
+    return miniVehiclePhotoAssets['F54'];
+  if (name.contains('컨트리맨') || name.contains('countryman'))
+    return miniVehiclePhotoAssets['U25'];
+  if (name.contains('전기') || name.contains('electric') || name.contains(' se'))
+    return miniVehiclePhotoAssets['J01'];
+  if (name.contains('5도어') || name.contains('5-door'))
+    return miniVehiclePhotoAssets['F65'];
+  if (name.contains('3도어') || name.contains('cooper') || name.contains('쿠퍼'))
+    return miniVehiclePhotoAssets['F66'];
+  return null;
+}
+
+bool hasMiniVehiclePhoto(Map<String, dynamic> vehicle) =>
+    miniVehiclePhotoAsset(vehicle) != null;
+
+String? bmwVehiclePhotoAsset(Map<String, dynamic> vehicle) {
+  final name =
+      '${vehicle['model_name'] ?? ''} ${vehicle['trim'] ?? ''}'.toLowerCase();
+  if (!name.contains('bmw')) return null;
+  if (RegExp(r'\bix\d*').hasMatch(name)) {
+    return 'assets/images/bmw-vehicles/bmw-electric-suv-ix3.jpg';
+  }
+  final isSuv = RegExp(r'\b(?:x\s?\d|xm|ix\d*)\b').hasMatch(name);
+  return isSuv
+      ? 'assets/images/bmw-vehicles/bmw-suv-x5-2024.jpg'
+      : 'assets/images/bmw-vehicles/bmw-sedan-5-series-2024.jpg';
+}
+
+bool hasBmwVehiclePhoto(Map<String, dynamic> vehicle) =>
+    bmwVehiclePhotoAsset(vehicle) != null;
+
 bool hasMaybachPhoto(Map<String, dynamic> vehicle) =>
-    '${vehicle['model_name'] ?? ''} ${vehicle['trim'] ?? ''}'.toLowerCase().contains('maybach');
+    '${vehicle['model_name'] ?? ''} ${vehicle['trim'] ?? ''}'
+        .toLowerCase()
+        .contains('maybach');
 
-
-class VehiclePhoto extends StatelessWidget {
+class VehiclePhoto extends StatefulWidget {
   const VehiclePhoto({required this.vehicle, this.height = 118, super.key});
   final Map<String, dynamic> vehicle;
   final double height;
+
+  @override
+  State<VehiclePhoto> createState() => _VehiclePhotoState();
+}
+
+class _VehiclePhotoState extends State<VehiclePhoto> {
+  late Future<File?> _customPhoto;
+
+  String? get _plate => widget.vehicle['plate_number']?.toString();
+
+  @override
+  void initState() {
+    super.initState();
+    _customPhoto = VehiclePhotoStorage.forPlate(_plate);
+  }
+
+  @override
+  void didUpdateWidget(covariant VehiclePhoto oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.vehicle['plate_number'] != widget.vehicle['plate_number']) {
+      _customPhoto = VehiclePhotoStorage.forPlate(_plate);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (hasMaybachPhoto(vehicle)) {
-      return SizedBox(height: height, width: double.infinity, child: Image.asset(
-        maybachS580FrontAsset, fit: BoxFit.contain, alignment: Alignment.center,
-        semanticLabel: 'Mercedes-Maybach S 580 차량 전면',
-        errorBuilder: (context, error, stackTrace) => Center(child: Icon(Icons.directions_car_filled, size: height * .55, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-      ));
-    }
-    if (!hasFavouredF66Photo(vehicle)) return const SizedBox.shrink();
-    return SizedBox(height: height, width: double.infinity, child: Image.asset(
-      favouredF66PhotoAsset, fit: BoxFit.contain, alignment: Alignment.center,
-      semanticLabel: '4세대 MINI Cooper S Favoured 차량 사진',
-      errorBuilder: (context, error, stackTrace) => Center(child: Icon(Icons.directions_car_filled, size: height * .55, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-    ));
+    return FutureBuilder<File?>(
+        future: _customPhoto,
+        builder: (context, snapshot) {
+          final file = snapshot.data;
+          if (file != null) {
+            return SizedBox(
+                height: widget.height,
+                width: double.infinity,
+                child: Image.file(file,
+                    fit: BoxFit.contain,
+                    alignment: Alignment.center,
+                    errorBuilder: (_, __, ___) => _fallback(context)));
+          }
+          return _builtInPhoto(context);
+        });
   }
+
+  Widget _builtInPhoto(BuildContext context) {
+    if (hasMaybachPhoto(widget.vehicle)) {
+      return SizedBox(
+          height: widget.height,
+          width: double.infinity,
+          child: Image.asset(
+            maybachS580FrontAsset,
+            fit: BoxFit.contain,
+            alignment: Alignment.center,
+            semanticLabel: 'Mercedes-Maybach S 580 차량 전면',
+            errorBuilder: (_, __, ___) => _fallback(context),
+          ));
+    }
+    final asset = hasFavouredF66Photo(widget.vehicle)
+        ? favouredF66PhotoAsset
+        : miniVehiclePhotoAsset(widget.vehicle) ??
+            bmwVehiclePhotoAsset(widget.vehicle);
+    if (asset == null) return _fallback(context);
+    return SizedBox(
+        height: widget.height,
+        width: double.infinity,
+        child: Image.asset(
+          asset,
+          fit: BoxFit.contain,
+          alignment: Alignment.center,
+          semanticLabel:
+              asset.contains('/bmw-vehicles/') ? 'BMW 차량 사진' : 'MINI 차량 사진',
+          errorBuilder: (_, __, ___) => _fallback(context),
+        ));
+  }
+
+  Widget _fallback(BuildContext context) => SizedBox(
+      height: widget.height,
+      width: double.infinity,
+      child: Center(
+          child: Icon(Icons.directions_car_filled,
+              size: widget.height * .55,
+              color: Theme.of(context).colorScheme.onSurfaceVariant)));
 }
 
 String formatKilometers(dynamic value) {
@@ -532,15 +682,7 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.fromLTRB(20, 14, 20, 28), children: [
     VehicleOverview(key: ValueKey('overview-$signedIn'), api: api, signedIn: signedIn, onGarage: onOpenGarage),
-    const SizedBox(height: 10),
-    Row(children: [
-      Expanded(child: OutlinedButton.icon(onPressed: onOpenGarage, icon: const Icon(Icons.add), label: const Text('기록 추가'))),
-      const SizedBox(width: 12),
-      Expanded(child: OutlinedButton.icon(onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => CatalogPage(api: api, path: 'partners', title: '업체 찾기 · 예약'))), icon: const Icon(Icons.storefront_outlined), label: const Text('업체 찾기'))),
-    ]),
     const SizedBox(height: 16),
-    const SectionHeading(title: '제휴 배너', subtitle: '카페 제휴 소식'),
-    const SizedBox(height: 10),
     const AffiliateBannerCarousel(),
   ]);
 }
@@ -561,6 +703,9 @@ class CafePage extends StatelessWidget {
       onTap: () => _openCafeNotice(context, naverCafeMobileUrl),
     ),
     const Divider(),
+    const SizedBox(height: 20),
+    const SizedBox(height: 24),
+    CafeShoppingPreview(api: api),
   ]);
 }
 
@@ -733,12 +878,12 @@ class _AttendanceCheckinCardState extends State<AttendanceCheckinCard> {
             Text('$points P', style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900, color: brandRed)),
           ]),
           const SizedBox(height: 6),
-          Text('매일 출석 1,000P · 7일 연속 보너스 3,000P · 현재 $streak일 연속', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          Text('매일 출석 100P · 현재 $streak일 연속', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
           const SizedBox(height: 10),
           SizedBox(width: double.infinity, child: FilledButton.icon(
             onPressed: busy || snapshot.connectionState == ConnectionState.waiting ? null : _checkIn,
             icon: Icon(checked ? Icons.check_circle_outline : Icons.touch_app_outlined),
-            label: Text(busy ? '처리 중…' : !widget.signedIn && !ApiClient.demoMode ? '로그인하고 출석하기' : checked ? '오늘 출석 완료' : '출석하고 ${streak > 0 && streak % 7 == 6 ? '4,000' : '1,000'}P 받기'),
+            label: Text(busy ? '처리 중…' : !widget.signedIn && !ApiClient.demoMode ? '로그인하고 출석하기' : checked ? '오늘 출석 완료' : '출석하고 100P 받기'),
           )),
           const SizedBox(height: 3),
           const Center(child: Text('네이버페이 전환은 제휴 확정 후 제공됩니다.', style: TextStyle(fontSize: 12, color: Colors.grey))),
@@ -871,8 +1016,8 @@ class _VehicleOverviewState extends State<VehicleOverview> {
           if (vehicle != null) IconButton(tooltip: '차량 QR', onPressed: () => showVehiclePassportQr(context, vehicle), icon: const Icon(Icons.qr_code_2)),
           TextButton(onPressed: widget.onGarage, child: const Text('차량 관리')),
         ]),
-        if (vehicle != null && (hasFavouredF66Photo(vehicle) || hasMaybachPhoto(vehicle)))
-          VehiclePhoto(vehicle: vehicle, height: 220),
+        if (vehicle != null && (hasMiniVehiclePhoto(vehicle) || hasBmwVehiclePhoto(vehicle) || hasMaybachPhoto(vehicle)))
+          VehiclePhoto(vehicle: vehicle, height: 132),
         Text(vehicleTitle, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -.5)),
         const SizedBox(height: 4),
         Text(subtitle, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
@@ -1344,6 +1489,34 @@ class GaragePage extends StatefulWidget {
 }
 
 class _GaragePageState extends State<GaragePage> {
+  int vehiclePhotoRevision = 0;
+  Future<void> changeVehiclePhoto(Map<String, dynamic> vehicle) async {
+    final plate = '${vehicle['plate_number'] ?? ''}'.trim();
+    if (plate.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('차량 번호를 먼저 등록해 주세요.')));
+      return;
+    }
+    try {
+      final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 2000, maxHeight: 2000, imageQuality: 90);
+      if (picked == null || !mounted) return;
+      final original = await picked.readAsBytes();
+      if (!mounted) return;
+      final removeBackground = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+        title: const Text('차량 사진'), content: const Text('사진 배경을 제거할까요?'),
+        actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('원본 사용')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('배경 제거'))],
+      ));
+      if (removeBackground == null || !mounted) return;
+      final bytes = removeBackground ? await removeVehiclePhotoBackground(context, original) : original;
+      if (bytes == null || !mounted) return;
+      await VehiclePhotoStorage.saveForPlate(plate, bytes);
+      if (!mounted) return;
+      setState(() => vehiclePhotoRevision++);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('차량 사진을 변경했습니다. 이 기기에 저장됩니다.')));
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('사진을 변경하지 못했습니다. 사진 접근 권한을 확인해 주세요.')));
+    }
+  }
+
   late Future<List<Map<String, dynamic>>> vehiclesFuture;
   int? selectedVehicleId;
   String ledgerFilter = '전체';
@@ -1717,10 +1890,11 @@ class _GaragePageState extends State<GaragePage> {
           Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(child: Text(vehicle['nickname']?.toString().trim().isNotEmpty == true ? vehicle['nickname'].toString() : vehicle['model_name'].toString(), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900))),
+              IconButton(onPressed: () => changeVehiclePhoto(vehicle), tooltip: '차량 사진 변경', icon: const Icon(Icons.add_a_photo_outlined)),
               IconButton(onPressed: () => editVehiclePlate(vehicle), tooltip: '차량 번호판 등록·변경', icon: const Icon(Icons.edit_road_outlined)),
               IconButton(onPressed: () => showVehicleQr(vehicle), tooltip: '차량 QR', icon: const Icon(Icons.qr_code_2)),
             ]),
-            if (hasFavouredF66Photo(vehicle) || hasMaybachPhoto(vehicle)) VehiclePhoto(vehicle: vehicle, height: 132),
+            VehiclePhoto(key: ValueKey('photo-${vehicle['id']}-$vehiclePhotoRevision'), vehicle: vehicle, height: 132),
             Text('차량 번호  ${(vehicle['plate_number'] ?? '').toString().isEmpty ? '미등록' : vehicle['plate_number']}', style: const TextStyle(fontWeight: FontWeight.w700)),
             Text('이용 형태  ${_vehicleRelationshipLabel(vehicle['ownership_relationship'])} · 소유권 미확인', style: const TextStyle(fontSize: 12)),
             Text([
@@ -1922,7 +2096,7 @@ class AccountPage extends StatelessWidget {
           return Card(child: InkWell(borderRadius: BorderRadius.circular(14), onTap: onManageVehicles, child: Padding(
             padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [Expanded(child: Text(name, style: const TextStyle(fontWeight: FontWeight.w800))), const Icon(Icons.chevron_right)]),
-              if (hasFavouredF66Photo(vehicle) || hasMaybachPhoto(vehicle)) VehiclePhoto(vehicle: vehicle, height: 104),
+              if (hasMiniVehiclePhoto(vehicle) || hasBmwVehiclePhoto(vehicle) || hasMaybachPhoto(vehicle)) VehiclePhoto(vehicle: vehicle, height: 104),
               if (details.isNotEmpty) Text(details, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ]),
           )));

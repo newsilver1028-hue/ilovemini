@@ -3,6 +3,7 @@ import plistlib
 import xml.etree.ElementTree as ET
 p = Path('ios/Runner/Info.plist')
 with p.open('rb') as f: data = plistlib.load(f)
+data['NSPhotoLibraryUsageDescription'] = '내 차량 사진을 선택하고 변경하기 위해 사진 보관함을 사용합니다.'
 data['NSCameraUsageDescription'] = '차량 QR 코드를 스캔하기 위해 카메라를 사용합니다.'
 data['NSFaceIDUsageDescription'] = '아이러브미니 앱에서 QR을 안전하게 표시하기 위해 Face ID를 사용합니다.'
 types = data.setdefault('CFBundleURLTypes', [])
