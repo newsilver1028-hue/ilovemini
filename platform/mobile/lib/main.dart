@@ -1017,7 +1017,7 @@ class _VehicleOverviewState extends State<VehicleOverview> {
           TextButton(onPressed: widget.onGarage, child: const Text('차량 관리')),
         ]),
         if (vehicle != null && (hasMiniVehiclePhoto(vehicle) || hasBmwVehiclePhoto(vehicle) || hasMaybachPhoto(vehicle)))
-          VehiclePhoto(vehicle: vehicle, height: 100),
+          SizedBox(width: 88, height: 54, child: VehiclePhoto(vehicle: vehicle, height: 54)),
         Text(vehicleTitle, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -.5)),
         const SizedBox(height: 4),
         Text(subtitle, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
@@ -1894,7 +1894,7 @@ class _GaragePageState extends State<GaragePage> {
               IconButton(onPressed: () => editVehiclePlate(vehicle), tooltip: '차량 번호판 등록·변경', icon: const Icon(Icons.edit_road_outlined)),
               IconButton(onPressed: () => showVehicleQr(vehicle), tooltip: '차량 QR', icon: const Icon(Icons.qr_code_2)),
             ]),
-            VehiclePhoto(key: ValueKey('photo-${vehicle['id']}-$vehiclePhotoRevision'), vehicle: vehicle, height: 132),
+            SizedBox(width: 88, height: 54, child: VehiclePhoto(key: ValueKey('photo-${vehicle['id']}-$vehiclePhotoRevision'), vehicle: vehicle, height: 54)),
             Text('차량 번호  ${(vehicle['plate_number'] ?? '').toString().isEmpty ? '미등록' : vehicle['plate_number']}', style: const TextStyle(fontWeight: FontWeight.w700)),
             Text('이용 형태  ${_vehicleRelationshipLabel(vehicle['ownership_relationship'])} · 소유권 미확인', style: const TextStyle(fontSize: 12)),
             Text([
