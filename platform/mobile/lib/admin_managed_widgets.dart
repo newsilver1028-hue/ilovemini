@@ -12,6 +12,9 @@ bool secureLink(String value) {
 }
 
 const managedAssets = {
+  'partner-deutsch': 'assets/images/partner-square-deutsch.png',
+  'partner-printtrap': 'assets/images/partner-square-printtrap.png',
+  'partner-kumho': 'assets/images/partner-square-kumho.png',
   'mini-october': 'assets/images/season/mini-october.png',
   'phone-holder':
       'assets/images/mini-recommended-items/item-01-phone-holder.png',
@@ -100,66 +103,183 @@ class ManagedBanners extends StatefulWidget {
 }
 
 class _ManagedBannersState extends State<ManagedBanners> {
-  final controller = PageController();
-  Timer? timer;
-  int count = 0, page = 0;
-  late final content = widget.api.appContent().then((data) {
-    count = (data['banners'] as List? ?? []).length;
-    return data;
-  });
+  List<Map<String, String>> banners = [];
+  int get _bannerCount => banners.length;
+  Future<void> _loadBanners() async {
+    try {
+      final data = await widget.api.appContent();
+      if (!mounted) return;
+      setState(() => banners = (data['banners'] as List? ?? [])
+          .whereType<Map>()
+          .map((row) => <String, String>{
+                'image_url': '${row['image_url'] ?? ''}',
+                'asset_key': '${row['asset_key'] ?? ''}',
+                'alt': '${row['title'] ?? ''}',
+                'url': '${row['action_url'] ?? ''}',
+              })
+          .toList());
+    } catch (_) {/* Keep the current banners during connection failures. */}
+  }
+
+  final PageController _controller = PageController(initialPage: 1);
+  Timer? _timer;
+  int currentPage = 1;
+  bool paused = false;
+
+  int get logicalPage => currentPage <= 0
+      ? _bannerCount
+      : currentPage > _bannerCount
+          ? 1
+          : currentPage;
+
   @override
   void initState() {
     super.initState();
-    timer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _loadBanners();
+    _startTimer();
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    if (paused) return;
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (mounted &&
-          count > 1 &&
-          controller.hasClients &&
+          _bannerCount > 1 &&
+          _controller.hasClients &&
           !MediaQuery.disableAnimationsOf(context))
-        controller.animateToPage((page + 1) % count,
+        _controller.nextPage(
             duration: const Duration(milliseconds: 360),
             curve: Curves.easeOutCubic);
     });
   }
 
+  void _onPageChanged(int index) {
+    if (!mounted) return;
+    setState(() => currentPage = index);
+    if (index == 0 || index == _bannerCount + 1) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_controller.hasClients) return;
+        final target = index == 0 ? _bannerCount : 1;
+        _controller.jumpToPage(target);
+        setState(() => currentPage = target);
+      });
+    }
+  }
+
+  Future<void> _openBanner(Map<String, String> banner) async {
+    final url = banner['url'];
+    if (url != null && secureLink(url))
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
   @override
   void dispose() {
-    timer?.cancel();
-    controller.dispose();
+    _timer?.cancel();
+    _controller.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<Map<String, dynamic>>(
-      future: content,
-      builder: (context, snapshot) {
-        final rows = (snapshot.data?['banners'] as List? ?? [])
-            .whereType<Map>()
-            .toList();
-        if (rows.isEmpty) return const SizedBox.shrink();
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('제휴 배너',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 10),
-          AspectRatio(
-              aspectRatio: 1,
-              child: PageView(
-                  controller: controller,
-                  onPageChanged: (value) => page = value,
-                  children: rows
-                      .map((row) => InkWell(
-                            onTap: secureLink('${row['action_url'] ?? ''}')
-                                ? () => launchUrl(Uri.parse(row['action_url']),
-                                    mode: LaunchMode.externalApplication)
-                                : null,
-                            child: ClipRRect(
-                                borderRadius: BorderRadius.circular(14),
-                                child: managedImage(row, fit: BoxFit.cover)),
-                          ))
-                      .toList())),
-          if (rows.length > 1)
-            Center(child: Text('좌우로 넘겨 보기 · ${rows.length}개')),
-        ]);
-      });
+  Widget build(BuildContext context) {
+    if (banners.isEmpty) return const SizedBox.shrink();
+    final width = MediaQuery.sizeOf(context).width - 40;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        const Text('제휴 배너',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+        Text('카페 제휴 소식',
+            style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      ]),
+      const SizedBox(height: 19),
+      ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+              height: width,
+              child: Stack(children: [
+                PageView.builder(
+                  controller: _controller,
+                  itemCount: _bannerCount + 2,
+                  onPageChanged: _onPageChanged,
+                  itemBuilder: (context, page) {
+                    final index = page == 0
+                        ? _bannerCount - 1
+                        : page == _bannerCount + 1
+                            ? 0
+                            : page - 1;
+                    final banner = banners[index];
+                    final image = SizedBox(
+                        width: width,
+                        height: width,
+                        child: managedImage(banner, fit: BoxFit.cover));
+                    final url = banner['url'];
+                    return url == null || !secureLink(url)
+                        ? image
+                        : Semantics(
+                            button: true,
+                            label: '${banner['alt']} 자세히 보기',
+                            child: InkWell(
+                                onTap: () => _openBanner(banner),
+                                child: image));
+                  },
+                ),
+                if (_bannerCount > 1)
+                  Positioned(
+                      right: 9,
+                      bottom: 9,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                            color: const Color(0xC7191A1E),
+                            borderRadius: BorderRadius.circular(24)),
+                        child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 3),
+                            child:
+                                Row(mainAxisSize: MainAxisSize.min, children: [
+                              IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  tooltip: '이전 배너',
+                                  onPressed: () => _controller.previousPage(
+                                      duration:
+                                          const Duration(milliseconds: 280),
+                                      curve: Curves.easeOut),
+                                  icon: const Icon(Icons.chevron_left,
+                                      color: Colors.white, size: 20)),
+                              Text('$logicalPage / $_bannerCount',
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800)),
+                              IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  tooltip: '다음 배너',
+                                  onPressed: () => _controller.nextPage(
+                                      duration:
+                                          const Duration(milliseconds: 280),
+                                      curve: Curves.easeOut),
+                                  icon: const Icon(Icons.chevron_right,
+                                      color: Colors.white, size: 20)),
+                              IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  tooltip: paused ? '자동 넘김 재생' : '자동 넘김 일시정지',
+                                  onPressed: () {
+                                    setState(() => paused = !paused);
+                                    if (paused) {
+                                      _timer?.cancel();
+                                    } else {
+                                      _startTimer();
+                                    }
+                                  },
+                                  icon: Icon(
+                                      paused ? Icons.play_arrow : Icons.pause,
+                                      color: Colors.white,
+                                      size: 18)),
+                            ])),
+                      )),
+              ]))),
+    ]);
+  }
 }
 
 class ManagedNotices extends StatefulWidget {
