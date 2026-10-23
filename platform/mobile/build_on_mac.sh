@@ -12,6 +12,7 @@ if [[ ! -d android || ! -d ios ]]; then
   [[ -d ios ]] || cp -R "$native_temp/ilovemini/ios" ios
 fi
 python3 configure_native.py
+swift configure_apple.swift
 flutter pub get
 flutter analyze lib test
 flutter test

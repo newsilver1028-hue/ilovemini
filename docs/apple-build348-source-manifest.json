@@ -1,0 +1,42 @@
+{
+  "baseline": "App Store Connect iOS 1.0.0 build 348; Pending Developer Release verified 2026-10-24",
+  "ipa_sha256": "8cccff35ddbfd8c0bd268d04ce4cb5c48e915f6e876406b5fd55c85edd06aeac",
+  "source_artifact": "/Users/santiagosam/Documents/Codex/2026-10-07/swift-users-santiagosam-downloads-ilovemini-mobile/work/ilovemini-server/platform/mobile/.dart_tool/flutter_build/b15f105c8914565147cdc4a7550770b2/app.dill",
+  "source_extraction": "Exact UTF-8 source bytes stored in kernel source table, using encoded source length; no decompilation or handwritten reconstruction.",
+  "files": {
+    "brand_loading.dart": {
+      "sha256": "fa3985332cf175a573088732de2a281519441ee2c16c60a8aa282e95688e3514",
+      "bytes": 5008
+    },
+    "vehicle_photo_support.dart": {
+      "sha256": "4fabd585473b48e61c54c649c6d2fe5c2c92a56950ee14f3fc1554bf85bf13ba",
+      "bytes": 6786
+    },
+    "firebase_options.dart": {
+      "sha256": "2e4ba56f4958cc8007444bb4ea9f1f5fb0ed71e83e7b2caa8ede01bcb36f9d28",
+      "bytes": 1311
+    },
+    "main.dart": {
+      "sha256": "e45ae81024bb5eb19817ecf42d5b7275ddb1134e073b888de3c8eed9e92ccaad",
+      "bytes": 376866
+    },
+    "partner_directory.dart": {
+      "sha256": "975a1c68852e6061fda3695d6d5b8d34d01599df6cbc255f683d083c101015a3",
+      "bytes": 17804
+    },
+    "vehicle_catalog_picker.dart": {
+      "sha256": "48fdf51a58657de8bd296718a15db350403b0cb157e5880e72edcd6e6ade5e36",
+      "bytes": 48136
+    },
+    "api_client.dart": {
+      "sha256": "5e09a16c038fee06bc3221fc18f6dc33b51bf73571f026ca3cc67ebd4555e098",
+      "bytes": 52663
+    },
+    "partner_map.dart": {
+      "sha256": "a98775f0a5753ca272a7193f274af97a00d3ee63f7e99f2dfa4706d80b48e134",
+      "bytes": 4876
+    }
+  },
+  "reinstall_build": 360,
+  "source_behavior_changes": []
+}

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'brand_loading.dart';
 
 class PartnerMap extends StatefulWidget {
   const PartnerMap({required this.query, this.interactive = false, super.key});
@@ -62,7 +63,15 @@ class _PartnerMapState extends State<PartnerMap> {
                 child: Padding(padding: EdgeInsets.all(8), child: Text('지도 위에서도 위아래로 스크롤하세요', textAlign: TextAlign.center, style: TextStyle(color: Colors.black87, fontSize: 12))),
               )),
             ),
-            if (loading) const Align(alignment: Alignment.topCenter, child: LinearProgressIndicator()),
+            if (loading)
+              Positioned.fill(
+                  child: ColoredBox(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .surface
+                          .withValues(alpha: .72),
+                      child: const Center(
+                          child: MiniDriveLoader(compact: true)))),
             if (failed) ColoredBox(color: Theme.of(context).colorScheme.surface, child: Center(child: TextButton(
               onPressed: loadMap, child: const Text('지도를 불러오지 못했습니다. 다시 시도')))),
           ])),
