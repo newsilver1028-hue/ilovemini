@@ -3,6 +3,7 @@ from django.utils import timezone
 from .models import Vehicle, VehicleOwnership, LedgerEntry, Reminder, Notice, Partner, PartnerReview, Offer, PartnerBooking, PartnerStaff
 from .integrity import ledger_record_hash, legacy_ledger_record_hash
 from .vehicle_identity import normalize_plate_number
+from .media_views import uploaded_image_url
 
 class VehicleSerializer(serializers.ModelSerializer):
     plate_number = serializers.CharField(max_length=16, required=False, allow_blank=True, validators=[])
@@ -141,6 +142,20 @@ class NoticeSerializer(serializers.ModelSerializer):
 
 class PartnerSerializer(serializers.ModelSerializer):
     introduction_images = serializers.SerializerMethodField()
+    storefront_photo_url = serializers.SerializerMethodField()
+    representative_photo_url = serializers.SerializerMethodField()
+
+    def _partner_photo_url(self, obj, kind, data, content_type, fallback):
+        if data and content_type in {"image/png", "image/jpeg", "image/webp"}:
+            request = self.context.get("request")
+            return uploaded_image_url(request, f"/api/media/partners/{obj.pk}/{kind}/", data)
+        return fallback if fallback.startswith("https://") else ""
+
+    def get_storefront_photo_url(self, obj):
+        return self._partner_photo_url(obj, "storefront", obj.storefront_photo_data, obj.storefront_photo_content_type, obj.storefront_photo_url)
+
+    def get_representative_photo_url(self, obj):
+        return self._partner_photo_url(obj, "representative", obj.representative_photo_data, obj.representative_photo_content_type, obj.representative_photo_url)
 
     def get_introduction_images(self, obj):
         request = self.context.get("request")

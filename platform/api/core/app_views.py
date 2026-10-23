@@ -17,6 +17,7 @@ from .member_display import member_nickname
 from .member_roles import GRADES, member_grade
 from .models import AppContent, AppRelease, MemberPreference, RecordCorrectionRequest, Vehicle, PartnerStaff, LedgerEntry, PartnerBooking
 from .integrity import ledger_record_hash, legacy_ledger_record_hash
+from .media_views import uploaded_image_url
 
 def active_vehicles(user):
     return Vehicle.objects.filter(status='active', ownerships__user=user, ownerships__ended_at__isnull=True).distinct()
@@ -30,8 +31,11 @@ class AppContentView(APIView):
         now = timezone.now()
         items = AppContent.objects.filter(is_active=True, starts_at__lte=now).filter(Q(ends_at__isnull=True) | Q(ends_at__gt=now))
         def public(item):
+            image_url = item.image_url if item.image_url.startswith('https://') else ''
+            if item.image_data:
+                image_url = uploaded_image_url(request, f'/api/media/app-content/{item.pk}/', item.image_data)
             return {'id': item.pk, 'title': item.title, 'category': item.category, 'description': item.description,
-                'image_url': item.image_url if item.image_url.startswith('https://') else '', 'asset_key': item.asset_key,
+                'image_url': image_url, 'asset_key': item.asset_key,
                 'action_url': item.action_url if item.action_url.startswith('https://') else '',
                 'price_krw': item.price_krw, 'compatible_models': item.compatible_models}
         products = [public(item) for item in items if item.kind == 'product']

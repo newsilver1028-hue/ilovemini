@@ -14,6 +14,7 @@ from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView
 from core.partner_admin import partner_admin_site
 from core.privacy_views import privacy_policy, terms_of_service
 from core.partner_push_views import web_push_subscribe, web_push_unsubscribe, partner_service_worker
+from core.media_views import app_content_image, season_banner_image, partner_image
 
 router = DefaultRouter()
 from core.app_sync import AppSyncView, MemberPointHistoryView
@@ -41,6 +42,9 @@ urlpatterns = [
     path("privacy/", privacy_policy, name="privacy_policy"),
     path("terms/", terms_of_service, name="terms_of_service"),
     path("api/app/content/", AppContentView.as_view(), name="app_content"),
+    path("api/media/app-content/<int:pk>/", app_content_image, name="app_content_image"),
+    path("api/media/season-banner/<int:pk>/", season_banner_image, name="season_banner_image"),
+    path("api/media/partners/<int:pk>/<str:image_kind>/", partner_image, name="partner_uploaded_image"),
     path("api/app/sync/", AppSyncView.as_view(), name="app_sync"),
     path("api/points/history/", MemberPointHistoryView.as_view(), name="member_point_history"),
     path("api/shopping/search/", ShoppingSearchView.as_view(), name="shopping_search"),

@@ -178,6 +178,35 @@ class NoticeAdminForm(forms.ModelForm):
         return cleaned
 
 
+def _apply_admin_image_upload(form, cleaned, upload_field, data_field, content_type_field, clear_field):
+    upload = cleaned.get(upload_field)
+    clear = cleaned.get(clear_field)
+    if upload and clear:
+        form.add_error(clear_field, "새 파일을 첨부하거나 기존 파일을 제거하는 작업 중 하나만 선택해 주세요.")
+        return
+    if clear:
+        setattr(form.instance, data_field, None)
+        setattr(form.instance, content_type_field, "")
+        return
+    if not upload:
+        return
+    if upload.size > 5 * 1024 * 1024:
+        form.add_error(upload_field, "이미지는 5MB 이하로 첨부해 주세요.")
+        return
+    data = upload.read()
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        mime = "image/png"
+    elif data.startswith(b"\xff\xd8\xff"):
+        mime = "image/jpeg"
+    elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        mime = "image/webp"
+    else:
+        form.add_error(upload_field, "PNG, JPEG, WebP 이미지 파일만 첨부할 수 있습니다.")
+        return
+    setattr(form.instance, data_field, data)
+    setattr(form.instance, content_type_field, mime)
+
+
 class PartnerAdminForm(forms.ModelForm):
     description = forms.CharField(label="업체 소개 글", required=False,
         help_text="앱의 업체 상세 → 사진 아래 ‘업체 소개’에 표시됩니다. 소개 문구를 자유롭게 작성하세요.",
@@ -189,6 +218,14 @@ class PartnerAdminForm(forms.ModelForm):
         help_text="사진 파일 첨부는 아래 ‘매장 사진’에서 가능합니다. 권장 1200×900px(4:3), 최소 800×600px. 주소가 있는 대표 사진만 입력하세요.")
     representative_photo_url = forms.URLField(label="대표자 사진 주소", required=False,
         help_text="권장 800×800px(1:1) 정사각형, 최소 400×400px. 얼굴이 중앙에 오도록 준비해 주세요.")
+    storefront_photo_upload = forms.FileField(label="매장 대표 사진 파일", required=False,
+        help_text="권장 1200×900px(4:3), 최소 800×600px. PNG, JPEG, WebP, 최대 5MB. 선택하면 사진 주소보다 첨부 파일이 우선 표시됩니다.",
+        widget=forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/webp"}))
+    clear_storefront_photo_upload = forms.BooleanField(label="첨부한 매장 사진 제거", required=False)
+    representative_photo_upload = forms.FileField(label="대표자 사진 파일", required=False,
+        help_text="권장 800×800px(1:1), 최소 400×400px. PNG, JPEG, WebP, 최대 5MB. 선택하면 사진 주소보다 첨부 파일이 우선 표시됩니다.",
+        widget=forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/webp"}))
+    clear_representative_photo_upload = forms.BooleanField(label="첨부한 대표자 사진 제거", required=False)
     service_categories = forms.MultipleChoiceField(
         label="서비스 분야",
         required=False,
@@ -211,6 +248,12 @@ class PartnerAdminForm(forms.ModelForm):
 
     def clean_service_categories(self):
         return list(dict.fromkeys(self.cleaned_data["service_categories"]))
+
+    def clean(self):
+        cleaned = super().clean()
+        _apply_admin_image_upload(self, cleaned, "storefront_photo_upload", "storefront_photo_data", "storefront_photo_content_type", "clear_storefront_photo_upload")
+        _apply_admin_image_upload(self, cleaned, "representative_photo_upload", "representative_photo_data", "representative_photo_content_type", "clear_representative_photo_upload")
+        return cleaned
 
     class Media:
         js = ("core/partner_service_categories.js",)
@@ -550,12 +593,13 @@ class PartnerAdmin(AdminCalendarMixin, admin.ModelAdmin):
     search_fields = ("name", "branch_label", "region", "description", "address")
     save_on_top = True
     inlines = (PartnerImageInline, OfferInline)
+    readonly_fields = ("storefront_upload_status", "representative_upload_status")
     fieldsets = (
         ("업체 기본 정보", {"fields": ("name", "branch_label", "region", "service_categories")}),
         ("업체 소개 글", {"description": "앱의 사진 아래 소개 문구를 수정하는 곳입니다.", "fields": ("description",)}),
         ("매장 상세 안내", {"description": "앱의 업체 정보에 표시할 방문 및 이용 안내입니다.", "fields": ("business_info",)}),
-        ("대표 사진 주소", {"description": "파일 사진은 아래 매장 사진에서 첨부하세요. 이 항목은 외부 이미지 주소가 있을 때만 사용합니다.", "fields": ("storefront_photo_url",)}),
-        ("대표 정비사", {"fields": ("representative_name", "representative_title", "representative_experience_years", "representative_photo_url")}),
+        ("대표 매장 사진", {"fields": ("storefront_upload_status", "storefront_photo_url", "storefront_photo_upload", "clear_storefront_photo_upload")}),
+        ("대표 정비사", {"fields": ("representative_name", "representative_title", "representative_experience_years", "representative_upload_status", "representative_photo_url", "representative_photo_upload", "clear_representative_photo_upload")}),
         ("연락처 및 연결", {"fields": ("address", "phone", "hours", "cafe_url", "map_url")}),
         ("앱 노출 설정", {"fields": ("is_active", "is_sponsored", "display_order")}),
     )
@@ -569,6 +613,14 @@ class PartnerAdmin(AdminCalendarMixin, admin.ModelAdmin):
             ),
         ]
         return custom + super().get_urls()
+
+    @admin.display(description="첨부 상태")
+    def storefront_upload_status(self, obj):
+        return "이미지 파일 첨부됨 · 새 파일을 선택하면 교체됩니다." if obj and obj.storefront_photo_data else "첨부 이미지 없음"
+
+    @admin.display(description="첨부 상태")
+    def representative_upload_status(self, obj):
+        return "이미지 파일 첨부됨 · 새 파일을 선택하면 교체됩니다." if obj and obj.representative_photo_data else "첨부 이미지 없음"
 
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
@@ -1223,6 +1275,11 @@ User._meta.get_field("id").verbose_name = "회원 번호"
 Group._meta.get_field("id").verbose_name = "번호"
 
 class SeasonBannerAdminForm(forms.ModelForm):
+    image_upload = forms.FileField(label="배너 이미지 파일", required=False,
+        help_text="권장 1080×1920px(9:16 세로형), PNG·JPEG·WebP, 최대 5MB. 첨부 파일은 공개 HTTPS 주소보다 우선 표시됩니다.",
+        widget=forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/webp"}))
+    clear_image_upload = forms.BooleanField(label="첨부한 이미지 제거", required=False)
+
     class Meta:
         model = SeasonBanner
         fields = "__all__"
@@ -1231,8 +1288,13 @@ class SeasonBannerAdminForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields["image_url"].help_text = (
             "앱 시작 시즌 배너용 권장 1080×1920px(9:16 세로형). "
-            "제목·중요 문구는 가장자리에서 10% 안쪽에 배치하세요. 공개 HTTPS 이미지 주소를 입력합니다."
+            "제목·중요 문구는 가장자리에서 10% 안쪽에 배치하세요. 공개 HTTPS 이미지 주소를 입력하거나 아래에서 파일을 첨부하세요."
         )
+
+    def clean(self):
+        cleaned = super().clean()
+        _apply_admin_image_upload(self, cleaned, "image_upload", "image_data", "image_content_type", "clear_image_upload")
+        return cleaned
 
 
 @admin.register(SeasonBanner)
@@ -1244,8 +1306,22 @@ class SeasonBannerAdmin(AdminCalendarMixin, admin.ModelAdmin):
     search_fields = ("title", "subtitle")
     date_hierarchy = "starts_at"
     save_on_top = True
+    fieldsets = (
+        ("배너 내용", {"fields": ("title", "subtitle", "asset_key", "uploaded_image_status", "image_url", "image_upload", "clear_image_upload")}),
+        ("노출 일정", {"fields": ("is_active", "starts_at", "ends_at", "duration_seconds", "priority")}),
+    )
+    readonly_fields = ("uploaded_image_status",)
+
+    @admin.display(description="첨부 상태")
+    def uploaded_image_status(self, obj):
+        return "이미지 파일 첨부됨 · 새 파일을 선택하면 교체됩니다." if obj and obj.image_data else "첨부 이미지 없음"
 
 class AppContentAdminForm(forms.ModelForm):
+    image_upload = forms.FileField(label="이미지 파일 첨부", required=False,
+        help_text="배너·상품 이미지 권장 1200×1200px(1:1), 최소 800×800px. PNG·JPEG·WebP, 최대 5MB. 첨부 파일은 이미지 주소보다 우선 표시됩니다.",
+        widget=forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/webp"}))
+    clear_image_upload = forms.BooleanField(label="첨부한 이미지 제거", required=False)
+
     class Meta:
         model = AppContent
         fields = "__all__"
@@ -1254,8 +1330,13 @@ class AppContentAdminForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields["image_url"].help_text = (
             "권장 1200×1200px(1:1 정사각형), 최소 800×800px. "
-            "앱 카드에서 잘리지 않도록 주요 피사체를 중앙에 두세요. 공개 HTTPS 이미지 주소를 입력합니다."
+            "앱 카드에서 잘리지 않도록 주요 피사체를 중앙에 두세요. 공개 HTTPS 이미지 주소를 입력하거나 아래에서 파일을 첨부하세요."
         )
+
+    def clean(self):
+        cleaned = super().clean()
+        _apply_admin_image_upload(self, cleaned, "image_upload", "image_data", "image_content_type", "clear_image_upload")
+        return cleaned
 
 
 @admin.register(AppContent)
@@ -1267,6 +1348,15 @@ class AppContentAdmin(AdminCalendarMixin, admin.ModelAdmin):
     search_fields = ("title", "description", "compatible_models")
     date_hierarchy = "starts_at"
     save_on_top = True
+    fieldsets = (
+        ("콘텐츠", {"fields": ("title", "kind", "category", "description", "uploaded_image_status", "image_url", "image_upload", "clear_image_upload", "asset_key", "action_url", "price_krw", "compatible_models")}),
+        ("노출 일정과 순서", {"fields": ("is_active", "starts_at", "ends_at", "display_order")}),
+    )
+    readonly_fields = ("uploaded_image_status",)
+
+    @admin.display(description="첨부 상태")
+    def uploaded_image_status(self, obj):
+        return "이미지 파일 첨부됨 · 새 파일을 선택하면 교체됩니다." if obj and obj.image_data else "첨부 이미지 없음"
 
 @admin.register(AppRelease)
 class AppReleaseAdmin(AdminCalendarMixin, admin.ModelAdmin):
