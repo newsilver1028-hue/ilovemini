@@ -8,6 +8,11 @@ class CafeShoppingPreview extends StatefulWidget {
   State<CafeShoppingPreview> createState() => _CafeShoppingPreviewState();
 }
 class _CafeShoppingPreviewState extends State<CafeShoppingPreview> {
+  Widget demoImage() => AspectRatio(aspectRatio: 1, child: Image.asset(
+    category == 'recommended'
+      ? 'assets/images/mini-recommended-items/demo-recommended.jpg'
+      : 'assets/images/mini-recommended-items/demo-groupbuy.jpg',
+    fit: BoxFit.contain, semanticLabel: '${category == 'recommended' ? '추천아이템' : '공동구매'} 데모 이미지'));
   late final Future<Map<String,dynamic>> content;
   String category='recommended';
   @override
@@ -19,10 +24,10 @@ class _CafeShoppingPreviewState extends State<CafeShoppingPreview> {
     const SizedBox(height:12),
     Row(children:[for(final entry in {'recommended':'추천아이템','groupbuy':'공동구매'}.entries) Expanded(child:TextButton(onPressed:()=>setState(()=>category=entry.key),child:Text(entry.value,style:TextStyle(fontWeight:category==entry.key?FontWeight.bold:FontWeight.normal))))]),
     FutureBuilder<Map<String,dynamic>>(future:content,builder:(context,snapshot){
-      if(snapshot.hasError)return const Padding(padding:EdgeInsets.all(16),child:Text('쇼핑 정보를 불러오지 못했습니다.'));
+      if(snapshot.hasError)return demoImage();
       if(!snapshot.hasData)return const LinearProgressIndicator();
       final items=(snapshot.data!['products'] as List? ?? []).whereType<Map>().where((row)=>(row['category']??'recommended')==category);
-      if(items.isEmpty)return const Padding(padding:EdgeInsets.all(24),child:Center(child:Text('업데이트예정')));
+      if(items.isEmpty)return demoImage();
       final item=items.first;
       final raw='${item['image_url']??''}';
       final uri=Uri.parse('https://ilovemini.onrender.com/').resolve(raw);
