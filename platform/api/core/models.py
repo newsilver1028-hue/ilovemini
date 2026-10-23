@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 8432)
-Total output lines: 636
-
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -240,7 +237,200 @@ class WebPushSubscription(models.Model):
 
     class Meta:
         verbose_name = "협력업체 PC 알림 구독"
-        verbose_name_plural = "…2432 tokens truncated… = models.CharField(max_length=500, blank=True)
+        verbose_name_plural = "협력업체 PC 알림 구독"
+        constraints = [models.UniqueConstraint(fields=["partner", "endpoint"], name="unique_partner_webpush_endpoint")]
+        indexes = [models.Index(fields=["partner", "user"], name="core_webpush_partner_user_idx")]
+
+class Notice(models.Model):
+    title = models.CharField(max_length=140)
+    summary = models.CharField(max_length=280, blank=True)
+    body = models.TextField(blank=True)
+    category = models.CharField(max_length=40, default="notice")
+    original_url = models.URLField(blank=True)
+    is_pinned = models.BooleanField(default=False)
+    published_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    is_published = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-is_pinned", "-published_at"]
+
+
+class AttendanceCheckin(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="attendance_checkins")
+    checkin_date = models.DateField()
+    points_awarded = models.PositiveIntegerField(default=100)
+    streak_days = models.PositiveSmallIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-checkin_date"]
+        constraints = [models.UniqueConstraint(fields=["user", "checkin_date"], name="unique_user_daily_checkin")]
+
+    def __str__(self):
+        return f"{self.user_id} · {self.checkin_date} · {self.points_awarded}P"
+
+
+class PointTransaction(models.Model):
+    class Type(models.TextChoices):
+        ATTENDANCE = "attendance", "출석 적립"
+        SERVICE_EARN = "service_earn", "정비 결제 적립"
+        REDEMPTION = "redemption", "포인트 사용"
+        REFUND = "refund", "사용 취소·환급"
+        ADJUSTMENT = "adjustment", "운영자 조정"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name="회원", on_delete=models.PROTECT, related_name="point_transactions")
+    partner = models.ForeignKey("Partner", verbose_name="협력업체", on_delete=models.PROTECT, null=True, blank=True, related_name="point_transactions")
+    ledger_entry = models.ForeignKey("LedgerEntry", verbose_name="정비 기록", on_delete=models.PROTECT, null=True, blank=True, related_name="point_transactions")
+    transaction_type = models.CharField("거래 종류", max_length=20, choices=Type.choices)
+    points_delta = models.IntegerField("포인트 변동", help_text="적립은 양수, 사용은 음수로 기록합니다.")
+    available_at = models.DateTimeField("사용 가능 시각", default=timezone.now)
+    memo = models.CharField("처리 내용", max_length=240, blank=True)
+    idempotency_key = models.CharField("중복 방지 키", max_length=100, unique=True, default=uuid.uuid4)
+    created_at = models.DateTimeField("거래 시각", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "포인트 거래 내역"
+        verbose_name_plural = "포인트 거래 내역"
+        ordering = ["-created_at", "-pk"]
+
+    def __str__(self):
+        sign = "+" if self.points_delta > 0 else ""
+        return f"회원 {self.user_id} · {sign}{self.points_delta}P"
+
+
+class PointRedemptionRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "승인 대기"
+        APPROVED = "approved", "회원 승인"
+        COMPLETED = "completed", "사용 완료"
+        REJECTED = "rejected", "회원 거절"
+        EXPIRED = "expired", "시간 만료"
+        CANCELLED = "cancelled", "업체 취소"
+
+    member = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name="회원", on_delete=models.PROTECT, related_name="point_redemption_requests")
+    partner = models.ForeignKey("Partner", verbose_name="협력업체", on_delete=models.PROTECT, related_name="point_redemption_requests")
+    payment_amount_krw = models.PositiveIntegerField("결제 금액(원)")
+    points_requested = models.PositiveIntegerField("사용 요청 포인트")
+    status = models.CharField("처리 상태", max_length=16, choices=Status.choices, default=Status.PENDING)
+    expires_at = models.DateTimeField("요청 만료 시각")
+    responded_at = models.DateTimeField("회원 응답 시각", null=True, blank=True)
+    completed_at = models.DateTimeField("사용 완료 시각", null=True, blank=True)
+    transaction = models.ForeignKey(PointTransaction, verbose_name="포인트 거래", on_delete=models.PROTECT, null=True, blank=True, related_name="redemption_requests")
+    created_at = models.DateTimeField("요청 시각", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "포인트 사용 승인 요청"
+        verbose_name_plural = "포인트 사용 승인 요청"
+        ordering = ["-created_at", "-pk"]
+
+    def __str__(self):
+        return f"{self.partner} · 회원 {self.member_id} · {self.points_requested}P"
+
+class Partner(models.Model):
+    name = models.CharField(max_length=120)
+    branch_label = models.CharField(max_length=80, blank=True, default="")
+    region = models.CharField(max_length=80, blank=True)
+    service_categories = models.JSONField(default=list, blank=True)
+    description = models.TextField(blank=True)
+    address = models.CharField(max_length=240, blank=True)
+    phone = models.CharField(max_length=40, blank=True)
+    hours = models.CharField(max_length=160, blank=True)
+    cafe_url = models.URLField(blank=True)
+    map_url = models.URLField(blank=True)
+    storefront_photo_url = models.URLField(max_length=2048, blank=True)
+    business_info = models.TextField(blank=True)
+    representative_name = models.CharField(max_length=100, blank=True)
+    representative_title = models.CharField(max_length=100, blank=True)
+    representative_experience_years = models.PositiveSmallIntegerField(null=True, blank=True)
+    representative_photo_url = models.URLField(max_length=2048, blank=True)
+    is_sponsored = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=False)
+    display_order = models.PositiveSmallIntegerField(default=100)
+
+    class Meta:
+        ordering = ["display_order", "name"]
+        constraints = [models.UniqueConstraint(fields=["name", "branch_label"], name="unique_partner_name_branch")]
+
+    def __str__(self):
+        return f"{self.name} · {self.branch_label}" if self.branch_label else self.name
+
+
+class PartnerServiceCategoryOption(models.Model):
+    name = models.CharField("서비스 분야", max_length=80, unique=True)
+    is_active = models.BooleanField("사용", default=True)
+    display_order = models.PositiveSmallIntegerField("표시 순서", default=100)
+
+    class Meta:
+        ordering = ["display_order", "name"]
+        verbose_name = "업체 서비스 분야"
+        verbose_name_plural = "업체 서비스 분야"
+
+    def __str__(self):
+        return self.name
+
+
+class PartnerImage(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="introduction_images")
+    caption = models.CharField("이미지 설명", max_length=160, blank=True)
+    image_data = models.BinaryField(editable=False)
+    content_type = models.CharField(max_length=32, editable=False)
+    display_order = models.PositiveSmallIntegerField("표시 순서", default=0)
+
+    class Meta:
+        ordering = ["display_order", "pk"]
+        verbose_name = "업체 소개 이미지"
+        verbose_name_plural = "업체 소개 이미지"
+
+    def __str__(self):
+        return self.caption or f"{self.partner} 소개 이미지"
+
+
+class PartnerReview(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="reviews")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="partner_reviews")
+    rating = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    comment = models.CharField(max_length=1000, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [models.UniqueConstraint(fields=["partner", "user"], name="unique_partner_review_user")]
+
+    def __str__(self):
+        return f"{self.partner} · {self.rating}/5"
+
+class PartnerStaff(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="staff_members")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="partner_memberships")
+    can_verify_records = models.BooleanField(default=False)
+    can_manage_bookings = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["partner", "user"], name="unique_partner_staff")]
+
+    def __str__(self):
+        return f"{self.partner} · {self.user}"
+
+
+class PartnerBooking(models.Model):
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "접수 대기"
+        CONFIRMED = "confirmed", "예약 확정"
+        REJECTED = "rejected", "예약 거절"
+        CANCELLED = "cancelled", "취소"
+        COMPLETED = "completed", "완료"
+
+    customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="partner_bookings")
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="bookings")
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.SET_NULL, null=True, blank=True, related_name="bookings")
+    requested_at = models.DateTimeField(default=timezone.now)
+    scheduled_at = models.DateTimeField()
+    service_type = models.CharField(max_length=100)
+    customer_note = models.CharField(max_length=500, blank=True)
     contact_phone = models.CharField(max_length=24, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.REQUESTED)
     cancellation_reason = models.CharField("예약 취소 사유", max_length=500, blank=True, default="")
