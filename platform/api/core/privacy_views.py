@@ -18,7 +18,7 @@ def privacy_policy(request):
             "privacy_contact_phone": os.getenv(
                 "PRIVACY_CONTACT_PHONE", "0507-1416-5035"
             ),
-            "effective_date": os.getenv("PRIVACY_POLICY_EFFECTIVE_DATE", "2026년 10월 20일"),
+            "effective_date": os.getenv("PRIVACY_POLICY_EFFECTIVE_DATE", "2026년 10월 24일"),
         },
     )
 
