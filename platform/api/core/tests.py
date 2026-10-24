@@ -66,35 +66,9 @@ class CafeSearchTests(TestCase):
         self.assertIn("sort=date", upstream.call_args.args[0].full_url)
         self.assertIn("query=MINI", upstream.call_args.args[0].full_url)
 
-    def test_cafe_answer_requires_server_key(self):
-        with override_settings(OPENAI_API_KEY=""):
-            response = APIClient().post("/api/cafe/answer/", {"q": "F56 미션"}, format="json")
-        self.assertEqual(response.status_code, 503)
-
-    @override_settings(OPENAI_API_KEY="server-test-key", OPENAI_SEARCH_MODEL="gpt-test")
-    def test_cafe_answer_searches_public_cafe_and_returns_only_cafe_citations(self):
-        class FakeResponse:
-            def __enter__(self): return self
-            def __exit__(self, *args): return False
-            def read(self): return json.dumps({
-                "output_text": "카페 공개글에 따르면 우선 진단이 필요합니다.",
-                "output": [{"type": "message", "content": [{"type": "output_text", "text": "카페 공개글에 따르면 우선 진단이 필요합니다.", "annotations": [
-                    {"type": "url_citation", "url_citation": {"url": "https://cafe.naver.com/minilover/123", "title": "F56 미션 점검"}},
-                    {"type": "url_citation", "url_citation": {"url": "https://example.com/untrusted", "title": "무관한 출처"}},
-                ]}]}]
-            }).encode()
-
-        with patch("core.views.urlopen", return_value=FakeResponse()) as upstream:
-            response = APIClient().post("/api/cafe/answer/", {"q": "F56 미션 변속 충격"}, format="json")
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertTrue(response.data["live_search"])
-        self.assertEqual(response.data["sources"], [{"title": "F56 미션 점검", "url": "https://cafe.naver.com/minilover/123"}])
-        request = upstream.call_args.args[0]
-        request_body = json.loads(request.data)
-        self.assertEqual(request.get_header("Authorization"), "Bearer server-test-key")
-        self.assertEqual(request_body["tools"][0]["filters"]["allowed_domains"], ["cafe.naver.com"])
-        self.assertEqual(request_body["tool_choice"], "required")
-        self.assertIn("site:cafe.naver.com/minilover", request_body["input"])
+    def test_ai_cafe_answer_endpoint_is_removed(self):
+        response = APIClient().post("/api/cafe/answer/", {"q": "F56 미션"}, format="json")
+        self.assertEqual(response.status_code, 404)
 
 
 class AttendanceCheckinTests(TestCase):
