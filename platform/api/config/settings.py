@@ -75,7 +75,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework_simplejwt.authentication.JWTAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticatedOrReadOnly"],
+    # Baseline application-level request caps. The default Django cache is
+    # process-local unless a shared cache is configured, so these are not a
+    # substitute for edge-level DDoS protection.
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
     "DEFAULT_THROTTLE_RATES": {
+        "anon": "300/minute",
+        "user": "600/minute",
         "naver_start": "5/minute", "partner_naver_start": "5/minute",
         "naver_complete": "10/minute", "apple_login": "10/minute",
         "vehicle_transfer": "5/minute", "verified_record": "10/minute",
