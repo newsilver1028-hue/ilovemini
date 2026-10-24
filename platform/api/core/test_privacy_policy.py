@@ -19,8 +19,8 @@ class PrivacyPolicyPageTests(SimpleTestCase):
         self.assertContains(response, "미국 오리건주")
         self.assertContains(response, "탈퇴일로부터 최대 1년")
         self.assertContains(response, "Hugging Face")
-        self.assertContains(response, "OpenAI, L.L.C.")
-        self.assertContains(response, "입력한 질문이 OpenAI API로 전송")
+        self.assertNotContains(response, "OpenAI")
+        self.assertNotContains(response, "AI 카페 검색")
         self.assertContains(response, "Apple 로그인")
         self.assertNotContains(response, "초안입니다")
 
