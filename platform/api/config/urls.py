@@ -8,7 +8,7 @@ from django.http import HttpResponseRedirect
 from django.conf import settings
 from django.views.generic import RedirectView
 from rest_framework.routers import DefaultRouter
-from core.views import HealthView, CafeSearchView, CafeLatestView, CafeAnswerView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet, PartnerPointRedemptionView, PartnerPointBalanceView, MemberPointRedemptionView
+from core.views import HealthView, CafeSearchView, CafeLatestView, VehicleViewSet, LedgerEntryViewSet, ReminderViewSet, NoticeViewSet, PartnerViewSet, OfferViewSet, PushDeviceView, AttendanceView, PartnerBookingViewSet, PartnerPointRedemptionView, PartnerPointBalanceView, MemberPointRedemptionView
 from core.member_views import MemberGradeView
 from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView, AppleLoginView, AppReviewLoginView, AccountDeletionView, PartnerNaverLoginStartView, PartnerNaverLoginCompleteView
 from core.partner_admin import partner_admin_site
@@ -67,7 +67,6 @@ urlpatterns = [
     path("api/health/", HealthView.as_view(), name="health"),
     path("api/cafe/search/", CafeSearchView.as_view(), name="cafe_search"),
     path("api/cafe/latest/", CafeLatestView.as_view(), name="cafe_latest"),
-    path("api/cafe/answer/", CafeAnswerView.as_view(), name="cafe_answer"),
     path("api/auth/naver/start/", NaverStartView.as_view(), name="naver_start"),
     path("api/auth/naver/callback/", NaverCallbackView.as_view(), name="naver_callback"),
     path("api/auth/naver/complete/", NaverCompleteView.as_view(), name="naver_complete"),
