@@ -79,7 +79,6 @@ REST_FRAMEWORK = {
         "vehicle_transfer": "5/minute", "verified_record": "10/minute",
         "attendance": "30/minute",
         "cafe_search": "20/minute",
-        "cafe_answer": "10/minute",
         "booking": "20/minute",
         "point_redemption": "120/minute",
         "partner_review": "10/minute", "review_login": "10/minute",
@@ -103,8 +102,6 @@ WEB_PUSH_VAPID_PRIVATE_KEY = os.getenv("WEB_PUSH_VAPID_PRIVATE_KEY", "")
 WEB_PUSH_VAPID_SUBJECT = os.getenv("WEB_PUSH_VAPID_SUBJECT", "https://ilovemini.onrender.com/privacy/")
 NAVER_API_HUB_CLIENT_ID = os.getenv("NAVER_API_HUB_CLIENT_ID", "")
 NAVER_API_HUB_CLIENT_SECRET = os.getenv("NAVER_API_HUB_CLIENT_SECRET", "")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_SEARCH_MODEL = os.getenv("OPENAI_SEARCH_MODEL", "gpt-5.5")
 CORS_ALLOWED_ORIGINS = [origin.strip().rstrip("/") for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()]
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 if not DEBUG:
