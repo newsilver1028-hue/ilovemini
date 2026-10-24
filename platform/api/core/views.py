@@ -153,67 +153,6 @@ class CafeLatestView(APIView):
                          "source": "NAVER API HUB · 아이러브미니 공개글 · 최신순"})
 
 
-class CafeAnswerView(APIView):
-    """Search public ILOVEMINI Cafe pages on demand and answer with citations."""
-    permission_classes = [permissions.AllowAny]
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "cafe_answer"
-
-    def post(self, request):
-        query = str(request.data.get("q", "")).strip()
-        if len(query) < 2 or len(query) > 120:
-            return Response({"detail": "질문은 2자 이상 120자 이하로 입력해 주세요."}, status=400)
-        if not settings.OPENAI_API_KEY:
-            return Response({"detail": "AI 검색 서버가 아직 연결되지 않았습니다."}, status=503)
-
-        prompt = (
-            "사용자가 MINI 차량 관련 질문을 했습니다. Responses API의 웹 검색으로 실제 검색을 반드시 수행하세요. "
-            "검색어에는 site:cafe.naver.com/minilover 를 포함하고 아이러브미니 네이버 카페의 공개 게시글을 우선 확인하세요. "
-            "카페 글에서 근거를 찾지 못하면 그 사실을 먼저 밝히고, 근거가 없는 정비 사실을 만들어내지 마세요. "
-            "정비 안전과 관련된 답변은 단정하지 말고 전문가 점검이 필요할 수 있음을 안내하세요. "
-            "답변은 한국어로 간결하게 쓰고, 검색한 게시글을 인용해 주세요.\n\n질문: " + query
-        )
-        body = json.dumps({
-            "model": settings.OPENAI_SEARCH_MODEL,
-            "tools": [{"type": "web_search", "filters": {"allowed_domains": ["cafe.naver.com"]}}],
-            "tool_choice": "required",
-            "include": ["web_search_call.action.sources"],
-            "input": prompt,
-        }).encode("utf-8")
-        upstream = Request(
-            "https://api.openai.com/v1/responses", data=body,
-            headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-                     "Content-Type": "application/json", "Accept": "application/json"},
-            method="POST",
-        )
-        try:
-            with urlopen(upstream, timeout=45) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, ValueError):
-            return Response({"detail": "카페 검색 답변을 가져오지 못했어요. 잠시 후 다시 시도해 주세요."}, status=502)
-
-        answer = str(payload.get("output_text", "")).strip()
-        sources = {}
-        for item in payload.get("output", []):
-            if item.get("type") == "message":
-                for part in item.get("content", []):
-                    if part.get("type") == "output_text":
-                        answer = answer or str(part.get("text", "")).strip()
-                        for annotation in part.get("annotations", []):
-                            citation = annotation.get("url_citation", {})
-                            url = str(citation.get("url", ""))
-                            if url.startswith("https://") and urlparse(url).hostname in {"cafe.naver.com", "m.cafe.naver.com"}:
-                                sources[url] = {"title": str(citation.get("title") or "아이러브미니 카페 게시글"), "url": url}
-            if item.get("type") == "web_search_call":
-                for source in item.get("action", {}).get("sources", []):
-                    url = str(source.get("url", ""))
-                    if url.startswith("https://") and urlparse(url).hostname in {"cafe.naver.com", "m.cafe.naver.com"}:
-                        sources.setdefault(url, {"title": str(source.get("title") or "아이러브미니 카페 게시글"), "url": url})
-        if not answer:
-            return Response({"detail": "검색 결과에서 답변을 만들지 못했어요. 다른 표현으로 질문해 주세요."}, status=502)
-        return Response({"query": query, "answer": answer, "sources": list(sources.values())[:6],
-                         "source": "아이러브미니 카페 공개글 웹 검색", "live_search": True})
-
 
 def _attendance_payload(user, today):
     rows = list(AttendanceCheckin.objects.filter(user=user).order_by("-checkin_date")[:31])
