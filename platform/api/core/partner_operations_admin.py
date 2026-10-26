@@ -562,6 +562,10 @@ class PartnerTaxInvoiceAdmin(PartnerScopedAdmin):
         }
         if request.method != "POST":
             return render(request, "admin/core/partnertaxinvoice/issue_confirm.html", confirmation_context)
+        item_rows = invoice.items if isinstance(invoice.items, list) else []
+        if not any(isinstance(item, dict) and str(item.get("description", "")).strip() for item in item_rows):
+            self.message_user(request, "실제 발행 전에 품목을 한 줄 이상 입력해 주세요.", level="error")
+            return HttpResponseRedirect(confirmation_context["change_url"])
         if not getattr(settings, "POPBILL_LINK_ID", "") or not getattr(settings, "POPBILL_SECRET_KEY", ""):
             self.message_user(request, "Render 환경변수 POPBILL_LINK_ID와 POPBILL_SECRET_KEY를 먼저 설정해 주세요.", level="error")
             return HttpResponseRedirect(confirmation_context["change_url"])
