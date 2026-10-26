@@ -50,6 +50,7 @@ class PartnerAdminSite(AdminSite):
     site_header = "아이러브미니 협력업체 센터"
     site_title = "협력업체 센터"
     index_title = "업체 업무"
+    index_template = "core/partner_admin_index.html"
     login_template = "core/partner_admin_login.html"
     site_url = None
 
