@@ -1,12 +1,13 @@
 import hashlib
 import secrets
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django import forms
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import F
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse
 from django.urls import path, reverse
 from django.utils import timezone
 from django.conf import settings
@@ -395,17 +396,73 @@ class PartnerPaymentAdmin(PartnerScopedAdmin):
 
 
 class PartnerTaxInvoiceForm(forms.ModelForm):
+    items = forms.JSONField(
+        label="품목",
+        required=False,
+        help_text="작업지시에서 불러오거나 아래 표에 품목·수량·단가를 입력하세요. 금액은 수량×단가로 계산됩니다.",
+        widget=forms.Textarea(attrs={"rows": 5, "class": "invoice-items-source", "spellcheck": "false"}),
+    )
+
     class Meta:
         model = PartnerTaxInvoice
         fields = "__all__"
+
+    def clean_items(self):
+        raw_items = self.cleaned_data.get("items") or []
+        if not isinstance(raw_items, list):
+            raise ValidationError("품목은 목록 형식이어야 합니다.")
+        if len(raw_items) > 99:
+            raise ValidationError("품목은 최대 99개까지 입력할 수 있습니다.")
+
+        items = []
+        for index, raw in enumerate(raw_items, start=1):
+            if not isinstance(raw, dict):
+                raise ValidationError(f"{index}번 품목 형식을 확인해 주세요.")
+            description = str(raw.get("description", "")).strip()
+            if not description:
+                continue
+            if len(description) > 100:
+                raise ValidationError(f"{index}번 품목명은 100자 이내로 입력해 주세요.")
+            try:
+                quantity = Decimal(str(raw.get("quantity", "1")))
+                price_value = Decimal(str(raw.get("unit_price_krw", 0)))
+            except (InvalidOperation, TypeError, ValueError):
+                raise ValidationError(f"{index}번 품목의 수량과 단가를 확인해 주세요.")
+            if not quantity.is_finite() or quantity <= 0 or quantity > Decimal("1000000"):
+                raise ValidationError(f"{index}번 품목의 수량은 0보다 큰 값이어야 합니다.")
+            if not price_value.is_finite() or price_value < 0 or price_value != price_value.to_integral_value():
+                raise ValidationError(f"{index}번 품목의 단가는 0 이상의 원 단위로 입력해 주세요.")
+            unit_price = int(price_value)
+            amount = int((quantity * unit_price).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            items.append({
+                "description": description,
+                "quantity": format(quantity.normalize(), "f"),
+                "unit_price_krw": unit_price,
+                "amount_krw": amount,
+            })
+        return items
 
     def clean(self):
         data = super().clean()
         partner, work_order = data.get("partner"), data.get("work_order")
         if partner and work_order and partner.pk != work_order.partner_id:
             self.add_error("work_order", "정비 작업과 협력업체가 일치하지 않습니다.")
-        if data.get("total_krw") != (data.get("supply_cost_krw", 0) + data.get("tax_krw", 0)):
+
+        supply = data.get("supply_cost_krw")
+        tax = data.get("tax_krw")
+        total = data.get("total_krw")
+        if supply is not None and tax is not None and total is not None and total != supply + tax:
             self.add_error("total_krw", "합계는 공급가액과 세액의 합이어야 합니다.")
+        if supply is not None and tax is not None:
+            tax_type = data.get("tax_type")
+            if tax_type in (PartnerTaxInvoice.TaxType.EXEMPT, PartnerTaxInvoice.TaxType.ZERO) and tax != 0:
+                self.add_error("tax_krw", "면세·영세 계산서의 세액은 0원이어야 합니다.")
+            elif tax_type == PartnerTaxInvoice.TaxType.TAXABLE and total is not None:
+                expected_supply = int((Decimal(total) / Decimal("1.1")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+                expected_tax = total - expected_supply
+                if supply != expected_supply or tax != expected_tax:
+                    self.add_error("tax_krw", f"과세 금액 기준 세액은 {expected_tax:,}원이어야 합니다.")
+
         for field in ("seller_business_number", "buyer_business_number"):
             value = "".join(char for char in data.get(field, "") if char.isdigit())
             if value and len(value) != 10:
@@ -446,7 +503,47 @@ class PartnerTaxInvoiceAdmin(PartnerScopedAdmin):
         return self.has_view_permission(request, obj) and (obj is None or obj.status == PartnerTaxInvoice.Status.DRAFT)
 
     def get_urls(self):
-        return [path("<path:object_id>/issue/", self.admin_site.admin_view(self.issue_invoice), name="partner-taxinvoice-issue")] + super().get_urls()
+        custom_urls = [
+            path("tax-invoice-work-orders/", self.admin_site.admin_view(self.work_order_options), name="partner-taxinvoice-work-orders"),
+            path("<path:object_id>/issue/", self.admin_site.admin_view(self.issue_invoice), name="partner-taxinvoice-issue"),
+        ]
+        return custom_urls + super().get_urls()
+
+    def work_order_options(self, request):
+        if request.method != "GET":
+            return HttpResponseNotAllowed(["GET"])
+        try:
+            partner_id = int(request.GET.get("partner_id", ""))
+        except (TypeError, ValueError):
+            return JsonResponse({"error": "업체를 먼저 선택해 주세요."}, status=400)
+        if not Partner.objects.filter(pk=partner_id, pk__in=self.allowed_partner_ids(request)).exists():
+            return JsonResponse({"error": "접근 권한이 없는 업체입니다."}, status=403)
+
+        orders = PartnerWorkOrder.objects.filter(partner_id=partner_id).select_related(
+            "customer"
+        ).prefetch_related("lines").order_by("-pk")
+        results = []
+        for order in orders:
+            vehicle = order.plate_number or order.vehicle_model or "차량 미등록"
+            lines = [{
+                "description": line.description,
+                "quantity": str(line.quantity),
+                "unit_price_krw": line.unit_price_krw,
+                "amount_krw": line.amount_krw,
+            } for line in order.lines.all()]
+            total = order.final_total_krw or order.quoted_total_krw
+            results.append({
+                "id": order.pk,
+                "label": f"WO-{order.pk} · {vehicle} · {order.get_status_display()}",
+                "buyer_name": order.customer.name if order.customer_id else order.customer_name,
+                "buyer_business_number": order.customer.business_number if order.customer_id else "",
+                "buyer_representative": "",
+                "buyer_email": order.customer.email if order.customer_id else "",
+                "buyer_address": order.customer.address if order.customer_id else "",
+                "total_krw": total,
+                "items": lines,
+            })
+        return JsonResponse({"work_orders": results})
 
     def issue_invoice(self, request, object_id):
         invoice = self.get_object(request, object_id)
@@ -465,6 +562,10 @@ class PartnerTaxInvoiceAdmin(PartnerScopedAdmin):
         }
         if request.method != "POST":
             return render(request, "admin/core/partnertaxinvoice/issue_confirm.html", confirmation_context)
+        item_rows = invoice.items if isinstance(invoice.items, list) else []
+        if not any(isinstance(item, dict) and str(item.get("description", "")).strip() for item in item_rows):
+            self.message_user(request, "실제 발행 전에 품목을 한 줄 이상 입력해 주세요.", level="error")
+            return HttpResponseRedirect(confirmation_context["change_url"])
         if not getattr(settings, "POPBILL_LINK_ID", "") or not getattr(settings, "POPBILL_SECRET_KEY", ""):
             self.message_user(request, "Render 환경변수 POPBILL_LINK_ID와 POPBILL_SECRET_KEY를 먼저 설정해 주세요.", level="error")
             return HttpResponseRedirect(confirmation_context["change_url"])
