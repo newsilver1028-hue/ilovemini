@@ -31,6 +31,7 @@ class EstimateForm(PhaseOneForm):
     class Meta:
         model = ServiceEstimate
         fields = ['booking','items','note']
+        labels = {'booking': '연결 예약'}
         widgets = {'items': EstimateItemsWidget}
 
 class RecommendationForm(PhaseOneForm):
