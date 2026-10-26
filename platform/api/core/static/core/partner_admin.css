@@ -46,11 +46,10 @@
 .workshop-empty { padding:34px 16px; text-align:center; }
 .workshop-empty p { margin:7px 0 16px; color:var(--body-quiet-color,#71747d); }
 .workshop-shortcuts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
-.workshop-shortcuts a { display:grid; gap:6px; position:relative; padding:16px 38px 16px 16px; border:1px solid var(--border-color,#dedfe4); border-radius:11px; color:var(--body-fg,#202127)!important; text-decoration:none!important; transition:border-color .18s ease,transform .18s ease; }
+.workshop-shortcuts a { display:grid; gap:6px; position:relative; padding:16px; border:1px solid var(--border-color,#dedfe4); border-radius:11px; color:var(--body-fg,#202127)!important; text-decoration:none!important; transition:border-color .18s ease,transform .18s ease; }
 .workshop-shortcuts a:hover { transform:translateY(-2px); border-color:#b3213b; }
 .workshop-shortcuts span { color:#b3213b; font-size:10px; font-weight:850; letter-spacing:.12em; }
 .workshop-shortcuts strong { font-size:12px; }
-.workshop-shortcuts b { position:absolute; top:16px; right:16px; color:var(--body-quiet-color,#71747d); }
 .workshop-report-filter { display:flex; align-items:center; gap:8px; }
 .workshop-report-filter label { color:var(--body-quiet-color,#71747d); font-size:12px; font-weight:750; }
 .workshop-report-filter input,.workshop-report-filter button { min-height:42px; padding:0 12px; border:1px solid var(--border-color,#dedfe4); border-radius:8px; background:var(--body-bg,#fff); color:var(--body-fg,#202127); font:inherit; }
