@@ -69,6 +69,7 @@ class PartnerAdminSite(AdminSite):
         app_list = super().get_app_list(request, app_label)
         names = {
             "PartnerBooking": "업체 예약",
+            "PartnerWorkOrder": "정비 접수·작업지시",
             "LedgerEntry": "인증 정비기록",
         }
         for app in app_list:
@@ -526,3 +527,6 @@ from .models import ServiceEstimate, MaintenanceRecommendation
 from .phase_one_admin import EstimateAdmin, RecommendationAdmin
 partner_admin_site.register(ServiceEstimate, EstimateAdmin)
 partner_admin_site.register(MaintenanceRecommendation, RecommendationAdmin)
+from .models import PartnerWorkOrder
+from .work_order_admin import PartnerWorkOrderAdmin
+partner_admin_site.register(PartnerWorkOrder, PartnerWorkOrderAdmin)

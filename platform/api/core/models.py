@@ -478,6 +478,62 @@ class PartnerBooking(models.Model):
     def __str__(self):
         return f"{self.partner} · {self.scheduled_at:%Y-%m-%d %H:%M} · {self.get_status_display()}"
 
+
+class PartnerWorkOrder(models.Model):
+    """Partner-scoped repair intake and workshop job card."""
+
+    class Status(models.TextChoices):
+        RECEIVED = "received", "접수"
+        INSPECTING = "inspecting", "점검 중"
+        QUOTE = "quote", "견적 작성"
+        WAITING_APPROVAL = "waiting_approval", "고객 승인 대기"
+        WAITING_PARTS = "waiting_parts", "부품 대기"
+        IN_PROGRESS = "in_progress", "정비 중"
+        READY = "ready", "출고 대기"
+        COMPLETED = "completed", "정비 완료"
+        CANCELLED = "cancelled", "취소"
+
+    class PaymentMethod(models.TextChoices):
+        CARD = "card", "카드"
+        CASH = "cash", "현금"
+        TRANSFER = "transfer", "계좌이체"
+        EASY_PAY = "easy_pay", "간편결제"
+        OTHER = "other", "기타"
+
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="work_orders", verbose_name="협력업체")
+    booking = models.OneToOneField(PartnerBooking, on_delete=models.PROTECT, null=True, blank=True, related_name="work_order", verbose_name="연결 예약")
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.SET_NULL, null=True, blank=True, related_name="partner_work_orders", verbose_name="등록 차량")
+    customer_name = models.CharField("고객명", max_length=100, blank=True)
+    contact_phone = models.CharField("연락처", max_length=24, blank=True)
+    vehicle_model = models.CharField("차량명", max_length=100, blank=True)
+    plate_number = models.CharField("차량번호", max_length=16, blank=True, db_index=True)
+    odometer_km = models.PositiveIntegerField("입고 주행거리(km)", null=True, blank=True)
+    customer_concern = models.TextField("고객 요청·증상", blank=True)
+    inspection_notes = models.TextField("점검·진단 내용", blank=True)
+    work_notes = models.TextField("작업 내용", blank=True)
+    customer_message = models.CharField("고객 안내", max_length=500, blank=True)
+    technician_name = models.CharField("담당 정비사", max_length=100, blank=True)
+    items = models.JSONField("부품·공임 항목", default=list, blank=True)
+    quoted_total_krw = models.PositiveIntegerField("견적 금액(원)", default=0)
+    final_total_krw = models.PositiveIntegerField("최종 정비 금액(원)", default=0)
+    paid_amount_krw = models.PositiveIntegerField("수납 금액(원)", default=0)
+    payment_method = models.CharField("결제 수단", max_length=16, choices=PaymentMethod.choices, blank=True)
+    status = models.CharField("작업 상태", max_length=24, choices=Status.choices, default=Status.RECEIVED)
+    internal_note = models.TextField("업체 내부 메모", blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="partner_work_orders_created", verbose_name="접수 담당자")
+    created_at = models.DateTimeField("접수 시각", auto_now_add=True)
+    updated_at = models.DateTimeField("수정 시각", auto_now=True)
+    completed_at = models.DateTimeField("완료 시각", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "정비 접수·작업지시"
+        verbose_name_plural = "정비 접수·작업지시"
+        ordering = ["-created_at", "-pk"]
+        indexes = [models.Index(fields=["partner", "status", "created_at"], name="partner_work_status_idx")]
+
+    def __str__(self):
+        return f"작업 #{self.pk or '신규'} · {self.plate_number or self.vehicle_model or self.customer_name or '차량 미지정'}"
+
 class Offer(models.Model):
     partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="offers")
     title = models.CharField(max_length=140)
