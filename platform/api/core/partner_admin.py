@@ -30,7 +30,14 @@ def active_staff_for(request):
     ).select_related("partner")
 
 
+def is_system_admin(request):
+    user = request.user
+    return bool(user.is_authenticated and user.is_active and user.is_staff and user.is_superuser)
+
+
 def staff_partners(request, *, booking=False, records=False):
+    if is_system_admin(request):
+        return Partner.objects.filter(is_active=True).values_list("id", flat=True)
     qs = active_staff_for(request)
     if booking:
         qs = qs.filter(can_manage_bookings=True)
@@ -59,10 +66,12 @@ class PartnerAdminSite(AdminSite):
         return bool(
             request.user.is_authenticated
             and request.user.is_active
-            and not request.user.is_superuser
-            and active_staff_for(request).filter(
-                Q(can_manage_bookings=True) | Q(can_verify_records=True)
-            ).exists()
+            and (
+                is_system_admin(request)
+                or active_staff_for(request).filter(
+                    Q(can_manage_bookings=True) | Q(can_verify_records=True)
+                ).exists()
+            )
         )
 
     def get_app_list(self, request, app_label=None):
@@ -140,9 +149,9 @@ class PartnerAdminSite(AdminSite):
 
     def export_bookings(self, request):
         staff = active_staff_for(request).filter(can_manage_bookings=True)
-        if not staff.exists():
+        if not is_system_admin(request) and not staff.exists():
             raise Http404
-        partner_ids = staff.values_list("partner_id", flat=True)
+        partner_ids = staff_partners(request, booking=True)
         bookings = PartnerBooking.objects.filter(partner_id__in=partner_ids).select_related(
             "partner", "customer__naver_identity", "customer__apple_identity", "vehicle"
         ).order_by("-scheduled_at", "-pk")
@@ -170,9 +179,9 @@ class PartnerAdminSite(AdminSite):
 
     def export_maintenance_records(self, request):
         staff = active_staff_for(request).filter(can_verify_records=True)
-        if not staff.exists():
+        if not is_system_admin(request) and not staff.exists():
             raise Http404
-        partner_ids = staff.values_list("partner_id", flat=True)
+        partner_ids = staff_partners(request, records=True)
         entries = LedgerEntry.objects.filter(
             source=LedgerEntry.Source.PARTNER,
             partner_id__in=partner_ids,
@@ -217,7 +226,7 @@ class PartnerAdminSite(AdminSite):
         )
 
     def ledger_evidence_view(self, request, entry_id, evidence_id):
-        if not active_staff_for(request).filter(can_verify_records=True).exists():
+        if not is_system_admin(request) and not active_staff_for(request).filter(can_verify_records=True).exists():
             raise Http404
         partner_ids = staff_partners(request, records=True)
         evidence = LedgerEvidence.objects.select_related("entry").filter(
@@ -366,7 +375,7 @@ class PartnerBookingAdmin(admin.ModelAdmin):
         return super().changelist_view(request, extra_context=extra_context)
 
     def has_module_permission(self, request):
-        return active_staff_for(request).filter(can_manage_bookings=True).exists()
+        return is_system_admin(request) or active_staff_for(request).filter(can_manage_bookings=True).exists()
 
     def has_view_permission(self, request, obj=None):
         allowed = self.has_module_permission(request)
@@ -499,7 +508,7 @@ class PartnerLedgerEntryAdmin(admin.ModelAdmin):
         ).select_related("partner", "vehicle")
 
     def has_module_permission(self, request):
-        return active_staff_for(request).filter(can_verify_records=True).exists()
+        return is_system_admin(request) or active_staff_for(request).filter(can_verify_records=True).exists()
 
     def has_view_permission(self, request, obj=None):
         allowed = self.has_module_permission(request)
