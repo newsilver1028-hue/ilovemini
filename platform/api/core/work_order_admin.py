@@ -2,9 +2,9 @@ from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.urls import reverse
-from django.utils.html import format_html
+from django.utils.html import format_html, format_html_join
 from django.utils import timezone
 
 from .member_display import member_nickname
@@ -80,10 +80,11 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
         ("접수 정보", {"fields": ("partner", "booking", ("customer", "partner_vehicle"), ("customer_name", "contact_phone"), ("vehicle_model", "plate_number", "odometer_km"), "customer_concern", "status")}),
         ("점검·작업", {"fields": ("inspection_notes", ("quoted_total_krw", "final_total_krw"), ("technician_name", "work_notes"), "customer_message")}),
         ("수납", {"fields": (("paid_amount_krw", "payment_method"),)}),
+        ("차량 정비 이력", {"fields": ("vehicle_service_history",)}),
         ("업체 메모", {"fields": ("internal_note",)}),
         ("기록", {"fields": ("created_by", "created_at", "updated_at", "completed_at"), "classes": ("collapse",)}),
     )
-    readonly_fields = ("created_by", "created_at", "updated_at", "completed_at")
+    readonly_fields = ("created_by", "created_at", "updated_at", "completed_at", "vehicle_service_history")
     inlines = []
 
     class Media:
@@ -101,6 +102,44 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
     @admin.display(description="차량")
     def vehicle_summary(self, obj):
         return " · ".join(value for value in (obj.plate_number, obj.vehicle_model) if value) or "차량 미입력"
+
+    @admin.display(description="최근 작업 (같은 업체 차량)")
+    def vehicle_service_history(self, obj):
+        if not obj or not obj.pk:
+            return "접수 내용을 저장하면 같은 차량의 이전 작업이 표시됩니다."
+        identity = Q()
+        if obj.partner_vehicle_id:
+            identity |= Q(partner_vehicle_id=obj.partner_vehicle_id)
+        if obj.vehicle_id:
+            identity |= Q(vehicle_id=obj.vehicle_id)
+        plate = (obj.plate_number or "").strip()
+        if plate:
+            identity |= Q(plate_number__iexact=plate)
+        if not identity.children:
+            return "차량 대장 또는 차량번호를 등록하면 이전 정비 이력을 확인할 수 있습니다."
+        rows = PartnerWorkOrder.objects.filter(
+            partner_id=obj.partner_id,
+        ).filter(identity).exclude(
+            pk=obj.pk,
+        ).exclude(
+            status=PartnerWorkOrder.Status.CANCELLED,
+        ).order_by("-created_at", "-pk")[:5]
+        if not rows:
+            return "이 업체에 등록된 이전 작업이 없습니다."
+        entries = format_html_join(
+            "",
+            '<li><div class="partner-service-history__heading"><strong>{}</strong><span>{} · {}</span></div><p>{}</p></li>',
+            (
+                (
+                    timezone.localtime(row.created_at).strftime("%Y-%m-%d %H:%M"),
+                    row.get_status_display(),
+                    f"{(row.final_total_krw or row.quoted_total_krw):,}원",
+                    row.customer_concern or row.work_notes or "요청·작업 메모 없음",
+                )
+                for row in rows
+            ),
+        )
+        return format_html('<ol class="partner-service-history">{}</ol>', entries)
 
     def get_queryset(self, request):
         return super().get_queryset(request).filter(
