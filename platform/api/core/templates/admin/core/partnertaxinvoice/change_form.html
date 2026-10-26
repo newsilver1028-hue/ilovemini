@@ -69,6 +69,41 @@
     body.model-partnertaxinvoice.change-form .invoice-section--items textarea {
       min-height:156px; padding:12px; font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
     }
+    body.model-partnertaxinvoice.change-form .invoice-items-editor {
+      border:1px solid var(--border-color,#dedfe5); border-radius:10px; background:var(--body-bg,#fff); overflow:hidden;
+    }
+    body.model-partnertaxinvoice.change-form .invoice-items-toolbar,
+    body.model-partnertaxinvoice.change-form .invoice-items-summary {
+      display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px;
+      background:var(--darkened-bg,#fafafb);
+    }
+    body.model-partnertaxinvoice.change-form .invoice-items-toolbar strong { font-size:13px; }
+    body.model-partnertaxinvoice.change-form .invoice-items-toolbar button,
+    body.model-partnertaxinvoice.change-form .invoice-item-remove {
+      min-height:34px; padding:6px 11px; border:1px solid var(--border-color,#dedfe5);
+      border-radius:7px; background:var(--body-bg,#fff); color:var(--body-fg,#292b31); cursor:pointer;
+    }
+    body.model-partnertaxinvoice.change-form .invoice-items-toolbar button:hover,
+    body.model-partnertaxinvoice.change-form .invoice-item-remove:hover { border-color:#b3213b; color:#a51e36; }
+    body.model-partnertaxinvoice.change-form .invoice-items-scroll { overflow-x:auto; }
+    body.model-partnertaxinvoice.change-form .invoice-items-table { width:100%; min-width:690px; border-collapse:collapse; }
+    body.model-partnertaxinvoice.change-form .invoice-items-table th,
+    body.model-partnertaxinvoice.change-form .invoice-items-table td {
+      padding:9px 10px; border-bottom:1px solid var(--hairline-color,#ececf0); text-align:left; vertical-align:middle;
+    }
+    body.model-partnertaxinvoice.change-form .invoice-items-table th { color:var(--body-quiet-color,#727680); font-size:11px; white-space:nowrap; }
+    body.model-partnertaxinvoice.change-form .invoice-items-table td input {
+      min-height:36px!important; padding:7px 9px!important; font-size:12px;
+    }
+    body.model-partnertaxinvoice.change-form .invoice-items-table td:nth-child(2),
+    body.model-partnertaxinvoice.change-form .invoice-items-table td:nth-child(3),
+    body.model-partnertaxinvoice.change-form .invoice-items-table td:nth-child(4) { width:120px; }
+    body.model-partnertaxinvoice.change-form .invoice-items-table td:nth-child(5) { width:110px; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    body.model-partnertaxinvoice.change-form .invoice-items-summary { border-top:1px solid var(--border-color,#dedfe5); font-size:12px; }
+    body.model-partnertaxinvoice.change-form .invoice-items-summary strong { font-size:15px; font-variant-numeric:tabular-nums; }
+    body.model-partnertaxinvoice.change-form .invoice-items-message { margin:10px 14px; color:var(--body-quiet-color,#727680); font-size:11px; line-height:1.55; }
+    body.model-partnertaxinvoice.change-form .invoice-items-editor .errorlist { margin:10px 14px; }
+    body.model-partnertaxinvoice.change-form .invoice-items-empty { padding:18px 14px; color:var(--body-quiet-color,#727680); font-size:12px; text-align:center; }
     body.model-partnertaxinvoice.change-form .invoice-section .readonly {
       color:var(--body-quiet-color,#686c75); font-size:12px; line-height:1.55;
     }
@@ -131,12 +166,14 @@
       var form = document.getElementById("partnertaxinvoice_form");
       if (!form || form.dataset.invoiceLayoutReady === "true") return;
       form.dataset.invoiceLayoutReady = "true";
+      var isNewInvoice = {% if original %}false{% else %}true{% endif %};
+      var workOrderOptionsUrl = "{% url 'partner_admin:partner-taxinvoice-work-orders' %}";
       var groups = [
-        { cls: "invoice-section--basics", index: "01", title: "거래 기본 정보", note: "협력업체와 연결할 정비 작업, 발행 조건을 지정합니다.", fields: ["partner","work_order","status","tax_type","purpose","write_date"] },
-        { cls: "invoice-section--seller", index: "02", title: "공급자 정보", note: "세금계산서를 발행하는 사업자의 등록 정보를 확인합니다.", fields: ["seller_business_number","seller_name","seller_representative","seller_email","seller_address"] },
-        { cls: "invoice-section--buyer", index: "03", title: "공급받는자 정보", note: "세금계산서를 받을 거래처의 정보를 입력합니다.", fields: ["buyer_business_number","buyer_name","buyer_representative","buyer_email","buyer_address"] },
-        { cls: "invoice-section--amounts", index: "04", title: "금액 및 품목", note: "공급가액·세액·합계가 일치하는지 확인하고 품목 내역을 검토합니다.", fields: ["supply_cost_krw","tax_krw","total_krw","items"] },
-        { cls: "invoice-section--provider", index: "05", title: "발행 대행 정보", note: "외부 발행 대행사의 문서 식별 정보를 관리합니다.", fields: ["provider_name","provider_user_id","provider_document_id","provider_error_code"] },
+        { cls: "invoice-section--basics", index: "01", title: "거래 기본 정보", note: "협력업체를 선택하면 해당 업체의 작업만 표시됩니다.", fields: ["partner","work_order","status","tax_type","purpose","write_date"] },
+        { cls: "invoice-section--seller", index: "02", title: "공급자 정보", note: "실제 발행에 사용할 사업자 정보를 정확히 입력하세요.", fields: ["seller_business_number","seller_name","seller_representative","seller_email","seller_address"] },
+        { cls: "invoice-section--buyer", index: "03", title: "공급받는자 정보", note: "연결한 정비 작업의 고객 정보를 불러온 뒤 확인할 수 있습니다.", fields: ["buyer_business_number","buyer_name","buyer_representative","buyer_email","buyer_address"] },
+        { cls: "invoice-section--amounts", index: "04", title: "금액 및 품목", note: "품목별 수량·단가를 입력하면 금액이 계산됩니다. 과세 유형에 맞춰 세액과 합계도 확인하세요.", fields: ["supply_cost_krw","tax_krw","total_krw","items"] },
+        { cls: "invoice-section--provider", index: "05", title: "발행 대행 정보", note: "발행 전 팝빌 사용자 ID와 사업자 정보를 확인하세요.", fields: ["provider_name","provider_user_id","provider_document_id","provider_error_code"] },
         { cls: "invoice-section--records", index: "06", title: "등록 및 발행 이력", note: "저장과 외부 발행 처리 결과가 기록됩니다.", fields: ["issued_at","created_by_display","created_at"] }
       ];
       var saveButton = form.querySelector('.submit-row input[name="_save"]');
@@ -167,6 +204,240 @@
         rows[0].parentNode.insertBefore(section, rows[0]);
         rows.forEach(function (row) { body.appendChild(row); });
       });
+
+      function field(name) { return form.querySelector("#id_" + name); }
+      var partnerSelect = field("partner");
+      var workOrderSelect = field("work_order");
+      var taxTypeSelect = field("tax_type");
+      var supplyInput = field("supply_cost_krw");
+      var taxInput = field("tax_krw");
+      var totalInput = field("total_krw");
+      var source = field("items");
+      if (!partnerSelect || !workOrderSelect || !source) return;
+
+      var sourceRow = source.closest(".form-row");
+      var editor = document.createElement("div");
+      editor.className = "invoice-items-editor";
+      editor.setAttribute("aria-label","품목 입력");
+      var toolbar = document.createElement("div");
+      toolbar.className = "invoice-items-toolbar";
+      var toolbarTitle = document.createElement("strong");
+      toolbarTitle.textContent = "계산서 품목";
+      var addButton = document.createElement("button");
+      addButton.type = "button";
+      addButton.textContent = "＋ 품목 추가";
+      toolbar.append(toolbarTitle,addButton);
+      var scroll = document.createElement("div");
+      scroll.className = "invoice-items-scroll";
+      var table = document.createElement("table");
+      table.className = "invoice-items-table";
+      table.innerHTML = "<thead><tr><th scope='col'>품목명</th><th scope='col'>수량</th><th scope='col'>단가</th><th scope='col'>품목 금액</th><th scope='col'>삭제</th></tr></thead>";
+      var tbody = document.createElement("tbody");
+      table.appendChild(tbody);
+      scroll.appendChild(table);
+      var empty = document.createElement("div");
+      empty.className = "invoice-items-empty";
+      empty.textContent = "정비 작업을 선택하면 품목이 불러와집니다. 직접 입력할 수도 있습니다.";
+      var summary = document.createElement("div");
+      summary.className = "invoice-items-summary";
+      var summaryLabel = document.createElement("span");
+      summaryLabel.textContent = "품목 합계";
+      var summaryValue = document.createElement("strong");
+      summaryValue.textContent = "0원";
+      summary.append(summaryLabel,summaryValue);
+      var message = document.createElement("p");
+      message.className = "invoice-items-message";
+      message.textContent = "품목 합계와 공급가액·세액·합계는 각각 확인해 주세요. 저장만으로 전자세금계산서가 발행되지는 않습니다.";
+      editor.append(toolbar,empty,scroll,summary,message);
+      sourceRow.parentNode.insertBefore(editor,sourceRow.nextSibling);
+
+      var sourceHelp = sourceRow.querySelector(".help, .helptext");
+      if (sourceHelp) sourceHelp.hidden = true;
+      var sourceErrors = sourceRow.querySelector(".errorlist");
+      if (sourceErrors) editor.insertBefore(sourceErrors,toolbar);
+      sourceRow.hidden = true;
+
+      function won(value) {
+        var number = Number(value) || 0;
+        return Math.round(number).toLocaleString("ko-KR") + "원";
+      }
+      function roundTax(supply) { return Math.floor((Number(supply) || 0) * 0.1 + 0.5); }
+      function computeLine(row) {
+        var quantity = Number(row.querySelector('[data-role="quantity"]').value);
+        var unitPrice = Number(row.querySelector('[data-role="unit-price"]').value);
+        var amount = (Number.isFinite(quantity) && Number.isFinite(unitPrice)) ? Math.round(quantity * unitPrice) : 0;
+        row.querySelector('[data-role="amount"]').textContent = won(amount);
+        return amount;
+      }
+      function collectItems() {
+        return Array.from(tbody.querySelectorAll("tr")).map(function (row) {
+          var description = row.querySelector('[data-role="description"]').value.trim();
+          if (!description) return null;
+          var quantity = row.querySelector('[data-role="quantity"]').value || "1";
+          var unitPrice = Number(row.querySelector('[data-role="unit-price"]').value) || 0;
+          return {description:description, quantity:quantity, unit_price_krw:unitPrice, amount_krw:computeLine(row)};
+        }).filter(Boolean);
+      }
+      function updateItems() {
+        var rows = Array.from(tbody.querySelectorAll("tr"));
+        empty.hidden = rows.length > 0;
+        var items = collectItems();
+        source.value = JSON.stringify(items, null, 2);
+        summaryValue.textContent = won(items.reduce(function (sum,item) { return sum + item.amount_krw; },0));
+      }
+      function addItem(item) {
+        item = item || {};
+        var row = document.createElement("tr");
+        var descriptionCell = document.createElement("td");
+        var description = document.createElement("input");
+        description.type = "text";
+        description.maxLength = 100;
+        description.placeholder = "예: 엔진오일 교환";
+        description.setAttribute("aria-label","품목명");
+        description.dataset.role = "description";
+        description.value = item.description || "";
+        descriptionCell.appendChild(description);
+
+        var quantityCell = document.createElement("td");
+        var quantity = document.createElement("input");
+        quantity.type = "number";
+        quantity.min = "0.01";
+        quantity.step = "0.01";
+        quantity.value = item.quantity || "1";
+        quantity.setAttribute("aria-label","수량");
+        quantity.dataset.role = "quantity";
+        quantityCell.appendChild(quantity);
+
+        var unitCell = document.createElement("td");
+        var unitPrice = document.createElement("input");
+        unitPrice.type = "number";
+        unitPrice.min = "0";
+        unitPrice.step = "1";
+        unitPrice.placeholder = "0";
+        unitPrice.value = item.unit_price_krw ?? "";
+        unitPrice.setAttribute("aria-label","단가(원)");
+        unitPrice.dataset.role = "unit-price";
+        unitCell.appendChild(unitPrice);
+
+        var amountCell = document.createElement("td");
+        amountCell.textContent = won(item.amount_krw || 0);
+        amountCell.dataset.role = "amount";
+        var removeCell = document.createElement("td");
+        var removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "invoice-item-remove";
+        removeButton.textContent = "삭제";
+        removeButton.setAttribute("aria-label","품목 삭제");
+        removeButton.addEventListener("click",function () { row.remove(); updateItems(); });
+        removeCell.appendChild(removeButton);
+        row.append(descriptionCell,quantityCell,unitCell,amountCell,removeCell);
+        [description,quantity,unitPrice].forEach(function (input) {
+          input.addEventListener("input",updateItems);
+        });
+        tbody.appendChild(row);
+        computeLine(row);
+      }
+      function renderItems(items) {
+        tbody.replaceChildren();
+        (Array.isArray(items) ? items : []).forEach(addItem);
+        updateItems();
+      }
+      addButton.addEventListener("click",function () { addItem(); updateItems(); tbody.lastElementChild?.querySelector('[data-role="description"]').focus(); });
+      try {
+        var initialItems = JSON.parse(source.value || "[]");
+        renderItems(initialItems);
+      } catch (error) {
+        sourceRow.hidden = false;
+        editor.hidden = true;
+      }
+
+      function updateTotalsFromSupply() {
+        if (!supplyInput || !taxInput || !totalInput) return;
+        var supply = Number(supplyInput.value) || 0;
+        var taxType = taxTypeSelect ? taxTypeSelect.value : "taxable";
+        var tax = taxType === "taxable" ? roundTax(supply) : 0;
+        taxInput.value = tax;
+        totalInput.value = supply + tax;
+      }
+      function updateTotalsFromGross(gross) {
+        if (!supplyInput || !taxInput || !totalInput) return;
+        gross = Number(gross) || 0;
+        if (taxTypeSelect && taxTypeSelect.value === "taxable") {
+          supplyInput.value = Math.floor(gross / 1.1 + 0.5);
+          taxInput.value = gross - Number(supplyInput.value);
+        } else {
+          supplyInput.value = gross;
+          taxInput.value = 0;
+        }
+        totalInput.value = gross;
+      }
+      if (taxInput) taxInput.readOnly = true;
+      if (totalInput) totalInput.readOnly = true;
+      if (supplyInput) supplyInput.addEventListener("input",updateTotalsFromSupply);
+      if (taxTypeSelect) taxTypeSelect.addEventListener("change",function () { updateTotalsFromGross(totalInput ? totalInput.value : 0); });
+
+      function putValue(name,value) {
+        var input = field(name);
+        if (input && value !== undefined && value !== null) input.value = value;
+      }
+      var currentPartnerId = partnerSelect.value;
+      var initialWorkOrderId = workOrderSelect.value;
+      async function loadWorkOrders(partnerId,preserveId) {
+        var selectedId = preserveId || "";
+        workOrderSelect.replaceChildren();
+        var placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "작업을 선택하세요";
+        workOrderSelect.appendChild(placeholder);
+        if (!partnerId) {
+          placeholder.textContent = "업체를 먼저 선택하세요";
+          workOrderSelect.disabled = true;
+          return;
+        }
+        workOrderSelect.disabled = true;
+        placeholder.textContent = "작업 목록을 불러오는 중…";
+        try {
+          var response = await fetch(workOrderOptionsUrl + "?partner_id=" + encodeURIComponent(partnerId), {credentials:"same-origin",headers:{"Accept":"application/json"}});
+          var payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "작업 목록을 불러오지 못했습니다.");
+          workOrderSelect.replaceChildren();
+          placeholder.textContent = payload.work_orders.length ? "작업을 선택하세요" : "연결 가능한 작업이 없습니다";
+          workOrderSelect.appendChild(placeholder);
+          payload.work_orders.forEach(function (order) {
+            var option = document.createElement("option");
+            option.value = order.id;
+            option.textContent = order.label;
+            option.dataset.order = JSON.stringify(order);
+            workOrderSelect.appendChild(option);
+          });
+          workOrderSelect.disabled = false;
+          if (selectedId && Array.from(workOrderSelect.options).some(function (option) { return option.value === String(selectedId); })) {
+            workOrderSelect.value = String(selectedId);
+            if (isNewInvoice) applySelectedOrder();
+          }
+        } catch (error) {
+          placeholder.textContent = error.message || "작업 목록을 불러오지 못했습니다";
+          workOrderSelect.disabled = false;
+        }
+      }
+      function applySelectedOrder() {
+        var option = workOrderSelect.selectedOptions[0];
+        if (!option || !option.dataset.order) return;
+        var order = JSON.parse(option.dataset.order);
+        ["buyer_name","buyer_business_number","buyer_representative","buyer_email","buyer_address"].forEach(function (name) {
+          putValue(name,order[name] || "");
+        });
+        updateTotalsFromGross(order.total_krw);
+        renderItems(order.items || []);
+      }
+      partnerSelect.addEventListener("change",function () {
+        currentPartnerId = partnerSelect.value;
+        workOrderSelect.value = "";
+        loadWorkOrders(currentPartnerId,"");
+      });
+      workOrderSelect.addEventListener("change",applySelectedOrder);
+      loadWorkOrders(currentPartnerId,initialWorkOrderId);
+      form.addEventListener("submit",updateItems);
     }());
   </script>
 {% endblock %}
