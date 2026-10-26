@@ -581,6 +581,7 @@ class PartnerBookingAdmin(admin.ModelAdmin):
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
+        extra_context["title"] = "업체 예약"
         today = timezone.localdate()
         year = request.GET.get("scheduled_at__year", "")
         month_number = request.GET.get("scheduled_at__month", "")
