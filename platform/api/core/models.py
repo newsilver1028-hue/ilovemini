@@ -612,6 +612,7 @@ class PartnerStockMovement(models.Model):
 
     class Reason(models.TextChoices):
         PURCHASE = "purchase", "부품 매입"
+        REPAIR_USE = "repair_use", "정비 사용"
         ADJUSTMENT = "adjustment", "재고 조정"
         RETURN = "return", "반품"
         DAMAGE = "damage", "파손·폐기"
@@ -620,6 +621,7 @@ class PartnerStockMovement(models.Model):
     partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="stock_movements", verbose_name="협력업체")
     part = models.ForeignKey(PartnerPart, on_delete=models.PROTECT, related_name="movements", verbose_name="부품")
     purchase = models.ForeignKey(PartnerPurchaseLine, null=True, blank=True, on_delete=models.PROTECT, related_name="stock_movements")
+    work_order = models.ForeignKey(PartnerWorkOrder, null=True, blank=True, on_delete=models.PROTECT, related_name="stock_movements", verbose_name="연결 작업")
     direction = models.CharField("구분", max_length=8, choices=Direction.choices)
     reason = models.CharField("사유", max_length=16, choices=Reason.choices, default=Reason.ADJUSTMENT)
     quantity = models.PositiveIntegerField("수량", validators=[MinValueValidator(1)])
