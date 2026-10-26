@@ -1,0 +1,11 @@
+{% extends "admin/change_form.html" %}
+{% block object-tools-items %}
+  {% if original %}
+    <li>
+      <form method="post" action="{% url 'partner_admin:partner-pos-rotate-token' original.pk %}" style="display:inline">
+        {% csrf_token %}<button type="submit" class="button">POS 토큰 발급·교체</button>
+      </form>
+    </li>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}
