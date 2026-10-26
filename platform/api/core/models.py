@@ -477,7 +477,8 @@ class PartnerBooking(models.Model):
         indexes = [models.Index(fields=["partner", "scheduled_at", "status"], name="core_partne_partner_427ead_idx")]
 
     def __str__(self):
-        return f"{self.partner} · {self.scheduled_at:%Y-%m-%d %H:%M} · {self.get_status_display()}"
+        scheduled_at = timezone.localtime(self.scheduled_at)
+        return f"{self.partner} · {scheduled_at:%Y-%m-%d %H:%M} · {self.get_status_display()}"
 
 
 class PartnerServiceDuration(models.Model):
