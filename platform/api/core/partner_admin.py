@@ -13,6 +13,7 @@ from datetime import datetime, time, timedelta
 from .models import (
     LedgerEntry,
     LedgerEvidence,
+    Partner,
     PartnerBooking,
     PartnerStaff,
 )
@@ -48,6 +49,7 @@ class PartnerAdminSite(AdminSite):
     def each_context(self, request):
         context = super().each_context(request)
         context["is_partner_admin"] = True
+        context["partner_application_options"] = Partner.objects.filter(is_active=True).order_by("name", "branch_label")
         context["partner_web_push_public_key"] = (
             getattr(settings, "WEB_PUSH_VAPID_PUBLIC_KEY", "") if self.has_permission(request) else ""
         )

@@ -20,7 +20,7 @@ from .models import (
     LedgerEntry, Notice, Offer, Partner, PartnerImage, PartnerReview, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
     VehicleOwnership, VehicleTransferCode, AttendanceCheckin, PointTransaction, PointRedemptionRequest,
     SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest, AppReviewAccount, AppleIdentity,
-    PartnerServiceCategoryOption, PartnerBooking, AppRuntimeSettings,
+    PartnerServiceCategoryOption, PartnerBooking, AppRuntimeSettings, PartnerAccessRequest,
 )
 
 
@@ -934,6 +934,66 @@ class PartnerStaffAdmin(AdminCalendarMixin, admin.ModelAdmin):
     search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "user__apple_identity__cafe_nickname", "=user__id", "partner__name")
     readonly_fields = ("created_at",)
     date_hierarchy = "created_at"
+
+
+class PartnerAccessRequestAdminForm(forms.ModelForm):
+    class Meta:
+        model = PartnerAccessRequest
+        fields = "__all__"
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("status") == PartnerAccessRequest.Status.APPROVED:
+            partner = cleaned.get("partner")
+            if partner and not partner.is_active:
+                self.add_error("partner", "활성화된 업체만 승인할 수 있습니다.")
+            if not (cleaned.get("can_verify_records") or cleaned.get("can_manage_bookings")):
+                raise forms.ValidationError("승인할 권한을 하나 이상 선택해 주세요.")
+            user = cleaned.get("user")
+            if user and (not user.is_active or user.is_superuser):
+                self.add_error("user", "비활성 또는 최고관리자 계정은 협력업체 담당자로 승인할 수 없습니다.")
+        return cleaned
+
+
+@admin.register(PartnerAccessRequest)
+class PartnerAccessRequestAdmin(AdminCalendarMixin, admin.ModelAdmin):
+    form = PartnerAccessRequestAdminForm
+    list_display = ("applicant", "partner", "status", "can_manage_bookings", "can_verify_records", "created_at", "reviewed_at")
+    list_filter = ("status", "partner", "created_at")
+    search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "partner__name")
+    readonly_fields = ("partner", "user", "created_at", "updated_at", "reviewed_by", "reviewed_at")
+    date_hierarchy = "created_at"
+    save_on_top = True
+
+    @admin.display(description="신청자")
+    def applicant(self, obj):
+        return member_nickname(obj.user)
+
+    def has_add_permission(self, request):
+        return False
+
+    def save_model(self, request, obj, form, change):
+        with transaction.atomic():
+            if obj.status == PartnerAccessRequest.Status.PENDING:
+                obj.reviewed_by = None
+                obj.reviewed_at = None
+            else:
+                obj.reviewed_by = request.user
+                obj.reviewed_at = timezone.now()
+            super().save_model(request, obj, form, change)
+            if obj.status == PartnerAccessRequest.Status.APPROVED:
+                user = obj.user
+                PartnerStaff.objects.update_or_create(
+                    partner=obj.partner,
+                    user=user,
+                    defaults={
+                        "can_manage_bookings": obj.can_manage_bookings,
+                        "can_verify_records": obj.can_verify_records,
+                        "is_active": True,
+                    },
+                )
+            else:
+                PartnerStaff.objects.filter(partner=obj.partner, user=obj.user).update(is_active=False)
 
 
 @admin.register(Offer)

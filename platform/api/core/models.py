@@ -422,6 +422,32 @@ class PartnerStaff(models.Model):
         return f"{self.partner} · {self.user}"
 
 
+class PartnerAccessRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "승인 대기"
+        APPROVED = "approved", "승인"
+        REJECTED = "rejected", "반려"
+
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="access_requests", verbose_name="신청 업체")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="partner_access_requests", verbose_name="네이버 계정")
+    status = models.CharField("처리 상태", max_length=12, choices=Status.choices, default=Status.PENDING)
+    can_verify_records = models.BooleanField("정비기록 인증 권한", default=False)
+    can_manage_bookings = models.BooleanField("예약 관리 권한", default=False)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="reviewed_partner_access_requests", verbose_name="처리 관리자")
+    reviewed_at = models.DateTimeField("처리 일시", null=True, blank=True)
+    created_at = models.DateTimeField("신청 일시", auto_now_add=True)
+    updated_at = models.DateTimeField("수정 일시", auto_now=True)
+
+    class Meta:
+        ordering = ["status", "-created_at", "-id"]
+        verbose_name = "협력업체 권한 신청"
+        verbose_name_plural = "협력업체 권한 신청"
+        constraints = [models.UniqueConstraint(fields=["partner", "user"], name="unique_partner_access_request")]
+
+    def __str__(self):
+        return f"{self.partner} · {self.user} · {self.get_status_display()}"
+
+
 class PartnerBooking(models.Model):
     class Status(models.TextChoices):
         REQUESTED = "requested", "접수 대기"
@@ -525,6 +551,7 @@ class NaverOAuthAttempt(models.Model):
     state_digest = models.CharField(max_length=64, unique=True)
     ticket_digest = models.CharField(max_length=64, unique=True, null=True, blank=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.CASCADE)
+    partner = models.ForeignKey(Partner, null=True, blank=True, on_delete=models.CASCADE, related_name="naver_login_attempts")
     profile_data = models.JSONField(default=dict, blank=True)
     provider_subject = models.CharField(max_length=64, blank=True)
     nickname = models.CharField(max_length=80, blank=True)

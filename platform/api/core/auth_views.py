@@ -28,7 +28,7 @@ from .models import (NaverOAuthAttempt, MemberConsent, NaverIdentity, AppleIdent
                      VehicleTransferCode,
                      LedgerEvidence, PointTransaction, RecordCorrectionRequest,
                      PushDevice, AttendanceCheckin, Reminder, PartnerBooking, PartnerReview,
-                     MemberPreference, AppReviewAccount, PartnerStaff, Partner)
+                     MemberPreference, AppReviewAccount, PartnerStaff, Partner, PartnerAccessRequest)
 
 from .naver_auth import digest, exchange_code, get_profile, jwt_pair, sync_identity, user_for_profile, NaverUnavailable
 from .apple_auth import (apple_revocation_configured, verify_apple_identity,
@@ -51,9 +51,14 @@ class PartnerNaverLoginStartView(APIView):
         if not settings.NAVER_CLIENT_ID or not settings.NAVER_CLIENT_SECRET or not settings.NAVER_REDIRECT_URI:
             messages.error(request, "네이버 로그인 설정을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.")
             return redirect("partner_admin:login")
+        partner_id = request.query_params.get("partner_id", "")
+        partner = Partner.objects.filter(pk=partner_id, is_active=True).first()
+        if partner is None:
+            return partner_login_redirect("application_invalid")
         state = secrets.token_urlsafe(32)
         NaverOAuthAttempt.objects.create(
             flow=NaverOAuthAttempt.Flow.PARTNER_ADMIN,
+            partner=partner,
             state_digest=digest(state),
             expires_at=timezone.now() + timedelta(minutes=10),
         )
@@ -70,7 +75,7 @@ def partner_login_redirect(error):
     return redirect(settings.ADMIN_CUSTOM_ORIGIN + "/partner-admin/login/?naver_error=" + error)
 
 
-def partner_user_for_naver_profile(profile):
+def partner_user_for_naver_profile(profile, partner_id):
     identity = NaverIdentity.objects.select_related("user").filter(
         subject=str(profile.get("id", ""))
     ).first()
@@ -79,6 +84,7 @@ def partner_user_for_naver_profile(profile):
     user = identity.user
     staff = PartnerStaff.objects.filter(
         user=user,
+        partner_id=partner_id,
         is_active=True,
         partner__is_active=True,
     ).filter(models.Q(can_manage_bookings=True) | models.Q(can_verify_records=True)).exists()
@@ -121,10 +127,35 @@ def complete_partner_naver_callback(attempt, state, code):
         attempt.delete()
         return partner_login_redirect("provider")
 
-    match = partner_user_for_naver_profile(profile)
+    match = partner_user_for_naver_profile(profile, attempt.partner_id)
     if match is None:
+        if not attempt.partner_id:
+            attempt.delete()
+            return partner_login_redirect("application_invalid")
+        if not Partner.objects.filter(pk=attempt.partner_id, is_active=True).exists():
+            attempt.delete()
+            return partner_login_redirect("application_invalid")
+        # Create only the provider identity needed to associate the request. Full
+        # app sign-in still requires the member's separate terms/privacy consent.
+        applicant = user_for_profile({"id": str(profile["id"]), "nickname": str(profile.get("nickname", ""))[:80]})
+        if not applicant.is_active or applicant.is_superuser:
+            attempt.delete()
+            return partner_login_redirect("not_registered")
+        application, created = PartnerAccessRequest.objects.get_or_create(
+            partner_id=attempt.partner_id,
+            user=applicant,
+            defaults={"status": PartnerAccessRequest.Status.PENDING},
+        )
+        if not created and application.status != PartnerAccessRequest.Status.PENDING:
+            application.status = PartnerAccessRequest.Status.PENDING
+            application.can_verify_records = False
+            application.can_manage_bookings = False
+            application.reviewed_by = None
+            application.reviewed_at = None
+        if not created:
+            application.save(update_fields=["status", "can_verify_records", "can_manage_bookings", "reviewed_by", "reviewed_at", "updated_at"])
         attempt.delete()
-        return partner_login_redirect("not_registered")
+        return partner_login_redirect("approval_pending")
     identity, user = match
     sync_identity(identity, profile)
     ticket = secrets.token_urlsafe(32)
@@ -159,7 +190,7 @@ class PartnerNaverLoginCompleteView(View):
                 return partner_login_redirect("expired")
             user = attempt.user
             staff = PartnerStaff.objects.filter(
-                user=user, is_active=True, partner__is_active=True,
+                user=user, partner_id=attempt.partner_id, is_active=True, partner__is_active=True,
             ).filter(models.Q(can_manage_bookings=True) | models.Q(can_verify_records=True)).exists()
             if not staff or not user.is_active or user.is_superuser:
                 attempt.delete()
