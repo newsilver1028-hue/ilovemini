@@ -8,6 +8,7 @@ from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
 from django.utils.html import format_html_join
 from django.utils import timezone
+from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from django.conf import settings
 from datetime import datetime, time, timedelta
@@ -121,7 +122,7 @@ class PartnerAdminSite(AdminSite):
             ),
         ] + super().get_urls()
 
-    @never_cache
+    @method_decorator(never_cache)
     def index(self, request, extra_context=None):
         context = self.each_context(request)
         context.update(extra_context or {})
