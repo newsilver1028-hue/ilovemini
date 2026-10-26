@@ -14,6 +14,7 @@ from core.auth_views import NaverStartView, NaverCallbackView, NaverCompleteView
 from core.partner_admin import partner_admin_site
 from core.privacy_views import privacy_policy, terms_of_service
 from core.partner_push_views import web_push_subscribe, web_push_unsubscribe, partner_service_worker
+from core.partner_pos_views import partner_pos_event
 from core.media_views import app_content_image, season_banner_image, partner_image
 
 router = DefaultRouter()
@@ -60,6 +61,7 @@ urlpatterns = [
     path("partner-admin/naver/complete/", PartnerNaverLoginCompleteView.as_view(), name="partner_naver_complete"),
     path("partner-admin/push/subscribe/", web_push_subscribe, name="partner_web_push_subscribe"),
     path("partner-admin/push/unsubscribe/", web_push_unsubscribe, name="partner_web_push_unsubscribe"),
+    path("api/partner-pos/events/", partner_pos_event, name="partner_pos_event"),
     path("partner-admin/service-worker.js", partner_service_worker, name="partner_service_worker"),
     path("partner-admin/", partner_admin_site.urls),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),

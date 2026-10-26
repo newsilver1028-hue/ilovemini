@@ -747,6 +747,111 @@ class PartnerFinancialEntry(models.Model):
     def __str__(self):
         return f"{self.get_kind_display()} · {self.category} · {self.amount_krw:,}원"
 
+
+class PartnerPosIntegration(models.Model):
+    """Per-shop receiver for normalized POS payment events."""
+
+    partner = models.OneToOneField(Partner, on_delete=models.CASCADE, related_name="pos_integration", verbose_name="협력업체")
+    provider_name = models.CharField("POS/VAN 제공사", max_length=80, blank=True)
+    token_hash = models.CharField("Webhook 토큰 해시", max_length=64, blank=True, editable=False)
+    is_active = models.BooleanField("연동 사용", default=False)
+    last_received_at = models.DateTimeField("마지막 수신", null=True, blank=True)
+    created_at = models.DateTimeField("등록일", auto_now_add=True)
+    updated_at = models.DateTimeField("수정일", auto_now=True)
+
+    class Meta:
+        verbose_name = "POS 연동"
+        verbose_name_plural = "POS 연동"
+
+    def __str__(self):
+        return f"{self.partner} · {self.provider_name or 'POS'}"
+
+
+class PartnerPayment(models.Model):
+    class Method(models.TextChoices):
+        CARD = "card", "카드"
+        CASH = "cash", "현금"
+        TRANSFER = "transfer", "계좌이체"
+        EASY_PAY = "easy_pay", "간편결제"
+        OTHER = "other", "기타"
+
+    class Status(models.TextChoices):
+        APPROVED = "approved", "승인"
+        CANCELLED = "cancelled", "취소"
+
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="payments", verbose_name="협력업체")
+    work_order = models.ForeignKey(PartnerWorkOrder, on_delete=models.PROTECT, related_name="payments", verbose_name="정비 작업")
+    provider_name = models.CharField("POS/VAN 제공사", max_length=80, default="POS")
+    provider_transaction_id = models.CharField("거래 번호", max_length=120)
+    method = models.CharField("결제 수단", max_length=16, choices=Method.choices)
+    status = models.CharField("상태", max_length=12, choices=Status.choices, default=Status.APPROVED)
+    amount_krw = models.PositiveIntegerField("결제 금액(원)")
+    approval_code = models.CharField("승인 번호", max_length=80, blank=True)
+    paid_at = models.DateTimeField("결제 일시", default=timezone.now)
+    created_at = models.DateTimeField("수신 일시", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "POS 결제 내역"
+        verbose_name_plural = "POS 결제 내역"
+        ordering = ["-paid_at", "-pk"]
+        constraints = [models.UniqueConstraint(fields=["partner", "provider_name", "provider_transaction_id"], name="unique_partner_pos_transaction")]
+        indexes = [models.Index(fields=["partner", "paid_at"], name="partner_payment_day_idx")]
+
+    def __str__(self):
+        return f"{self.work_order} · {self.amount_krw:,}원 · {self.get_status_display()}"
+
+
+class PartnerTaxInvoice(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "발행 준비"
+        ISSUED = "issued", "외부 발행 확인"
+        CANCELLED = "cancelled", "취소"
+
+    class TaxType(models.TextChoices):
+        TAXABLE = "taxable", "과세"
+        EXEMPT = "exempt", "면세"
+        ZERO = "zero", "영세"
+
+    class Purpose(models.TextChoices):
+        BILL = "bill", "청구"
+        RECEIPT = "receipt", "영수"
+
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="tax_invoices", verbose_name="협력업체")
+    work_order = models.ForeignKey(PartnerWorkOrder, on_delete=models.PROTECT, related_name="tax_invoices", verbose_name="정비 작업")
+    status = models.CharField("상태", max_length=12, choices=Status.choices, default=Status.DRAFT)
+    tax_type = models.CharField("과세 유형", max_length=12, choices=TaxType.choices, default=TaxType.TAXABLE)
+    purpose = models.CharField("발행 목적", max_length=12, choices=Purpose.choices, default=Purpose.RECEIPT)
+    write_date = models.DateField("작성일", default=timezone.localdate)
+    seller_business_number = models.CharField("공급자 사업자번호", max_length=20, blank=True)
+    seller_name = models.CharField("공급자 상호", max_length=120, blank=True)
+    seller_representative = models.CharField("공급자 대표자", max_length=100, blank=True)
+    seller_address = models.CharField("공급자 주소", max_length=240, blank=True)
+    seller_email = models.EmailField("공급자 이메일", blank=True)
+    buyer_business_number = models.CharField("공급받는자 사업자번호", max_length=20)
+    buyer_name = models.CharField("공급받는자 상호", max_length=120)
+    buyer_representative = models.CharField("공급받는자 대표자", max_length=100, blank=True)
+    buyer_address = models.CharField("공급받는자 주소", max_length=240, blank=True)
+    buyer_email = models.EmailField("공급받는자 이메일", blank=True)
+    supply_cost_krw = models.PositiveIntegerField("공급가액(원)")
+    tax_krw = models.PositiveIntegerField("세액(원)")
+    total_krw = models.PositiveIntegerField("합계(원)")
+    items = models.JSONField("품목", default=list, blank=True)
+    provider_name = models.CharField("발행 대행사", max_length=80, blank=True)
+    provider_user_id = models.CharField("팝빌 사용자 ID", max_length=80, blank=True)
+    provider_document_id = models.CharField("대행사 문서번호", max_length=120, blank=True)
+    provider_error_code = models.CharField("최근 발행 오류 코드", max_length=40, blank=True)
+    issued_at = models.DateTimeField("외부 발행 확인일", null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="partner_tax_invoices_created")
+    created_at = models.DateTimeField("등록일", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "전자세금계산서 발행 준비"
+        verbose_name_plural = "전자세금계산서 발행 준비"
+        ordering = ["-write_date", "-pk"]
+
+    def __str__(self):
+        return f"{self.buyer_name} · {self.total_krw:,}원 · {self.get_status_display()}"
+
 class Offer(models.Model):
     partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="offers")
     title = models.CharField(max_length=140)

@@ -1,0 +1,14 @@
+{% extends "admin/base_site.html" %}
+{% load humanize %}
+{% block content %}
+  <div class="module">
+    <h2>전자세금계산서 실제 발행</h2>
+    <p><strong>{{ invoice.seller_name }}</strong> → <strong>{{ invoice.buyer_name }}</strong></p>
+    <p>작성일 {{ invoice.write_date }} · 공급가액 {{ invoice.supply_cost_krw|intcomma }}원 · 세액 {{ invoice.tax_krw|intcomma }}원 · 합계 {{ invoice.total_krw|intcomma }}원</p>
+    <p>발행 요청은 공급자 인증서·팝빌 계정과 포인트를 사용하며, 성공 시 공급받는자에게 이메일이 전송될 수 있습니다. 발행 완료 후에는 이 화면에서 취소할 수 없습니다.</p>
+    {% if is_test %}<p><strong>현재 팝빌 테스트 환경입니다.</strong> 테스트 발행도 입력된 공급받는자 메일로 알림이 갈 수 있으므로 실제 고객 메일을 넣지 마세요.</p>{% else %}<p><strong>운영 환경입니다.</strong> 실제 전자세금계산서 발행 요청이 전송됩니다.</p>{% endif %}
+    <form method="post">{% csrf_token %}
+      <div class="submit-row"><input type="submit" value="발행 요청 실행" class="default"> <a href="{{ change_url }}" class="button cancel-link">돌아가기</a></div>
+    </form>
+  </div>
+{% endblock %}

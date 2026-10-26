@@ -90,6 +90,9 @@ class PartnerAdminSite(AdminSite):
             "PartnerWorkOrder": "정비 접수·작업지시",
             "PartnerCustomer": "고객 대장",
             "PartnerVehicle": "업체 차량 대장",
+            "PartnerPosIntegration": "POS 연동 설정",
+            "PartnerPayment": "POS 결제 내역",
+            "PartnerTaxInvoice": "전자세금계산서 발행 준비",
             "LedgerEntry": "인증 정비기록",
         }
         for app in app_list:

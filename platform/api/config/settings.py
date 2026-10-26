@@ -6,6 +6,10 @@ from urllib.parse import urlparse, unquote, parse_qs
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-only-change-me-replace-before-deployment-0123456789")
 LEDGER_INTEGRITY_KEY = os.getenv("LEDGER_INTEGRITY_KEY", SECRET_KEY)
+POPBILL_LINK_ID = os.getenv("POPBILL_LINK_ID", "")
+POPBILL_SECRET_KEY = os.getenv("POPBILL_SECRET_KEY", "")
+POPBILL_IS_TEST = os.getenv("POPBILL_IS_TEST", "true").strip().lower() in {"1", "true", "yes", "on"}
+POPBILL_IP_RESTRICT = os.getenv("POPBILL_IP_RESTRICT", "false").strip().lower() in {"1", "true", "yes", "on"}
 # Fail closed when deployment configuration omits DJANGO_DEBUG. Local Docker
 # Compose files explicitly set DJANGO_DEBUG=1 for development.
 DEBUG = os.getenv("DJANGO_DEBUG", "0") == "1"
@@ -20,7 +24,7 @@ if ADMIN_CUSTOM_ORIGIN not in CSRF_TRUSTED_ORIGINS:
 
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
-    "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
+    "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles", "django.contrib.humanize",
     "rest_framework", "corsheaders", "core",
 ]
 MIDDLEWARE = [
