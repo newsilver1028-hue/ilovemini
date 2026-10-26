@@ -5,8 +5,9 @@ from django.db import transaction
 from django.utils import timezone
 
 from .member_display import member_nickname
-from .models import PartnerBooking, PartnerStaff, PartnerWorkOrder
+from .models import PartnerBooking, PartnerStaff, PartnerWorkOrder, Partner
 from .phase_one_admin import EstimateItemsWidget
+from .partner_admin import is_system_admin, staff_partners
 
 
 class PartnerWorkOrderForm(forms.ModelForm):
@@ -24,10 +25,13 @@ class PartnerWorkOrderForm(forms.ModelForm):
     def __init__(self, *args, request=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.request = request
-        staff = PartnerStaff.objects.filter(
-            user=request.user, is_active=True, can_manage_bookings=True, partner__is_active=True
-        ) if request and request.user.is_authenticated else PartnerStaff.objects.none()
-        partner_ids = staff.values_list("partner_id", flat=True)
+        if request and is_system_admin(request):
+            partner_ids = Partner.objects.filter(is_active=True).values_list("id", flat=True)
+        else:
+            staff = PartnerStaff.objects.filter(
+                user=request.user, is_active=True, can_manage_bookings=True, partner__is_active=True
+            ) if request and request.user.is_authenticated else PartnerStaff.objects.none()
+            partner_ids = staff.values_list("partner_id", flat=True)
         self.fields["partner"].queryset = self.fields["partner"].queryset.filter(pk__in=partner_ids)
         self.fields["booking"].queryset = PartnerBooking.objects.filter(partner_id__in=partner_ids).select_related(
             "partner", "vehicle", "customer__naver_identity", "customer__apple_identity"
@@ -98,9 +102,7 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).filter(
-            partner_id__in=PartnerStaff.objects.filter(
-                user=request.user, is_active=True, can_manage_bookings=True, partner__is_active=True
-            ).values_list("partner_id", flat=True)
+            partner_id__in=staff_partners(request, booking=True)
         ).select_related("partner", "booking", "created_by")
 
     def get_form(self, request, obj=None, **kwargs):
@@ -112,15 +114,13 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
         return RequestForm
 
     def has_module_permission(self, request):
-        return bool(request.user.is_authenticated and PartnerStaff.objects.filter(
+        return is_system_admin(request) or bool(request.user.is_authenticated and PartnerStaff.objects.filter(
             user=request.user, is_active=True, can_manage_bookings=True, partner__is_active=True
         ).exists())
 
     def has_view_permission(self, request, obj=None):
         allowed = self.has_module_permission(request)
-        return allowed and (obj is None or obj.partner_id in PartnerStaff.objects.filter(
-            user=request.user, is_active=True, can_manage_bookings=True, partner__is_active=True
-        ).values_list("partner_id", flat=True))
+        return allowed and (obj is None or obj.partner_id in staff_partners(request, booking=True))
 
     def has_add_permission(self, request):
         return self.has_module_permission(request)
@@ -135,9 +135,7 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
 
     @transaction.atomic
     def save_model(self, request, obj, form, change):
-        partner_ids = list(PartnerStaff.objects.filter(
-            user=request.user, is_active=True, can_manage_bookings=True, partner__is_active=True
-        ).values_list("partner_id", flat=True))
+        partner_ids = list(staff_partners(request, booking=True))
         if obj.partner_id not in partner_ids:
             raise PermissionDenied("담당 협력업체의 작업만 저장할 수 있습니다.")
         if change and not PartnerWorkOrder.objects.filter(pk=obj.pk, partner_id__in=partner_ids).exists():
