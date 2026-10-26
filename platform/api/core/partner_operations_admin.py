@@ -1,8 +1,17 @@
+import hashlib
+import secrets
+
 from django import forms
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import F
+from django.http import HttpResponseRedirect
+from django.urls import path, reverse
+from django.utils import timezone
+from django.conf import settings
+from django.shortcuts import render
+import logging
 
 from .models import (
     Partner,
@@ -14,6 +23,9 @@ from .models import (
     PartnerWorkOrder,
     PartnerCustomer,
     PartnerVehicle,
+    PartnerPosIntegration,
+    PartnerPayment,
+    PartnerTaxInvoice,
 )
 from .partner_admin import active_staff_for, is_system_admin, partner_admin_site, staff_partners
 
@@ -311,3 +323,278 @@ partner_admin_site.register(PartnerVehicle, PartnerVehicleAdmin)
 partner_admin_site.register(PartnerPurchaseLine, PartnerPurchaseAdmin)
 partner_admin_site.register(PartnerStockMovement, PartnerStockMovementAdmin)
 partner_admin_site.register(PartnerFinancialEntry, PartnerFinancialEntryAdmin)
+
+
+class PartnerPosIntegrationAdmin(PartnerScopedAdmin):
+    change_form_template = "admin/core/partnerposintegration/change_form.html"
+    list_display = ("partner", "provider_name", "is_active", "last_received_at")
+    fields = ("partner", "provider_name", "is_active", "webhook_url", "event_contract", "last_received_at", "created_at", "updated_at")
+    readonly_fields = ("webhook_url", "event_contract", "last_received_at", "created_at", "updated_at")
+
+    @admin.display(description="수신 주소")
+    def webhook_url(self, obj):
+        if not obj or not obj.pk:
+            return "저장 후 생성됩니다."
+        return "/api/partner-pos/events/"
+
+    @admin.display(description="수신 규격")
+    def event_contract(self, obj):
+        return 'POST JSON · Authorization: Bearer {토큰} · {"event_id":"거래고유값","work_order_id":123,"status":"approved|cancelled","method":"card|cash|transfer|easy_pay|other","amount_krw":55000,"approval_code":"승인번호","paid_at":"ISO-8601"} · 취소는 승인 거래의 event_id와 work_order_id를 그대로 사용합니다.'
+
+    def get_urls(self):
+        return [path("<path:object_id>/rotate-token/", self.admin_site.admin_view(self.rotate_token), name="partner-pos-rotate-token")] + super().get_urls()
+
+    def rotate_token(self, request, object_id):
+        change_url = reverse("partner_admin:core_partnerposintegration_change", args=[object_id])
+        if request.method != "POST":
+            return HttpResponseRedirect(change_url)
+        integration = self.get_object(request, object_id)
+        if integration is None or integration.partner_id not in self.allowed_partner_ids(request):
+            raise PermissionDenied("접근 권한이 없습니다.")
+        token = secrets.token_urlsafe(36)
+        integration.token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        integration.is_active = True
+        integration.save(update_fields=("token_hash", "is_active", "updated_at"))
+        self.message_user(
+            request,
+            f"POS 수신 토큰(이 화면에서만 표시): {token} · 주소: /api/partner-pos/events/ · POS 프로그램에 Bearer 토큰으로 설정하세요.",
+            level="success",
+        )
+        return HttpResponseRedirect(change_url)
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj:
+            form.base_fields["partner"].disabled = True
+        return form
+
+    def save_model(self, request, obj, form, change):
+        if change:
+            obj.partner_id = self.get_object(request, obj.pk).partner_id
+        super().save_model(request, obj, form, change)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class PartnerPaymentAdmin(PartnerScopedAdmin):
+    list_display = ("paid_at", "work_order", "provider_name", "method", "status", "amount_krw", "provider_transaction_id", "approval_code")
+    list_filter = ("provider_name", "method", "status", "paid_at")
+    search_fields = ("provider_transaction_id", "approval_code", "work_order__plate_number", "work_order__customer_name")
+    readonly_fields = tuple(field.name for field in PartnerPayment._meta.fields)
+    fields = ("partner", "work_order", "provider_name", "provider_transaction_id", "method", "status", "amount_krw", "approval_code", "paid_at", "created_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return self.has_view_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class PartnerTaxInvoiceForm(forms.ModelForm):
+    class Meta:
+        model = PartnerTaxInvoice
+        fields = "__all__"
+
+    def clean(self):
+        data = super().clean()
+        partner, work_order = data.get("partner"), data.get("work_order")
+        if partner and work_order and partner.pk != work_order.partner_id:
+            self.add_error("work_order", "정비 작업과 협력업체가 일치하지 않습니다.")
+        if data.get("total_krw") != (data.get("supply_cost_krw", 0) + data.get("tax_krw", 0)):
+            self.add_error("total_krw", "합계는 공급가액과 세액의 합이어야 합니다.")
+        for field in ("seller_business_number", "buyer_business_number"):
+            value = "".join(char for char in data.get(field, "") if char.isdigit())
+            if value and len(value) != 10:
+                self.add_error(field, "사업자등록번호 10자리를 확인해 주세요.")
+            data[field] = value
+        if data.get("status") == PartnerTaxInvoice.Status.ISSUED and not data.get("provider_document_id"):
+            self.add_error("provider_document_id", "실제 발행을 확인할 대행사 문서번호가 필요합니다.")
+        if data.get("status") == PartnerTaxInvoice.Status.ISSUED:
+            for field in ("seller_business_number", "seller_name", "seller_representative", "buyer_business_number", "buyer_name", "buyer_representative"):
+                if not data.get(field):
+                    self.add_error(field, "외부 발행 확인에는 공급자와 공급받는자 정보가 필요합니다.")
+        return data
+
+
+class PartnerTaxInvoiceAdmin(PartnerScopedAdmin):
+    form = PartnerTaxInvoiceForm
+    change_form_template = "admin/core/partnertaxinvoice/change_form.html"
+    list_display = ("write_date", "buyer_name", "work_order", "tax_type", "total_krw", "status", "provider_name", "provider_document_id")
+    list_filter = ("status", "tax_type", "purpose", "write_date")
+    search_fields = ("buyer_name", "buyer_business_number", "seller_name", "provider_document_id", "work_order__plate_number")
+    date_hierarchy = "write_date"
+    fields = (
+        "partner", "work_order", "status", "tax_type", "purpose", "write_date",
+        ("seller_business_number", "seller_name"), ("seller_representative", "seller_email"), "seller_address",
+        ("buyer_business_number", "buyer_name"), ("buyer_representative", "buyer_email"), "buyer_address",
+        ("supply_cost_krw", "tax_krw", "total_krw"), "items",
+        ("provider_name", "provider_user_id", "provider_document_id"), "provider_error_code", "issued_at", "created_by", "created_at",
+    )
+    readonly_fields = ("status", "provider_error_code", "issued_at", "created_by", "created_at")
+
+    def has_change_permission(self, request, obj=None):
+        return self.has_view_permission(request, obj) and (obj is None or obj.status == PartnerTaxInvoice.Status.DRAFT)
+
+    def get_urls(self):
+        return [path("<path:object_id>/issue/", self.admin_site.admin_view(self.issue_invoice), name="partner-taxinvoice-issue")] + super().get_urls()
+
+    def issue_invoice(self, request, object_id):
+        invoice = self.get_object(request, object_id)
+        if invoice is None or not self.has_change_permission(request, invoice):
+            raise PermissionDenied("접근 권한이 없습니다.")
+        if invoice.status != PartnerTaxInvoice.Status.DRAFT:
+            self.message_user(request, "발행 준비 상태 문서만 외부 발행할 수 있습니다.", level="error")
+            return HttpResponseRedirect(reverse("partner_admin:core_partnertaxinvoice_change", args=[invoice.pk]))
+        confirmation_context = {
+            **self.admin_site.each_context(request),
+            "title": "전자세금계산서 발행 확인",
+            "opts": self.model._meta,
+            "invoice": invoice,
+            "change_url": reverse("partner_admin:core_partnertaxinvoice_change", args=[invoice.pk]),
+            "is_test": getattr(settings, "POPBILL_IS_TEST", True),
+        }
+        if request.method != "POST":
+            return render(request, "admin/core/partnertaxinvoice/issue_confirm.html", confirmation_context)
+        if not getattr(settings, "POPBILL_LINK_ID", "") or not getattr(settings, "POPBILL_SECRET_KEY", ""):
+            self.message_user(request, "Render 환경변수 POPBILL_LINK_ID와 POPBILL_SECRET_KEY를 먼저 설정해 주세요.", level="error")
+            return HttpResponseRedirect(confirmation_context["change_url"])
+        if not invoice.provider_user_id:
+            self.message_user(request, "해당 업체의 팝빌 사용자 ID를 입력한 뒤 발행해 주세요.", level="error")
+            return HttpResponseRedirect(confirmation_context["change_url"])
+        if not all((invoice.seller_business_number, invoice.seller_name, invoice.seller_representative,
+                    invoice.buyer_business_number, invoice.buyer_name, invoice.buyer_representative)):
+            self.message_user(request, "공급자·공급받는자 사업자 정보가 모두 필요합니다.", level="error")
+            return HttpResponseRedirect(confirmation_context["change_url"])
+        try:
+            from popbill import PopbillException, Taxinvoice, TaxinvoiceDetail, TaxinvoiceService
+            service = TaxinvoiceService(settings.POPBILL_LINK_ID, settings.POPBILL_SECRET_KEY)
+            service.IsTest = getattr(settings, "POPBILL_IS_TEST", True)
+            service.IPRestrictOnOff = getattr(settings, "POPBILL_IP_RESTRICT", False)
+            service.UseStaticIP = False
+            service.UseLocalTimeYN = True
+            mgt_key = f"ILM-TI-{invoice.pk}"
+            tax_type = {
+                PartnerTaxInvoice.TaxType.TAXABLE: "과세",
+                PartnerTaxInvoice.TaxType.EXEMPT: "면세",
+                PartnerTaxInvoice.TaxType.ZERO: "영세",
+            }[invoice.tax_type]
+            document = Taxinvoice(
+                writeDate=invoice.write_date.strftime("%Y%m%d"),
+                chargeDirection="정과금", issueType="정발행",
+                purposeType="청구" if invoice.purpose == PartnerTaxInvoice.Purpose.BILL else "영수",
+                taxType=tax_type,
+                invoicerCorpNum="".join(ch for ch in invoice.seller_business_number if ch.isdigit()),
+                invoicerCorpName=invoice.seller_name, invoicerMgtKey=mgt_key,
+                invoicerCEOName=invoice.seller_representative,
+                invoicerAddr=invoice.seller_address or "", invoicerBizClass="", invoicerBizType="",
+                invoicerContactName=invoice.seller_representative, invoicerEmail=invoice.seller_email or "",
+                invoiceeType="사업자",
+                invoiceeCorpNum="".join(ch for ch in invoice.buyer_business_number if ch.isdigit()),
+                invoiceeCorpName=invoice.buyer_name, invoiceeCEOName=invoice.buyer_representative,
+                invoiceeAddr=invoice.buyer_address or "", invoiceeBizClass="", invoiceeBizType="",
+                invoiceeContactName1=invoice.buyer_representative, invoiceeEmail1=invoice.buyer_email or "",
+                supplyCostTotal=str(invoice.supply_cost_krw), taxTotal=str(invoice.tax_krw),
+                totalAmount=str(invoice.total_krw), invoicerSMSSendYN=False,
+            )
+            item_rows = invoice.items if isinstance(invoice.items, list) else []
+            normalized = [item for item in item_rows if isinstance(item, dict) and item.get("description")]
+            if not normalized:
+                normalized = [{"description": f"정비 작업 WO-{invoice.work_order_id}", "quantity": 1, "amount_krw": invoice.total_krw}]
+            normalized = normalized[:99]
+            detail_list = []
+            remaining_supply, remaining_tax = invoice.supply_cost_krw, invoice.tax_krw
+            gross_values = [max(0, int(item.get("amount_krw", 0))) for item in normalized]
+            gross_total = sum(gross_values) or invoice.total_krw
+            for index, (item, gross) in enumerate(zip(normalized, gross_values)):
+                is_last = index == len(normalized) - 1
+                supply = remaining_supply if is_last else round(invoice.supply_cost_krw * gross / gross_total)
+                tax = remaining_tax if is_last else round(invoice.tax_krw * gross / gross_total)
+                remaining_supply -= supply
+                remaining_tax -= tax
+                detail_list.append(TaxinvoiceDetail(
+                    serialNum=index + 1,
+                    purchaseDT=invoice.write_date.strftime("%Y%m%d"),
+                    itemName=str(item["description"])[:100], spec="",
+                    qty=str(item.get("quantity", 1)),
+                    unitCost=str(item.get("unit_price_krw", supply)),
+                    supplyCost=str(supply), tax=str(tax), remark="",
+                ))
+            document.detailList = detail_list
+            response = service.registIssue(
+                "".join(ch for ch in invoice.seller_business_number if ch.isdigit()),
+                document, False, False, "", "", "", invoice.provider_user_id
+            )
+            if getattr(response, "code", None) != 1:
+                code = str(getattr(response, "code", "발행오류"))[:40]
+                invoice.provider_error_code = code
+                invoice.save(update_fields=("provider_error_code",))
+                self.message_user(request, f"팝빌 발행 실패 ({code}). 문서 상태를 발행으로 변경하지 않았습니다.", level="error")
+                return HttpResponseRedirect(confirmation_context["change_url"])
+            invoice.status = PartnerTaxInvoice.Status.ISSUED
+            invoice.provider_name = "팝빌"
+            invoice.provider_document_id = getattr(response, "ntsConfirmNum", "") or mgt_key
+            invoice.issued_at = timezone.now()
+            invoice.provider_error_code = ""
+            invoice.save(update_fields=("status", "provider_name", "provider_document_id", "issued_at", "provider_error_code"))
+            self.message_user(request, f"팝빌 발행 요청을 처리했습니다. 문서번호: {invoice.provider_document_id}", level="success")
+        except ImportError:
+            self.message_user(request, "팝빌 SDK를 사용할 수 없습니다. 서버 배포 상태를 확인해 주세요.", level="error")
+        except Exception as exc:
+            code = str(getattr(exc, "code", "발행오류"))[:40]
+            invoice.provider_error_code = code
+            invoice.save(update_fields=("provider_error_code",))
+            logging.getLogger(__name__).exception("Tax invoice issue failed (invoice_id=%s, code=%s)", invoice.pk, code)
+            self.message_user(request, f"팝빌 발행 실패 ({code}). 업체 계정·인증서·충전 포인트와 입력 정보를 확인해 주세요.", level="error")
+        return HttpResponseRedirect(confirmation_context["change_url"])
+
+    def get_changeform_initial_data(self, request):
+        initial = super().get_changeform_initial_data(request)
+        order_id = request.GET.get("work_order")
+        if order_id:
+            order = PartnerWorkOrder.objects.select_related("partner", "customer").filter(
+                pk=order_id, partner_id__in=self.allowed_partner_ids(request)
+            ).first()
+            if order:
+                lines = list(order.lines.all())
+                total = order.final_total_krw or order.quoted_total_krw
+                initial.update({
+                    "partner": order.partner_id,
+                    "work_order": order.pk,
+                    "buyer_name": (order.customer.name if order.customer_id else order.customer_name),
+                    "buyer_business_number": order.customer.business_number if order.customer_id else "",
+                    "buyer_email": order.customer.email if order.customer_id else "",
+                    "buyer_address": order.customer.address if order.customer_id else "",
+                    "supply_cost_krw": round(total / 1.1) if total else 0,
+                    "tax_krw": total - round(total / 1.1) if total else 0,
+                    "total_krw": total,
+                    "items": [{"description": line.description, "quantity": str(line.quantity), "unit_price_krw": line.unit_price_krw, "amount_krw": line.amount_krw} for line in lines],
+                })
+        return initial
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "work_order":
+            kwargs["queryset"] = PartnerWorkOrder.objects.filter(partner_id__in=self.allowed_partner_ids(request)).select_related("partner")
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def save_model(self, request, obj, form, change):
+        if obj.work_order.partner_id != obj.partner_id:
+            raise PermissionDenied("정비 작업과 협력업체가 일치하지 않습니다.")
+        if obj.status == PartnerTaxInvoice.Status.ISSUED and not obj.issued_at:
+            obj.issued_at = timezone.now()
+        if not change:
+            obj.created_by = request.user
+            if not obj.items:
+                obj.items = [{"description": line.description, "quantity": str(line.quantity), "unit_price_krw": line.unit_price_krw, "amount_krw": line.amount_krw} for line in obj.work_order.lines.all()]
+        super().save_model(request, obj, form, change)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+partner_admin_site.register(PartnerPosIntegration, PartnerPosIntegrationAdmin)
+partner_admin_site.register(PartnerPayment, PartnerPaymentAdmin)
+partner_admin_site.register(PartnerTaxInvoice, PartnerTaxInvoiceAdmin)
