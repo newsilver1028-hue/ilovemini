@@ -226,3 +226,10 @@ body.model-partnerbooking #changelist td { white-space: normal; }
 .workshop-queue-clear { display:grid; justify-items:center; gap:6px; padding:24px 12px; color:var(--body-quiet-color,#71747d); font-size:11px; text-align:center; }
 .workshop-queue-clear strong { color:var(--body-fg,#202127); font-size:13px; }
 @media(max-width:700px) { .workshop-queue-item { grid-template-columns:10px minmax(0,1fr) auto; gap:9px; } .workshop-queue-instruction { grid-column:2; grid-row:2; } .workshop-queue-open { grid-column:3; grid-row:1 / span 2; } .workshop-queue-note { max-width:130px; text-align:right; } }
+
+body.model-partnerworkorder.change-form .partner-service-history { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
+body.model-partnerworkorder.change-form .partner-service-history li { padding:10px 12px; border:1px solid var(--hairline-color,#ececf0); border-radius:8px; }
+body.model-partnerworkorder.change-form .partner-service-history__heading { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:baseline; }
+body.model-partnerworkorder.change-form .partner-service-history__heading strong { color:var(--body-fg,#202127); }
+body.model-partnerworkorder.change-form .partner-service-history__heading span { color:var(--body-quiet-color,#71747d); font-size:11px; }
+body.model-partnerworkorder.change-form .partner-service-history p { margin:5px 0 0; color:var(--body-quiet-color,#71747d); font-size:12px; white-space:pre-wrap; }
