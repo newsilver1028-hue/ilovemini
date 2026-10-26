@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block extrastyle %}{{ block.super }}
-<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}">
+<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=20261027-booking-layout-1">
 {% endblock %}
 
 {% block object-tools-items %}
@@ -11,7 +11,19 @@
 {% endblock %}
 
 {% block content %}
-{{ block.super }}
+<nav class="booking-setup" aria-label="예약 운영 설정">
+  <div class="booking-setup__intro">
+    <span class="booking-setup__eyebrow">BOOKING SETUP</span>
+    <strong>예약 운영 설정</strong>
+    <span>영업시간과 작업시간을 설정하면 가능한 시간만 고객에게 표시됩니다.</span>
+  </div>
+  <div class="booking-setup__links">
+    <a href="{% url 'partner_admin:core_partnerweeklyschedule_changelist' %}"><span>01</span><strong>주간 운영시간</strong><small>요일별 영업·예약 시작 간격</small></a>
+    <a href="{% url 'partner_admin:core_partnerserviceduration_changelist' %}"><span>02</span><strong>정비별 작업시간</strong><small>항목별 소요시간 설정</small></a>
+    <a href="{% url 'partner_admin:core_partnerscheduleexception_changelist' %}"><span>03</span><strong>날짜별 일정</strong><small>특정일 휴무·운영시간 변경</small></a>
+    <a href="{% url 'partner_admin:core_partnerscheduleblock_changelist' %}"><span>04</span><strong>임시 예약 차단</strong><small>돌발 상황 시간 막기</small></a>
+  </div>
+</nav>
 <section class="partner-calendar" aria-labelledby="partner-calendar-title">
   <div class="partner-calendar-heading">
     <div>
@@ -49,4 +61,5 @@
   </div>
   <p class="partner-calendar-empty">예약이 있는 날짜에만 일정이 표시됩니다.</p>
 </section>
+{{ block.super }}
 {% endblock %}
