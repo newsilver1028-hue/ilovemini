@@ -12,6 +12,8 @@ from .models import (
     PartnerStockMovement,
     PartnerSupplier,
     PartnerWorkOrder,
+    PartnerCustomer,
+    PartnerVehicle,
 )
 from .partner_admin import active_staff_for, is_system_admin, partner_admin_site, staff_partners
 
@@ -67,6 +69,52 @@ class PartnerSupplierAdmin(PartnerScopedAdmin):
     list_filter = ("is_active",)
     search_fields = ("name", "contact_name", "phone", "business_number")
     fields = ("partner", "name", "contact_name", "phone", "email", "address", "business_number", "note", "is_active")
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj:
+            form.base_fields["partner"].disabled = True
+        return form
+
+
+class PartnerCustomerAdmin(PartnerScopedAdmin):
+    list_display = ("name", "phone", "email", "business_number", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("name", "phone", "email", "business_number", "address")
+    fields = ("partner", "name", "phone", "email", "address", "business_number", "notes", "is_active", "created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at")
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj:
+            form.base_fields["partner"].disabled = True
+        return form
+
+
+class PartnerVehicleForm(forms.ModelForm):
+    class Meta:
+        model = PartnerVehicle
+        fields = ("partner", "customer", "plate_number", "manufacturer", "model_name", "model_year", "vin", "first_registration_date", "current_odometer_km", "notes", "is_active")
+
+    def clean(self):
+        data = super().clean()
+        partner, customer = data.get("partner"), data.get("customer")
+        if partner and customer and partner.pk != customer.partner_id:
+            self.add_error("customer", "고객과 협력업체가 일치하지 않습니다.")
+        return data
+
+
+class PartnerVehicleAdmin(PartnerScopedAdmin):
+    form = PartnerVehicleForm
+    list_display = ("plate_number", "manufacturer", "model_name", "customer", "current_odometer_km", "is_active")
+    list_filter = ("is_active", "manufacturer", "model_year")
+    search_fields = ("plate_number", "model_name", "vin", "customer__name", "customer__phone")
+    fields = ("partner", "customer", "plate_number", "manufacturer", "model_name", "model_year", "vin", "first_registration_date", "current_odometer_km", "notes", "is_active")
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "customer":
+            kwargs["queryset"] = PartnerCustomer.objects.filter(partner_id__in=self.allowed_partner_ids(request), is_active=True)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
@@ -258,6 +306,8 @@ class PartnerFinancialEntryAdmin(PartnerScopedAdmin):
 
 partner_admin_site.register(PartnerSupplier, PartnerSupplierAdmin)
 partner_admin_site.register(PartnerPart, PartnerPartAdmin)
+partner_admin_site.register(PartnerCustomer, PartnerCustomerAdmin)
+partner_admin_site.register(PartnerVehicle, PartnerVehicleAdmin)
 partner_admin_site.register(PartnerPurchaseLine, PartnerPurchaseAdmin)
 partner_admin_site.register(PartnerStockMovement, PartnerStockMovementAdmin)
 partner_admin_site.register(PartnerFinancialEntry, PartnerFinancialEntryAdmin)
