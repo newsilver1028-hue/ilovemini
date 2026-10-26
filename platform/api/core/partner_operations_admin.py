@@ -457,10 +457,11 @@ class PartnerTaxInvoiceForm(forms.ModelForm):
             tax_type = data.get("tax_type")
             if tax_type in (PartnerTaxInvoice.TaxType.EXEMPT, PartnerTaxInvoice.TaxType.ZERO) and tax != 0:
                 self.add_error("tax_krw", "면세·영세 계산서의 세액은 0원이어야 합니다.")
-            elif tax_type == PartnerTaxInvoice.TaxType.TAXABLE:
-                expected_tax = int((Decimal(supply) * Decimal("0.1")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-                if tax != expected_tax:
-                    self.add_error("tax_krw", f"과세 세액은 공급가액의 10%인 {expected_tax:,}원이어야 합니다.")
+            elif tax_type == PartnerTaxInvoice.TaxType.TAXABLE and total is not None:
+                expected_supply = int((Decimal(total) / Decimal("1.1")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+                expected_tax = total - expected_supply
+                if supply != expected_supply or tax != expected_tax:
+                    self.add_error("tax_krw", f"과세 금액 기준 세액은 {expected_tax:,}원이어야 합니다.")
 
         for field in ("seller_business_number", "buyer_business_number"):
             value = "".join(char for char in data.get(field, "") if char.isdigit())
