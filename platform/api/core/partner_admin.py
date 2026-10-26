@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 9014)
-Total output lines: 734
-
 from django.contrib import admin
 from django.contrib.admin import AdminSite
 from django.db.models import F, Q, Sum
@@ -328,7 +325,87 @@ class PartnerAdminSite(AdminSite):
         sheet.row_dimensions[1].height = 26
         for column in sheet.columns:
             values = [len(str(cell.value or "")) for cell in column]
-            width = min(max(max(values, default=8) + 2, 12), 42)…1014 tokens truncated…method_display() if entry.payment_method else "미기록(이전 앱)",
+            width = min(max(max(values, default=8) + 2, 12), 42)
+            sheet.column_dimensions[get_column_letter(column[0].column)].width = width
+            for cell in column[1:]:
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+        output = BytesIO()
+        workbook.save(output)
+        response = HttpResponse(
+            output.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response["Cache-Control"] = "private, no-store"
+        return response
+
+    def export_bookings(self, request):
+        staff = active_staff_for(request).filter(can_manage_bookings=True)
+        if not is_system_admin(request) and not staff.exists():
+            raise Http404
+        partner_ids = staff_partners(request, booking=True)
+        bookings = PartnerBooking.objects.filter(partner_id__in=partner_ids).select_related(
+            "partner", "customer__naver_identity", "customer__apple_identity", "vehicle"
+        ).order_by("-scheduled_at", "-pk")
+        rows = []
+        for booking in bookings.iterator():
+            vehicle = booking.vehicle
+            rows.append((
+                timezone.localtime(booking.scheduled_at).strftime("%Y-%m-%d %H:%M"),
+                vehicle.plate_number if vehicle else "",
+                booking.contact_phone or "미등록",
+                vehicle.model_name if vehicle else "차량 정보 없음",
+                booking.partner.name,
+                timezone.localtime(booking.requested_at).strftime("%Y-%m-%d %H:%M"),
+                booking.service_type,
+                booking.get_status_display(),
+                booking.customer_note,
+                booking.partner_note,
+            ))
+        return self._excel_response(
+            f"ilovemini-bookings-{timezone.localdate():%Y%m%d}.xlsx",
+            "예약 관리대장",
+            ["예약 일시", "차량번호", "연락처", "차량", "업체", "요청 일시", "작업 종류", "예약 상태", "요청 사항", "업체 메모"],
+            rows,
+        )
+
+    def export_maintenance_records(self, request):
+        staff = active_staff_for(request).filter(can_verify_records=True)
+        if not is_system_admin(request) and not staff.exists():
+            raise Http404
+        partner_ids = staff_partners(request, records=True)
+        entries = LedgerEntry.objects.filter(
+            source=LedgerEntry.Source.PARTNER,
+            partner_id__in=partner_ids,
+        ).select_related("partner", "vehicle", "verified_by__naver_identity", "verified_by__apple_identity").prefetch_related(
+            "evidence_images"
+        ).order_by("-entry_date", "-pk")
+        rows = []
+        for entry in entries.iterator(chunk_size=200):
+            vehicle = entry.vehicle
+            verified_by = entry.verified_by
+            line_items = entry.line_items if isinstance(entry.line_items, list) else []
+            item_values = []
+            for item in line_items:
+                if not isinstance(item, dict) or not str(item.get("name", "")).strip():
+                    continue
+                try:
+                    amount = int(item.get("amount_krw") or 0)
+                except (TypeError, ValueError):
+                    amount = 0
+                item_values.append(f"{str(item.get('name')).strip()}: {amount:,}원")
+            rows.append((
+                entry.entry_date.strftime("%Y-%m-%d"),
+                timezone.localtime(entry.verified_at).strftime("%Y-%m-%d %H:%M") if entry.verified_at else "",
+                entry.partner.name if entry.partner else "",
+                vehicle.model_name if vehicle else "차량 정보 없음",
+                vehicle.plate_number if vehicle else "",
+                entry.odometer_km,
+                entry.get_kind_display(),
+                " / ".join(item_values),
+                entry.gross_amount_krw if entry.gross_amount_krw is not None else entry.amount_krw,
+                entry.amount_krw,
+                entry.get_payment_method_display() if entry.payment_method else "미기록(이전 앱)",
                 entry.description,
                 entry.evidence_images.count(),
                 member_nickname(verified_by) if verified_by else "",
