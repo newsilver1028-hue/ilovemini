@@ -1,7 +1,7 @@
 {% extends "admin/base_site.html" %}
 {% load i18n static partner_format %}
 
-{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=20261026-workshop-3">{% endblock %}
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=20261027-action-queue">{% endblock %}
 
 {% block content %}
 <main class="workshop-dashboard" aria-labelledby="workshop-title">
@@ -37,6 +37,27 @@
     <a class="workshop-metric" href="{% url 'partner_admin:core_partnerfinancialentry_changelist' %}?kind=expense">
       <span>이번 달 장부 경비</span><strong>{{ partner_dashboard.month_expense|comma }}원</strong><small>직접 등록한 경비 기록 →</small>
     </a>
+  </section>
+
+  <section class="workshop-panel workshop-action-queue" aria-labelledby="workshop-queue-title">
+    <div class="workshop-panel__heading">
+      <div><p class="workshop-eyebrow">NEXT ACTIONS</p><h2 id="workshop-queue-title">먼저 처리할 업무 <span class="workshop-queue-count">{{ partner_dashboard.action_queue|length }}</span></h2></div>
+      <span class="workshop-queue-note">승인·출고·예약 응답 순으로 표시</span>
+    </div>
+    {% if partner_dashboard.action_queue %}
+      <ul class="workshop-queue-list">
+        {% for item in partner_dashboard.action_queue %}
+          <li class="workshop-queue-item workshop-queue-item--{{ item.status }}">
+            <span class="workshop-queue-marker" aria-hidden="true"></span>
+            <div class="workshop-queue-copy"><strong>{{ item.title }}</strong><span>{{ item.primary }}</span><small>{{ item.secondary }}</small></div>
+            <span class="workshop-queue-instruction">{{ item.instruction }}</span>
+            <a class="workshop-queue-open" href="{{ item.url }}" aria-label="{{ item.primary }} {{ item.title }} 열기">열기 <span aria-hidden="true">→</span></a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div class="workshop-queue-clear"><strong>급하게 처리할 업무가 없습니다.</strong><span>고객 승인, 출고, 오래된 예약 요청이 생기면 이곳에 표시됩니다.</span></div>
+    {% endif %}
   </section>
 
   <section class="workshop-panel" aria-labelledby="workshop-flow-title">

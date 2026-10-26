@@ -172,6 +172,42 @@ class PartnerAdminSite(AdminSite):
             "recent_orders": orders.order_by("-updated_at", "-pk")[:8],
             "today": today,
         }
+        # Surface urgent work in one tenant-scoped queue so staff can act without
+        # searching across separate booking and repair lists.
+        now = timezone.now()
+        queue = []
+        queue_specs = (
+            (PartnerWorkOrder.Status.WAITING_APPROVAL, 0, "고객 승인 대기", "견적 확인·안내"),
+            (PartnerWorkOrder.Status.READY, 1, "출고 대기", "수납·차량 인도 확인"),
+            (PartnerWorkOrder.Status.WAITING_PARTS, 3, "부품 대기", "입고 일정 확인"),
+            (PartnerWorkOrder.Status.RECEIVED, 4, "접수 미처리", "점검 시작"),
+        )
+        for status, priority, title, instruction in queue_specs:
+            for row in orders.filter(status=status).order_by("updated_at", "pk")[:8]:
+                queue.append({
+                    "priority": priority, "sort_at": row.updated_at, "title": title,
+                    "instruction": instruction,
+                    "primary": row.plate_number or row.vehicle_model or row.customer_name or "차량 미입력",
+                    "secondary": f"{row.customer_name or '고객 미입력'} · {row.updated_at:%m-%d %H:%M} 변경",
+                    "url": reverse("partner_admin:core_partnerworkorder_change", args=[row.pk]),
+                    "status": row.status,
+                })
+        stale_bookings = bookings.filter(
+            status=PartnerBooking.Status.REQUESTED,
+            requested_at__lt=now - timedelta(hours=24),
+        ).select_related("vehicle").order_by("requested_at")[:8]
+        for booking in stale_bookings:
+            queue.append({
+                "priority": 2, "sort_at": booking.requested_at,
+                "title": "예약 요청 24시간 초과",
+                "instruction": "고객에게 예약 가능 여부 회신",
+                "primary": booking.vehicle.model_name if booking.vehicle else booking.service_type,
+                "secondary": f"{member_nickname(booking.customer)} · {booking.requested_at:%m-%d %H:%M} 요청",
+                "url": reverse("partner_admin:core_partnerbooking_change", args=[booking.pk]),
+                "status": "booking",
+            })
+        queue.sort(key=lambda item: (item["priority"], item["sort_at"]))
+        context["partner_dashboard"]["action_queue"] = queue[:12]
         return render(request, self.index_template, context)
 
     def print_work_order_document(self, request, work_order_id, document_type=None, **kwargs):
