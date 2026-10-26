@@ -112,9 +112,9 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
         return RequestForm
 
     def has_module_permission(self, request):
-        return PartnerStaff.objects.filter(
+        return bool(request.user.is_authenticated and PartnerStaff.objects.filter(
             user=request.user, is_active=True, can_manage_bookings=True, partner__is_active=True
-        ).exists()
+        ).exists())
 
     def has_view_permission(self, request, obj=None):
         allowed = self.has_module_permission(request)
