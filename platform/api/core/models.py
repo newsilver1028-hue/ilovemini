@@ -534,6 +534,143 @@ class PartnerWorkOrder(models.Model):
     def __str__(self):
         return f"작업 #{self.pk or '신규'} · {self.plate_number or self.vehicle_model or self.customer_name or '차량 미지정'}"
 
+
+class PartnerSupplier(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="suppliers", verbose_name="협력업체")
+    name = models.CharField("거래처명", max_length=120)
+    contact_name = models.CharField("담당자", max_length=80, blank=True)
+    phone = models.CharField("전화번호", max_length=32, blank=True)
+    email = models.EmailField("이메일", blank=True)
+    address = models.CharField("주소", max_length=240, blank=True)
+    business_number = models.CharField("사업자등록번호", max_length=20, blank=True)
+    note = models.TextField("메모", blank=True)
+    is_active = models.BooleanField("거래 중", default=True)
+
+    class Meta:
+        verbose_name = "부품 거래처"
+        verbose_name_plural = "부품 거래처"
+        ordering = ["name", "pk"]
+        constraints = [models.UniqueConstraint(fields=["partner", "name"], name="unique_partner_supplier_name")]
+
+    def __str__(self):
+        return self.name
+
+
+class PartnerPart(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="parts", verbose_name="협력업체")
+    sku = models.CharField("관리번호", max_length=64, blank=True)
+    part_number = models.CharField("부품번호", max_length=100, blank=True)
+    name = models.CharField("부품명", max_length=160)
+    maker = models.CharField("제조사", max_length=100, blank=True)
+    unit = models.CharField("단위", max_length=24, default="개")
+    location = models.CharField("적재 위치", max_length=80, blank=True)
+    purchase_price_krw = models.PositiveIntegerField("매입 단가(원)", default=0)
+    sale_price_krw = models.PositiveIntegerField("판매 단가(원)", default=0)
+    stock_quantity = models.PositiveIntegerField("현재고", default=0)
+    reorder_level = models.PositiveIntegerField("재주문 기준", default=0)
+    is_active = models.BooleanField("사용", default=True)
+    updated_at = models.DateTimeField("수정일", auto_now=True)
+
+    class Meta:
+        verbose_name = "부품 정보"
+        verbose_name_plural = "부품 정보"
+        ordering = ["name", "pk"]
+        constraints = [models.UniqueConstraint(fields=["partner", "sku"], condition=~models.Q(sku=""), name="unique_partner_part_sku")]
+        indexes = [models.Index(fields=["partner", "name"], name="partner_part_name_idx")]
+
+    def __str__(self):
+        return f"{self.name} · {self.sku}" if self.sku else self.name
+
+
+class PartnerPurchaseLine(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="purchase_lines", verbose_name="협력업체")
+    supplier = models.ForeignKey(PartnerSupplier, on_delete=models.PROTECT, related_name="purchase_lines", verbose_name="매입처")
+    part = models.ForeignKey(PartnerPart, on_delete=models.PROTECT, related_name="purchase_lines", verbose_name="부품")
+    invoice_number = models.CharField("전표 번호", max_length=80, blank=True)
+    purchased_at = models.DateField("매입일", default=timezone.localdate)
+    quantity = models.PositiveIntegerField("수량", validators=[MinValueValidator(1)])
+    unit_price_krw = models.PositiveIntegerField("매입 단가(원)")
+    total_krw = models.PositiveIntegerField("매입 합계(원)", default=0)
+    paid_krw = models.PositiveIntegerField("지불액(원)", default=0)
+    note = models.CharField("메모", max_length=240, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="partner_purchases_created")
+    created_at = models.DateTimeField("등록일", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "부품 매입 등록"
+        verbose_name_plural = "부품 매입 등록"
+        ordering = ["-purchased_at", "-pk"]
+
+    def __str__(self):
+        return f"{self.part.name} · {self.purchased_at} · {self.total_krw:,}원"
+
+
+class PartnerStockMovement(models.Model):
+    class Direction(models.TextChoices):
+        IN = "in", "입고"
+        OUT = "out", "출고"
+
+    class Reason(models.TextChoices):
+        PURCHASE = "purchase", "부품 매입"
+        REPAIR_USE = "repair_use", "정비 사용"
+        ADJUSTMENT = "adjustment", "재고 조정"
+        RETURN = "return", "반품"
+        DAMAGE = "damage", "파손·폐기"
+        OTHER = "other", "기타"
+
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="stock_movements", verbose_name="협력업체")
+    part = models.ForeignKey(PartnerPart, on_delete=models.PROTECT, related_name="movements", verbose_name="부품")
+    purchase = models.ForeignKey(PartnerPurchaseLine, null=True, blank=True, on_delete=models.PROTECT, related_name="stock_movements")
+    work_order = models.ForeignKey(PartnerWorkOrder, null=True, blank=True, on_delete=models.PROTECT, related_name="stock_movements", verbose_name="연결 작업")
+    direction = models.CharField("구분", max_length=8, choices=Direction.choices)
+    reason = models.CharField("사유", max_length=16, choices=Reason.choices, default=Reason.ADJUSTMENT)
+    quantity = models.PositiveIntegerField("수량", validators=[MinValueValidator(1)])
+    balance_after = models.PositiveIntegerField("처리 후 재고", default=0)
+    note = models.CharField("메모", max_length=240, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="partner_stock_movements_created")
+    created_at = models.DateTimeField("처리일", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "재고 입출고 기록"
+        verbose_name_plural = "재고 입출고 기록"
+        ordering = ["-created_at", "-pk"]
+
+    def __str__(self):
+        return f"{self.part.name} · {self.get_direction_display()} {self.quantity}"
+
+
+class PartnerFinancialEntry(models.Model):
+    class Kind(models.TextChoices):
+        INCOME = "income", "입금"
+        EXPENSE = "expense", "경비"
+
+    class Method(models.TextChoices):
+        CASH = "cash", "현금"
+        CARD = "card", "카드"
+        TRANSFER = "transfer", "계좌이체"
+        OTHER = "other", "기타"
+
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="financial_entries", verbose_name="협력업체")
+    kind = models.CharField("구분", max_length=12, choices=Kind.choices)
+    category = models.CharField("항목", max_length=100)
+    occurred_at = models.DateField("처리일", default=timezone.localdate)
+    amount_krw = models.PositiveIntegerField("금액(원)", validators=[MinValueValidator(1)])
+    payment_method = models.CharField("결제 수단", max_length=12, choices=Method.choices, blank=True)
+    counterparty = models.CharField("상대방", max_length=100, blank=True)
+    work_order = models.ForeignKey(PartnerWorkOrder, null=True, blank=True, on_delete=models.PROTECT, related_name="financial_entries", verbose_name="연결 작업")
+    note = models.CharField("메모", max_length=240, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="partner_financial_entries_created")
+    created_at = models.DateTimeField("등록일", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "입금·경비 기록"
+        verbose_name_plural = "입금·경비 기록"
+        ordering = ["-occurred_at", "-pk"]
+        indexes = [models.Index(fields=["partner", "occurred_at", "kind"], name="partner_finance_day_idx")]
+
+    def __str__(self):
+        return f"{self.get_kind_display()} · {self.category} · {self.amount_krw:,}원"
+
 class Offer(models.Model):
     partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="offers")
     title = models.CharField(max_length=140)

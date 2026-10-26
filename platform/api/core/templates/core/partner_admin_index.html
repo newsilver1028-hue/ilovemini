@@ -1,7 +1,7 @@
 {% extends "admin/base_site.html" %}
 {% load i18n static partner_format %}
 
-{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=20261026-workshop">{% endblock %}
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=20261026-operations-2">{% endblock %}
 
 {% block content %}
 <main class="workshop-dashboard" aria-labelledby="workshop-title">
@@ -27,6 +27,15 @@
     </a>
     <a class="workshop-metric workshop-metric--attention" href="{% url 'partner_admin:core_partnerworkorder_changelist' %}?status=waiting_approval">
       <span>고객 승인 대기</span><strong>{{ partner_dashboard.awaiting_approval }}</strong><small>견적 확인 필요 →</small>
+    </a>
+    <a class="workshop-metric" href="{% url 'partner_admin:core_partnerpart_changelist' %}?stock=low">
+      <span>재주문 확인</span><strong>{{ partner_dashboard.low_stock_parts }}</strong><small>기준 재고 이하 부품 →</small>
+    </a>
+    <a class="workshop-metric" href="{% url 'partner_admin:core_partnerfinancialentry_changelist' %}?kind=income">
+      <span>이번 달 장부 입금</span><strong>{{ partner_dashboard.month_income|comma }}원</strong><small>직접 등록한 입금 기록 →</small>
+    </a>
+    <a class="workshop-metric" href="{% url 'partner_admin:core_partnerfinancialentry_changelist' %}?kind=expense">
+      <span>이번 달 장부 경비</span><strong>{{ partner_dashboard.month_expense|comma }}원</strong><small>직접 등록한 경비 기록 →</small>
     </a>
   </section>
 
@@ -81,6 +90,14 @@
     <a href="{% url 'partner_admin:core_serviceestimate_changelist' %}"><span>견적</span><strong>견적 확인 및 출력</strong><b aria-hidden="true">↗</b></a>
     {% endif %}
     {% if partner_dashboard.can_verify_records %}<a href="{% url 'partner_admin:core_ledgerentry_changelist' %}"><span>정비 이력</span><strong>인증 기록과 증빙 확인</strong><b aria-hidden="true">↗</b></a>{% endif %}
+    {% if partner_dashboard.can_manage_work %}
+    <a href="{% url 'partner_admin:core_partnerpart_changelist' %}"><span>부품·재고</span><strong>부품 단가, 현재고, 재주문 기준</strong><b aria-hidden="true">↗</b></a>
+    <a href="{% url 'partner_admin:core_partnersupplier_changelist' %}"><span>거래처</span><strong>부품 공급처와 담당자 관리</strong><b aria-hidden="true">↗</b></a>
+    <a href="{% url 'partner_admin:core_partnerpurchaseline_changelist' %}"><span>매입</span><strong>부품 매입 등록과 재고 입고 반영</strong><b aria-hidden="true">↗</b></a>
+    <a href="{% url 'partner_admin:core_partnerstockmovement_changelist' %}"><span>재고 조정</span><strong>입고·출고 이력과 재고 보정</strong><b aria-hidden="true">↗</b></a>
+    <a href="{% url 'partner_admin:core_partnerfinancialentry_changelist' %}"><span>입금·경비</span><strong>현금 흐름과 지출 기록</strong><b aria-hidden="true">↗</b></a>
+    <a href="{% url 'partner_admin:partner-operations-report' %}"><span>월간 리포트</span><strong>매출 장부, 미수금, 재고 평가 확인</strong><b aria-hidden="true">↗</b></a>
+    {% endif %}
   </section>
 </main>
 {% endblock %}

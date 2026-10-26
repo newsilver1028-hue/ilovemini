@@ -102,7 +102,7 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
     @admin.display(description="견적서")
     def quote_print_link(self, obj):
         url = reverse("partner_admin:partner-workorder-quote", args=[obj.pk])
-        return format_html('<a href="{}" target="_blank" rel="noopener">출력</a>', url)
+        return format_html('<a href="{}" target="_blank" rel="noopener">견적서</a>', url)
 
     @admin.display(description="차량")
     def vehicle_summary(self, obj):

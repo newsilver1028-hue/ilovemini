@@ -4,6 +4,11 @@
 {% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=20261026-workshop">{% endblock %}
 
 {% block object-tools-items %}
-  {% if original %}<li><a href="{% url 'partner_admin:partner-workorder-quote' original.pk %}" target="_blank" rel="noopener">견적서 출력 · PDF 저장</a></li>{% endif %}
+  {% if original %}
+    <li><a href="{% url 'partner_admin:partner-workorder-quote' original.pk %}" target="_blank" rel="noopener">견적서 출력</a></li>
+    <li><a href="{% url 'partner_admin:partner-workorder-document' original.pk 'job-card' %}" target="_blank" rel="noopener">작업지시서 출력</a></li>
+    <li><a href="{% url 'partner_admin:partner-workorder-document' original.pk 'repair-statement' %}" target="_blank" rel="noopener">정비명세서 출력</a></li>
+    <li><a href="{% url 'partner_admin:partner-workorder-document' original.pk 'receipt' %}" target="_blank" rel="noopener">수납영수증 출력</a></li>
+  {% endif %}
   {{ block.super }}
 {% endblock %}

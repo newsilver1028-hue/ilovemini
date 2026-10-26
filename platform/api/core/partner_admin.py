@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.admin import AdminSite
-from django.db.models import Q
+from django.db.models import F, Q, Sum
 from django.db import transaction
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpResponse
@@ -20,6 +20,9 @@ from .models import (
     PartnerBooking,
     PartnerStaff,
     PartnerWorkOrder,
+    PartnerPart,
+    PartnerFinancialEntry,
+    PartnerPurchaseLine,
     ServiceEstimate,
 )
 from .member_display import member_nickname
@@ -97,8 +100,14 @@ class PartnerAdminSite(AdminSite):
         return [
             path(
                 "work-orders/<int:work_order_id>/quote/",
-                self.admin_view(self.print_work_order_quote),
+                self.admin_view(self.print_work_order_document),
+                {"document_type": "quote"},
                 name="partner-workorder-quote",
+            ),
+            path(
+                "work-orders/<int:work_order_id>/<str:document_type>/",
+                self.admin_view(self.print_work_order_document),
+                name="partner-workorder-document",
             ),
             path(
                 "estimates/<int:estimate_id>/print/",
@@ -115,6 +124,7 @@ class PartnerAdminSite(AdminSite):
                 self.admin_view(self.export_maintenance_records),
                 name="partner-maintenance-export",
             ),
+            path("reports/", self.admin_view(self.operations_report), name="partner-operations-report"),
             path(
                 "ledger/<int:entry_id>/evidence/<int:evidence_id>/",
                 self.admin_view(self.ledger_evidence_view),
@@ -151,19 +161,38 @@ class PartnerAdminSite(AdminSite):
             "booking_requests": bookings.filter(status=PartnerBooking.Status.REQUESTED).count(),
             "active_orders": orders.filter(status__in=active_statuses).count(),
             "awaiting_approval": orders.filter(status=PartnerWorkOrder.Status.WAITING_APPROVAL).count(),
+            "low_stock_parts": PartnerPart.objects.filter(partner_id__in=partner_ids, is_active=True, stock_quantity__lte=F("reorder_level")).count(),
+            "month_income": PartnerFinancialEntry.objects.filter(partner_id__in=partner_ids, kind=PartnerFinancialEntry.Kind.INCOME, occurred_at__year=today.year, occurred_at__month=today.month).aggregate(total=Sum("amount_krw"))["total"] or 0,
+            "month_expense": PartnerFinancialEntry.objects.filter(partner_id__in=partner_ids, kind=PartnerFinancialEntry.Kind.EXPENSE, occurred_at__year=today.year, occurred_at__month=today.month).aggregate(total=Sum("amount_krw"))["total"] or 0,
             "recent_orders": orders.order_by("-updated_at", "-pk")[:8],
             "today": today,
         }
         return render(request, self.index_template, context)
 
-    def print_work_order_quote(self, request, work_order_id):
+    def print_work_order_document(self, request, work_order_id, document_type=None, **kwargs):
+        document_type = document_type or kwargs.get("document_type")
+        document_types = {
+            "quote": "정비 견적서",
+            "job-card": "정비 작업지시서",
+            "repair-statement": "정비 명세서",
+            "receipt": "수납 영수증",
+        }
+        if document_type not in document_types:
+            raise Http404
         work_order = get_object_or_404(
             PartnerWorkOrder.objects.select_related("partner", "booking", "vehicle"),
             pk=work_order_id,
             partner_id__in=staff_partners(request, booking=True),
         )
+        total = work_order.final_total_krw if document_type in {"repair-statement", "receipt"} else (
+            work_order.quoted_total_krw or sum(
+                item.get("amount_krw", 0) for item in work_order.items
+                if isinstance(item, dict) and type(item.get("amount_krw")) is int
+            )
+        )
         return render(request, "core/partner_quote_print.html", {
-            "document_title": "정비 견적서",
+            "document_title": document_types[document_type],
+            "document_type": document_type,
             "document_number": f"WO-{work_order.created_at:%y%m%d}-{work_order.pk:05d}",
             "issued_at": work_order.updated_at,
             "partner": work_order.partner,
@@ -175,13 +204,58 @@ class PartnerAdminSite(AdminSite):
             "customer_concern": work_order.customer_concern,
             "inspection_notes": work_order.inspection_notes,
             "items": work_order.items if isinstance(work_order.items, list) else [],
-            "total_krw": work_order.quoted_total_krw or sum(
-                item.get("amount_krw", 0) for item in work_order.items
-                if isinstance(item, dict) and type(item.get("amount_krw")) is int
-            ),
+            "total_krw": total,
+            "paid_krw": work_order.paid_amount_krw,
+            "balance_krw": max(0, total - work_order.paid_amount_krw),
+            "work_notes": work_order.work_notes,
             "note": work_order.customer_message,
             "status": work_order.get_status_display(),
         })
+
+    def operations_report(self, request):
+        today = timezone.localdate()
+        requested_month = request.GET.get("month", "")
+        try:
+            report_month = datetime.strptime(requested_month, "%Y-%m").date().replace(day=1)
+        except ValueError:
+            report_month = today.replace(day=1)
+        partner_ids = staff_partners(request, booking=True)
+        income = PartnerFinancialEntry.objects.filter(
+            partner_id__in=partner_ids, kind=PartnerFinancialEntry.Kind.INCOME,
+            occurred_at__year=report_month.year, occurred_at__month=report_month.month,
+        ).aggregate(total=Sum("amount_krw"))["total"] or 0
+        expenses = PartnerFinancialEntry.objects.filter(
+            partner_id__in=partner_ids, kind=PartnerFinancialEntry.Kind.EXPENSE,
+            occurred_at__year=report_month.year, occurred_at__month=report_month.month,
+        ).aggregate(total=Sum("amount_krw"))["total"] or 0
+        work_orders = PartnerWorkOrder.objects.filter(
+            partner_id__in=partner_ids, created_at__year=report_month.year,
+            created_at__month=report_month.month,
+        ).exclude(status=PartnerWorkOrder.Status.CANCELLED)
+        receivable = work_orders.aggregate(total=Sum(F("final_total_krw") - F("paid_amount_krw")))["total"] or 0
+        parts = PartnerPart.objects.filter(partner_id__in=partner_ids, is_active=True)
+        stock_value = parts.aggregate(total=Sum(F("stock_quantity") * F("purchase_price_krw")))["total"] or 0
+        context = self.each_context(request)
+        context.update({
+            "title": "월간 운영 리포트",
+            "report_month": report_month,
+            "income": income,
+            "expenses": expenses,
+            "net_cash": income - expenses,
+            "receivable": receivable,
+            "stock_value": stock_value,
+            "completed_orders": work_orders.filter(status=PartnerWorkOrder.Status.COMPLETED).count(),
+            "open_orders": work_orders.exclude(status__in=[PartnerWorkOrder.Status.COMPLETED, PartnerWorkOrder.Status.CANCELLED]).count(),
+            "recent_finances": PartnerFinancialEntry.objects.filter(
+                partner_id__in=partner_ids, occurred_at__year=report_month.year,
+                occurred_at__month=report_month.month,
+            ).select_related("partner", "work_order")[:20],
+            "recent_purchases": PartnerPurchaseLine.objects.filter(
+                partner_id__in=partner_ids, purchased_at__year=report_month.year,
+                purchased_at__month=report_month.month,
+            ).select_related("partner", "supplier", "part")[:20],
+        })
+        return render(request, "core/partner_operations_report.html", context)
 
     def print_service_estimate(self, request, estimate_id):
         estimate = get_object_or_404(
@@ -645,3 +719,4 @@ partner_admin_site.register(MaintenanceRecommendation, RecommendationAdmin)
 from .models import PartnerWorkOrder
 from .work_order_admin import PartnerWorkOrderAdmin
 partner_admin_site.register(PartnerWorkOrder, PartnerWorkOrderAdmin)
+from . import partner_operations_admin  # noqa: F401
