@@ -342,6 +342,17 @@ class PartnerPosIntegrationAdmin(PartnerScopedAdmin):
     def event_contract(self, obj):
         return 'POST JSON · Authorization: Bearer {토큰} · {"event_id":"거래고유값","work_order_id":123,"status":"approved|cancelled","method":"card|cash|transfer|easy_pay|other","amount_krw":55000,"approval_code":"승인번호","paid_at":"ISO-8601"} · 취소는 승인 거래의 event_id와 work_order_id를 그대로 사용합니다.'
 
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        field = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if field and db_field.name == "provider_name":
+            field.label = "POS/VAN 제공사 이름"
+            field.help_text = (
+                "업체명 입력만으로 토스·네이버 등 POS가 자동 연결되지는 않습니다. "
+                "해당 POS/VAN 프로그램이 아래 표준 웹훅 규격으로 결제 승인·취소 이벤트를 "
+                "서버에 전송하도록 별도 설정되어야 결제 내역이 반영됩니다. 이 화면은 카드 결제를 처리하지 않습니다."
+            )
+        return field
+
     def get_urls(self):
         return [path("<path:object_id>/rotate-token/", self.admin_site.admin_view(self.rotate_token), name="partner-pos-rotate-token")] + super().get_urls()
 

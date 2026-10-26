@@ -149,13 +149,13 @@
     <span class="invoice-notice__mark" aria-hidden="true">i</span>
     <div>
       <strong>저장과 실제 발행은 별도 단계입니다</strong>
-      <p>이 화면에서 저장하면 ‘발행 준비’ 문서가 등록됩니다. 저장만으로 세금계산서가 전송되지는 않습니다. 저장 후 문서에서 발행 정보를 확인하고 ‘팝빌 발행 확인’을 진행하세요. 정비 작업을 연결했다면 거래처·금액·품목을 발행 전에 다시 확인해 주세요.</p>
+      <p>저장 단계에서는 발행 준비 문서만 등록됩니다. 실제 발행은 별도 단계에서 Popbill API로 요청하며, 운영 발행인지 테스트 발행인지는 다음 확인 화면에 표시됩니다. 정비 작업을 연결했다면 거래처·금액·품목을 발행 전에 다시 확인해 주세요.</p>
     </div>
   </aside>
 {% endblock %}
 {% block object-tools-items %}
   {% if original and original.status == "draft" %}
-    <li><a href="{% url 'partner_admin:partner-taxinvoice-issue' original.pk %}">팝빌 발행 확인</a></li>
+    <li><a href="{% url 'partner_admin:partner-taxinvoice-issue' original.pk %}">팝빌 발행 요청</a></li>
   {% endif %}
   {{ block.super }}
 {% endblock %}

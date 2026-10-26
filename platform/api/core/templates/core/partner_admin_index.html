@@ -1,7 +1,7 @@
 {% extends "admin/base_site.html" %}
 {% load i18n static partner_format %}
 
-{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=20261027-no-arrows">{% endblock %}
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=20261027-schedule-alert">{% endblock %}
 
 {% block content %}
 <main class="workshop-dashboard" aria-labelledby="workshop-title">
@@ -13,6 +13,14 @@
     </div>
     {% if partner_dashboard.can_manage_work %}<a class="workshop-primary-action" href="{% url 'partner_admin:core_partnerworkorder_add' %}">＋ 정비 접수</a>{% endif %}
   </header>
+
+  {% if partner_dashboard.can_manage_work and partner_dashboard.partners_without_weekly_hours %}
+  <aside class="workshop-schedule-warning" role="status">
+    <strong>주간 예약 운영시간 설정 필요 · {{ partner_dashboard.partners_without_weekly_hours }}개 업체</strong>
+    <p>운영시간이 등록되지 않은 업체는 앱에 선택 가능한 예약 시간이 표시되지 않습니다. 운영시간을 등록하면 작업 소요시간과 겹치는 예약을 계산할 수 있습니다. 일정 설정 전 접수된 요청은 업체가 직접 확인해 주세요.</p>
+    <a href="{% url 'partner_admin:core_partnerweeklyschedule_changelist' %}">주간 예약 운영시간 설정</a>
+  </aside>
+  {% endif %}
 
   {% if partner_dashboard.can_manage_work %}
   <section class="workshop-metrics" aria-label="오늘 운영 현황">
@@ -107,6 +115,7 @@
   <section class="workshop-shortcuts" aria-label="정비 관리 메뉴">
     {% if partner_dashboard.can_manage_work %}
     <a href="{% url 'partner_admin:core_partnerbooking_changelist' %}"><span>예약</span><strong>예약 일정과 고객 요청 확인</strong></a>
+    <a href="{% url 'partner_admin:core_partnerweeklyschedule_changelist' %}"><span>예약 운영시간</span><strong>요일별 영업시간과 예약 간격 설정</strong></a>
     <a href="{% url 'partner_admin:core_partnerworkorder_changelist' %}"><span>작업지시</span><strong>입고 차량의 정비 과정 관리</strong></a>
     <a href="{% url 'partner_admin:core_partnercustomer_changelist' %}"><span>고객 대장</span><strong>고객 연락처와 거래 정보를 관리</strong></a>
     <a href="{% url 'partner_admin:core_partnervehicle_changelist' %}"><span>차량 대장</span><strong>차량번호·차종·주행거리 이력 관리</strong></a>

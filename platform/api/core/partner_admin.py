@@ -158,6 +158,13 @@ class PartnerAdminSite(AdminSite):
         partner_ids = staff_partners(request, booking=True)
         bookings = PartnerBooking.objects.filter(partner_id__in=partner_ids)
         orders = PartnerWorkOrder.objects.filter(partner_id__in=partner_ids).select_related("partner", "booking", "vehicle")
+        partners_without_weekly_hours = Partner.objects.filter(
+            pk__in=partner_ids, is_active=True
+        ).exclude(
+            pk__in=PartnerWeeklySchedule.objects.filter(
+                partner_id__in=partner_ids, is_closed=False
+            ).values("partner_id")
+        ).count()
         today = timezone.localdate()
         active_statuses = [
             PartnerWorkOrder.Status.RECEIVED,
@@ -173,6 +180,7 @@ class PartnerAdminSite(AdminSite):
             "can_verify_records": can_verify_records,
             "today_bookings": bookings.filter(scheduled_at__date=today).count(),
             "booking_requests": bookings.filter(status=PartnerBooking.Status.REQUESTED).count(),
+            "partners_without_weekly_hours": partners_without_weekly_hours,
             "active_orders": orders.filter(status__in=active_statuses).count(),
             "awaiting_approval": orders.filter(status=PartnerWorkOrder.Status.WAITING_APPROVAL).count(),
             "low_stock_parts": PartnerPart.objects.filter(partner_id__in=partner_ids, is_active=True, stock_quantity__lte=F("reorder_level")).count(),
