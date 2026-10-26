@@ -81,7 +81,14 @@
       backdrop-filter:blur(10px);
     }
     body.model-partnertaxinvoice.change-form .submit-row input { min-height:40px; border-radius:8px; }
-    body.model-partnertaxinvoice.change-form .submit-row input[name=_save] { background:#b3213b; }
+    body.model-partnertaxinvoice.change-form .submit-row input[name=_save] { background:#b3213b; color:#fff; }
+    body.model-partnertaxinvoice.change-form .submit-row input[name=_addanother],
+    body.model-partnertaxinvoice.change-form .submit-row input[name=_continue] {
+      border:1px solid var(--border-color,#d9dbe1); background:var(--body-bg,#fff)!important;
+      color:var(--body-fg,#34363b)!important; box-shadow:none;
+    }
+    body.model-partnertaxinvoice.change-form .submit-row input[name=_addanother]:hover,
+    body.model-partnertaxinvoice.change-form .submit-row input[name=_continue]:hover { border-color:#b3213b; color:#a51e36!important; }
     @media(max-width:760px) {
       body.model-partnertaxinvoice.change-form .invoice-section__heading { padding:15px 15px 12px; }
       body.model-partnertaxinvoice.change-form .invoice-section__body { padding:0 15px; }
@@ -129,6 +136,8 @@
         { cls: "invoice-section--provider", index: "05", title: "발행 대행 정보", note: "외부 발행 대행사의 문서 식별 정보를 관리합니다.", fields: ["provider_name","provider_user_id","provider_document_id","provider_error_code"] },
         { cls: "invoice-section--records", index: "06", title: "등록 및 발행 이력", note: "저장과 외부 발행 처리 결과가 기록됩니다.", fields: ["issued_at","created_by_display","created_at"] }
       ];
+      var saveButton = form.querySelector('.submit-row input[name="_save"]');
+      if (saveButton) saveButton.value = "발행 준비 저장";
       groups.forEach(function (group) {
         var rows = group.fields.map(function (field) {
           return form.querySelector(".form-row.field-" + field);
