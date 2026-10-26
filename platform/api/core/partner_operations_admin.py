@@ -68,6 +68,12 @@ class PartnerSupplierAdmin(PartnerScopedAdmin):
     search_fields = ("name", "contact_name", "phone", "business_number")
     fields = ("partner", "name", "contact_name", "phone", "email", "address", "business_number", "note", "is_active")
 
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj:
+            form.base_fields["partner"].disabled = True
+        return form
+
 
 class PartStockFilter(admin.SimpleListFilter):
     title = "재고 상태"
@@ -94,6 +100,12 @@ class PartnerPartAdmin(PartnerScopedAdmin):
     @admin.display(description="재고 상태")
     def stock_state(self, obj):
         return "재주문 필요" if obj.stock_quantity <= obj.reorder_level else "정상"
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj:
+            form.base_fields["partner"].disabled = True
+        return form
 
 
 class PartnerPurchaseForm(forms.ModelForm):
@@ -163,26 +175,38 @@ class PartnerPurchaseAdmin(PartnerScopedAdmin):
 class PartnerStockMovementForm(forms.ModelForm):
     class Meta:
         model = PartnerStockMovement
-        fields = ("partner", "part", "direction", "reason", "quantity", "note")
+        fields = ("partner", "part", "work_order", "direction", "reason", "quantity", "note")
 
     def clean(self):
         data = super().clean()
         if data.get("part") and data.get("partner") and data["part"].partner_id != data["partner"].pk:
             self.add_error("part", "부품과 업체가 일치하지 않습니다.")
+        if data.get("work_order") and data.get("partner") and data["work_order"].partner_id != data["partner"].pk:
+            self.add_error("work_order", "작업과 업체가 일치하지 않습니다.")
+        if data.get("reason") == PartnerStockMovement.Reason.REPAIR_USE:
+            if data.get("direction") != PartnerStockMovement.Direction.OUT:
+                self.add_error("direction", "정비 사용은 재고 출고로 등록해 주세요.")
+            if not data.get("work_order"):
+                self.add_error("work_order", "정비 사용에는 연결 작업을 지정해야 합니다.")
         return data
 
 
 class PartnerStockMovementAdmin(PartnerScopedAdmin):
     form = PartnerStockMovementForm
-    list_display = ("created_at", "part", "direction", "quantity", "balance_after", "reason", "note", "created_by")
+    list_display = ("created_at", "part", "direction", "quantity", "balance_after", "reason", "work_order", "note", "created_by")
     list_filter = ("direction", "reason", "created_at")
     search_fields = ("part__name", "part__sku", "note")
     date_hierarchy = "created_at"
-    fields = ("partner", "part", "direction", "reason", "quantity", "note", "balance_after", "created_by", "created_at")
+    fields = ("partner", "part", "work_order", "direction", "reason", "quantity", "note", "balance_after", "created_by", "created_at")
     readonly_fields = ("balance_after", "created_by", "created_at")
 
     def has_change_permission(self, request, obj=None):
         return obj is None and self.has_module_permission(request)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "work_order":
+            kwargs["queryset"] = PartnerWorkOrder.objects.filter(partner_id__in=self.allowed_partner_ids(request))
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     @transaction.atomic
     def save_model(self, request, obj, form, change):
@@ -208,6 +232,20 @@ class PartnerFinancialEntryAdmin(PartnerScopedAdmin):
     date_hierarchy = "occurred_at"
     fields = ("partner", "kind", "category", "occurred_at", "amount_krw", "payment_method", "counterparty", "work_order", "note", "created_by", "created_at")
     readonly_fields = ("created_by", "created_at")
+
+    def get_form(self, request, obj=None, **kwargs):
+        base_form = super().get_form(request, obj, **kwargs)
+
+        class PartnerFinanceForm(base_form):
+            def clean(self):
+                data = super().clean()
+                partner = data.get("partner")
+                work_order = data.get("work_order")
+                if partner and work_order and partner.pk != work_order.partner_id:
+                    self.add_error("work_order", "연결 작업과 업체가 일치하지 않습니다.")
+                return data
+
+        return PartnerFinanceForm
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "work_order":
