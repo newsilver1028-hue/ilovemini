@@ -1,0 +1,44 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+<div id="content-main" class="partner-portal-dashboard">
+  <header class="module" style="padding:24px; margin-bottom:20px;">
+    <h1 style="margin:0 0 8px;">업체 업무</h1>
+    <p style="margin:0;">예약과 인증 정비기록을 확인하고 처리할 수 있습니다.</p>
+  </header>
+
+  {% for app in app_list %}
+    <section class="module" style="margin-bottom:20px;" aria-label="{{ app.name }}">
+      <table>
+        <caption>
+          <span class="section">{{ app.name }}</span>
+        </caption>
+        <tbody>
+          {% for model in app.models %}
+            <tr>
+              <th scope="row">
+                {% if model.admin_url %}
+                  <a href="{{ model.admin_url }}">{{ model.name }}</a>
+                {% else %}
+                  {{ model.name }}
+                {% endif %}
+              </th>
+              <td>
+                {% if model.admin_url %}
+                  <a href="{{ model.admin_url }}" class="changelink">{% translate "View" %}</a>
+                {% endif %}
+                {% if model.add_url %}
+                  <a href="{{ model.add_url }}" class="addlink">{% translate "Add" %}</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% empty %}
+    <p class="module">표시할 수 있는 업체 업무 메뉴가 없습니다.</p>
+  {% endfor %}
+</div>
+{% endblock %}
