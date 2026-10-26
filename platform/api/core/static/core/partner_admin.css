@@ -209,3 +209,20 @@ body.model-partnerbooking #changelist td { white-space: normal; }
   .partner-day-events { grid-template-columns: 1fr; }
   body.model-ledgerentry #result_list tbody tr { grid-template-columns: 1fr 1fr; }
 }
+
+.workshop-queue-count { display:inline-grid; place-items:center; min-width:24px; height:24px; margin-left:5px; padding:0 6px; border-radius:999px; background:#f4e7e9; color:#a51e36; font-size:12px; vertical-align:3px; }
+.workshop-queue-note { color:var(--body-quiet-color,#71747d); font-size:11px; }
+.workshop-queue-list { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
+.workshop-queue-item { display:grid; grid-template-columns:12px minmax(170px,1.25fr) minmax(140px,1fr) auto; align-items:center; gap:12px; min-width:0; padding:13px 14px; border:1px solid var(--hairline-color,#ececf0); border-radius:10px; background:var(--body-bg,#fff); }
+.workshop-queue-marker { width:8px; height:8px; border-radius:50%; background:#b3213b; box-shadow:0 0 0 4px #b3213b16; }
+.workshop-queue-item--ready .workshop-queue-marker { background:#237344; box-shadow:0 0 0 4px #23734416; }
+.workshop-queue-item--waiting_parts .workshop-queue-marker { background:#b87712; box-shadow:0 0 0 4px #b8771216; }
+.workshop-queue-copy { display:grid; gap:3px; min-width:0; }
+.workshop-queue-copy strong { color:var(--body-fg,#202127); font-size:11px; }
+.workshop-queue-copy span { overflow:hidden; color:var(--body-fg,#202127); font-size:13px; font-weight:750; text-overflow:ellipsis; white-space:nowrap; }
+.workshop-queue-copy small,.workshop-queue-instruction { color:var(--body-quiet-color,#71747d); font-size:10px; }
+.workshop-queue-open { padding:7px 10px; border:1px solid var(--border-color,#dedfe4); border-radius:7px; color:var(--body-fg,#202127)!important; font-size:11px; font-weight:750; text-decoration:none!important; white-space:nowrap; }
+.workshop-queue-open:hover { border-color:#b3213b; color:#a51e36!important; }
+.workshop-queue-clear { display:grid; justify-items:center; gap:6px; padding:24px 12px; color:var(--body-quiet-color,#71747d); font-size:11px; text-align:center; }
+.workshop-queue-clear strong { color:var(--body-fg,#202127); font-size:13px; }
+@media(max-width:700px) { .workshop-queue-item { grid-template-columns:10px minmax(0,1fr) auto; gap:9px; } .workshop-queue-instruction { grid-column:2; grid-row:2; } .workshop-queue-open { grid-column:3; grid-row:1 / span 2; } .workshop-queue-note { max-width:130px; text-align:right; } }
