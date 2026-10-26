@@ -40,8 +40,8 @@
     {% if inspection_notes %}<section class="section"><h2>점검 및 진단</h2><div class="copy-box">{{ inspection_notes }}</div></section>{% endif %}
 
     {% if work_notes %}<section class="section"><h2>작업 내용</h2><div class="copy-box">{{ work_notes }}</div></section>{% endif %}
-    <section class="section"><h2>{% if document_type == "job-card" %}작업 예정 항목{% elif document_type == "repair-statement" %}정비 완료 항목{% else %}정비 항목{% endif %}</h2><table><thead><tr><th>항목</th><th class="amount">금액</th></tr></thead><tbody>
-      {% for item in items %}<tr><td>{% if item.title %}{{ item.title }}{% elif item.name %}{{ item.name }}{% else %}정비 항목{% endif %}</td><td class="amount">{{ item.amount_krw|default:0|comma }}원</td></tr>{% empty %}<tr><td colspan="2">등록된 견적 항목이 없습니다.</td></tr>{% endfor %}
+    <section class="section"><h2>{% if document_type == "job-card" %}작업 예정 항목{% elif document_type == "repair-statement" %}정비 완료 항목{% else %}정비 항목{% endif %}</h2><table><thead><tr><th>항목</th><th>수량</th><th class="amount">단가</th><th class="amount">금액</th></tr></thead><tbody>
+      {% for item in items %}<tr><td>{% if item.title %}{{ item.title }}{% elif item.name %}{{ item.name }}{% else %}정비 항목{% endif %}</td><td>{% if item.quantity %}{{ item.quantity }} {{ item.unit }}{% else %}1{% endif %}</td><td class="amount">{% if item.unit_price_krw %}{{ item.unit_price_krw|comma }}원{% else %}—{% endif %}</td><td class="amount">{{ item.amount_krw|default:0|comma }}원</td></tr>{% empty %}<tr><td colspan="4">등록된 견적 항목이 없습니다.</td></tr>{% endfor %}
     </tbody></table><div class="total"><span>{% if document_type == "repair-statement" or document_type == "receipt" %}정비 합계{% else %}견적 합계{% endif %}</span><strong>{{ total_krw|comma }}원</strong></div>
       {% if document_type == "receipt" %}<table style="margin-top:12px"><tbody><tr><th>수납 금액</th><td class="amount">{{ paid_krw|comma }}원</td></tr><tr><th>잔액</th><td class="amount">{{ balance_krw|comma }}원</td></tr></tbody></table>{% endif %}
     </section>
