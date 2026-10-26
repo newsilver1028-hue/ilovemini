@@ -1,7 +1,7 @@
 {% extends "admin/base_site.html" %}
 {% load static partner_format %}
 
-{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=20261026-workshop-3">{% endblock %}
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=20261027-no-arrows">{% endblock %}
 
 {% block content %}
 <main class="workshop-dashboard" aria-labelledby="report-title">
@@ -29,14 +29,14 @@
   </section>
 
   <section class="workshop-panel">
-    <div class="workshop-panel__heading"><div><p class="workshop-eyebrow">LEDGER</p><h2>입금·경비 기록</h2></div><a href="{% url 'partner_admin:core_partnerfinancialentry_add' %}">기록 추가 →</a></div>
+    <div class="workshop-panel__heading"><div><p class="workshop-eyebrow">LEDGER</p><h2>입금·경비 기록</h2></div><a href="{% url 'partner_admin:core_partnerfinancialentry_add' %}">기록 추가</a></div>
     {% if recent_finances %}<div class="workshop-table-wrap"><table class="workshop-table"><thead><tr><th>처리일</th><th>구분</th><th>항목</th><th>상대방</th><th>연결 작업</th><th>금액</th></tr></thead><tbody>
       {% for entry in recent_finances %}<tr><td>{{ entry.occurred_at|date:"Y-m-d" }}</td><td>{{ entry.get_kind_display }}</td><td>{{ entry.category }}</td><td>{{ entry.counterparty|default:"—" }}</td><td>{% if entry.work_order_id %}<a href="{% url 'partner_admin:core_partnerworkorder_change' entry.work_order_id %}">WO-{{ entry.work_order_id }}</a>{% else %}—{% endif %}</td><td>{{ entry.amount_krw|comma }}원</td></tr>{% endfor %}
     </tbody></table></div>{% else %}<div class="workshop-empty"><strong>이 달 장부 기록이 없습니다.</strong><p>실제 입금 또는 경비를 기록하면 월별 합계에 반영됩니다.</p></div>{% endif %}
   </section>
 
   <section class="workshop-panel">
-    <div class="workshop-panel__heading"><div><p class="workshop-eyebrow">PURCHASES</p><h2>부품 매입 내역</h2></div><a href="{% url 'partner_admin:core_partnerpurchaseline_add' %}">매입 등록 →</a></div>
+    <div class="workshop-panel__heading"><div><p class="workshop-eyebrow">PURCHASES</p><h2>부품 매입 내역</h2></div><a href="{% url 'partner_admin:core_partnerpurchaseline_add' %}">매입 등록</a></div>
     {% if recent_purchases %}<div class="workshop-table-wrap"><table class="workshop-table"><thead><tr><th>매입일</th><th>매입처</th><th>부품</th><th>수량</th><th>합계</th><th>지불액</th></tr></thead><tbody>
       {% for line in recent_purchases %}<tr><td>{{ line.purchased_at|date:"Y-m-d" }}</td><td>{{ line.supplier.name }}</td><td>{{ line.part.name }}</td><td>{{ line.quantity }} {{ line.part.unit }}</td><td>{{ line.total_krw|comma }}원</td><td>{{ line.paid_krw|comma }}원</td></tr>{% endfor %}
     </tbody></table></div>{% else %}<div class="workshop-empty"><strong>이 달 부품 매입 기록이 없습니다.</strong><p>매입을 등록하면 현재고와 재고 이동 이력에 자동 반영됩니다.</p></div>{% endif %}
