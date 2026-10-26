@@ -2,6 +2,8 @@ from django import forms
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.urls import reverse
+from django.utils.html import format_html
 from django.utils import timezone
 
 from .member_display import member_nickname
@@ -71,9 +73,10 @@ class PartnerWorkOrderForm(forms.ModelForm):
 
 class PartnerWorkOrderAdmin(admin.ModelAdmin):
     form = PartnerWorkOrderForm
+    change_form_template = "admin/core/partnerworkorder/change_form.html"
     list_display = (
         "order_number", "created_at", "customer_name", "vehicle_summary",
-        "contact_phone", "status", "quoted_total_krw", "paid_amount_krw",
+        "contact_phone", "status", "quoted_total_krw", "paid_amount_krw", "quote_print_link",
     )
     list_filter = ("status", "created_at")
     search_fields = ("customer_name", "contact_phone", "plate_number", "vehicle_model", "customer_concern")
@@ -95,6 +98,11 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
     @admin.display(description="작업 번호", ordering="pk")
     def order_number(self, obj):
         return f"WO-{obj.created_at:%y%m%d}-{obj.pk:05d}"
+
+    @admin.display(description="견적서")
+    def quote_print_link(self, obj):
+        url = reverse("partner_admin:partner-workorder-quote", args=[obj.pk])
+        return format_html('<a href="{}" target="_blank" rel="noopener">출력</a>', url)
 
     @admin.display(description="차량")
     def vehicle_summary(self, obj):
@@ -156,7 +164,7 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
         if not change:
             obj.created_by = request.user
         items = form.cleaned_data.get("items") or []
-        if items and not obj.quoted_total_krw:
+        if items:
             obj.quoted_total_krw = sum(row["amount_krw"] for row in items)
         if obj.status == PartnerWorkOrder.Status.COMPLETED and not obj.completed_at:
             obj.completed_at = timezone.now()

@@ -8,6 +8,56 @@
   color: #fff !important;
   font-weight: 750;
 }
+.workshop-dashboard { max-width: 1480px; margin: 0 auto; }
+.workshop-dashboard__header { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin:8px 0 24px; padding:28px; border:1px solid var(--border-color,#dedfe4); border-radius:16px; background:linear-gradient(120deg,var(--body-bg,#fff) 60%,#fff5f6); }
+.workshop-dashboard__header h1 { margin:0 0 6px!important; color:var(--body-fg,#202127); font-size:clamp(28px,3.4vw,40px)!important; letter-spacing:-.045em; }
+.workshop-dashboard__header p:last-child { margin:0; color:var(--body-quiet-color,#71747d); }
+.workshop-eyebrow { margin:0 0 7px; color:#b3213b; font-size:10px; font-weight:850; letter-spacing:.16em; }
+.workshop-primary-action,.workshop-secondary-action { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 17px; border-radius:9px; background:#b3213b; color:#fff!important; font-weight:800; text-decoration:none!important; white-space:nowrap; }
+.workshop-primary-action:hover,.workshop-secondary-action:hover { background:#941b31; }
+.workshop-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:20px; }
+.workshop-metric { display:grid; gap:6px; min-width:0; padding:18px 20px; border:1px solid var(--border-color,#dedfe4); border-radius:13px; background:var(--body-bg,#fff); color:var(--body-fg,#202127)!important; text-decoration:none!important; transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease; }
+.workshop-metric:hover { transform:translateY(-2px); border-color:#d6a0aa; box-shadow:0 8px 24px #2528320d; }
+.workshop-metric>span { color:var(--body-quiet-color,#71747d); font-size:12px; font-weight:700; }
+.workshop-metric strong { font-size:32px; line-height:1.1; letter-spacing:-.04em; }
+.workshop-metric small { color:var(--body-quiet-color,#71747d); font-size:11px; }
+.workshop-metric--attention strong { color:#b3213b; }
+.workshop-panel { margin:0 0 20px; padding:22px; border:1px solid var(--border-color,#dedfe4); border-radius:14px; background:var(--body-bg,#fff); }
+.workshop-panel__heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.workshop-panel__heading h2 { margin:0!important; font-size:21px!important; letter-spacing:-.03em; }
+.workshop-panel__heading a { font-size:12px; font-weight:750; }
+.workshop-flow { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:9px; margin:0; padding:0; list-style:none; }
+.workshop-flow li { position:relative; display:grid; gap:7px; min-width:0; padding:15px; border-radius:10px; background:var(--darkened-bg,#f7f7f8); }
+.workshop-flow li>span { color:#b3213b; font-size:10px; font-weight:850; letter-spacing:.12em; }
+.workshop-flow li strong { font-size:13px; }
+.workshop-flow li small { color:var(--body-quiet-color,#71747d); font-size:11px; line-height:1.5; }
+.workshop-table-wrap { overflow-x:auto; }
+.workshop-table { width:100%; border-collapse:collapse; }
+.workshop-table th { padding:10px 9px; border-bottom:1px solid var(--border-color,#dedfe4); color:var(--body-quiet-color,#71747d); font-size:11px; text-align:left; white-space:nowrap; }
+.workshop-table td { padding:13px 9px; border-bottom:1px solid var(--hairline-color,#ececf0); font-size:12px; vertical-align:middle; }
+.workshop-table tbody tr:last-child td { border-bottom:0; }
+.workshop-table td small { display:block; margin-top:3px; color:var(--body-quiet-color,#71747d); }
+.workshop-status { display:inline-flex; padding:4px 8px; border-radius:999px; background:#f0f1f3; color:#555963; font-size:10px; font-weight:800; white-space:nowrap; }
+.workshop-status--waiting_approval,.workshop-status--quote { background:#fff1df; color:#8b5200; }
+.workshop-status--in_progress { background:#e8f1ff; color:#2458a5; }
+.workshop-status--ready { background:#e5f5ec; color:#216b3c; }
+.workshop-status--completed { background:#eff0f5; color:#50566d; }
+.workshop-row-actions { white-space:nowrap; }
+.workshop-empty { padding:34px 16px; text-align:center; }
+.workshop-empty p { margin:7px 0 16px; color:var(--body-quiet-color,#71747d); }
+.workshop-shortcuts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.workshop-shortcuts a { display:grid; gap:6px; position:relative; padding:16px 38px 16px 16px; border:1px solid var(--border-color,#dedfe4); border-radius:11px; color:var(--body-fg,#202127)!important; text-decoration:none!important; transition:border-color .18s ease,transform .18s ease; }
+.workshop-shortcuts a:hover { transform:translateY(-2px); border-color:#b3213b; }
+.workshop-shortcuts span { color:#b3213b; font-size:10px; font-weight:850; letter-spacing:.12em; }
+.workshop-shortcuts strong { font-size:12px; }
+.workshop-shortcuts b { position:absolute; top:16px; right:16px; color:var(--body-quiet-color,#71747d); }
+body.model-serviceestimate #changelist { overflow-x:auto; }
+body.model-serviceestimate #result_list { min-width:840px; }
+body.model-partnerworkorder #result_list { min-width:980px; }
+body.model-partnerworkorder.change-form .object-tools a[href*="partner-workorder-quote"] { background:#b3213b; color:#fff; }
+@media(max-width:1050px) { .workshop-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .workshop-flow { grid-template-columns:repeat(3,minmax(0,1fr)); } .workshop-shortcuts { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:700px) { .workshop-dashboard__header { display:grid; align-items:start; padding:20px; } .workshop-primary-action { justify-self:start; } .workshop-panel { padding:16px; } .workshop-flow { grid-template-columns:1fr; } .workshop-flow li { grid-template-columns:42px 1fr; align-items:center; } .workshop-flow li small { grid-column:2; } .workshop-shortcuts { grid-template-columns:1fr 1fr; } .workshop-panel__heading { align-items:flex-end; } }
+@media(max-width:420px) { .workshop-metrics { gap:8px; } .workshop-metric { padding:14px; } .workshop-metric strong { font-size:27px; } .workshop-shortcuts { grid-template-columns:1fr; } }
 .partner-push-control { display: flex; align-items: center; gap: 10px; margin: 0 22px; }
 .partner-push-button { min-height: 36px; padding: 0 13px; border: 1px solid #d7d9df; border-radius: 9px; background: #fff; color: #34363b; font: inherit; font-size: 13px; font-weight: 750; cursor: pointer; }
 .partner-push-button:hover { border-color: #b3213b; color: #a51e36; }
