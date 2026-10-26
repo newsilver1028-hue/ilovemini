@@ -1,8 +1,9 @@
 from django.contrib import admin
 from django.contrib.admin import AdminSite
+from django import forms
 from django.db.models import F, Q, Sum
 from django.db import transaction
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
@@ -18,6 +19,10 @@ from .models import (
     LedgerEvidence,
     Partner,
     PartnerBooking,
+    PartnerServiceDuration,
+    PartnerWeeklySchedule,
+    PartnerScheduleException,
+    PartnerScheduleBlock,
     PartnerStaff,
     PartnerWorkOrder,
     PartnerPart,
@@ -87,6 +92,10 @@ class PartnerAdminSite(AdminSite):
         app_list = super().get_app_list(request, app_label)
         names = {
             "PartnerBooking": "업체 예약",
+            "PartnerServiceDuration": "정비 항목별 작업 시간",
+            "PartnerWeeklySchedule": "주간 예약 운영시간",
+            "PartnerScheduleException": "날짜별 일정 변경·휴무",
+            "PartnerScheduleBlock": "임시 예약 차단",
             "PartnerWorkOrder": "정비 접수·작업지시",
             "PartnerCustomer": "고객 대장",
             "PartnerVehicle": "업체 차량 대장",
@@ -492,14 +501,14 @@ class PartnerBookingStatusFilter(admin.SimpleListFilter):
 class PartnerBookingAdmin(admin.ModelAdmin):
     change_list_template = "admin/core/partnerbooking/change_list.html"
     change_form_template = "admin/core/partnerbooking/change_form.html"
-    list_display = ("booking_time", "vehicle_plate", "contact_phone_display", "vehicle_model", "service_label", "status_label")
+    list_display = ("booking_time", "vehicle_plate", "contact_phone_display", "vehicle_model", "service_label", "duration_label", "schedule_conflict_label", "status_label")
     list_filter = (PartnerBookingStatusFilter,)
     search_fields = ("vehicle__model_name", "vehicle__plate_number", "contact_phone", "service_type")
     list_select_related = ("vehicle", "partner")
     date_hierarchy = None
     ordering = ("-requested_at",)
     actions = None
-    fields = ("vehicle_registration", "contact_phone_display", "booking_time", "service_label", "customer_note_display", "status", "partner_note")
+    fields = ("vehicle_registration", "contact_phone_display", "booking_time", "scheduled_at", "service_label", "duration_minutes", "customer_note_display", "status", "partner_note")
     readonly_fields = ("vehicle_registration", "contact_phone_display", "booking_time", "service_label", "customer_note_display")
 
     @admin.display(description="차량번호 / 차량")
@@ -529,6 +538,22 @@ class PartnerBookingAdmin(admin.ModelAdmin):
     def service_label(self, obj):
         return obj.service_type or "미등록"
 
+    @admin.display(description="예상 작업 시간", ordering="duration_minutes")
+    def duration_label(self, obj):
+        hours, minutes = divmod(obj.duration_minutes or 60, 60)
+        return f"{hours}시간" + (f" {minutes}분" if minutes else "")
+
+    @admin.display(description="일정 확인")
+    def schedule_conflict_label(self, obj):
+        from .booking_schedule import ACTIVE_BOOKING_STATUSES
+        start = obj.scheduled_at
+        end = start + timedelta(minutes=obj.duration_minutes or 60)
+        conflicts = PartnerBooking.objects.filter(partner=obj.partner, status__in=ACTIVE_BOOKING_STATUSES, scheduled_at__lt=end).exclude(pk=obj.pk)
+        for other in conflicts.only("scheduled_at", "duration_minutes"):
+            if other.scheduled_at + timedelta(minutes=other.duration_minutes or 60) > start:
+                return "재조정 필요"
+        return "정상"
+
     @admin.display(description="예약 상태", ordering="status")
     def status_label(self, obj):
         return obj.get_status_display()
@@ -539,11 +564,14 @@ class PartnerBookingAdmin(admin.ModelAdmin):
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         field = super().formfield_for_dbfield(db_field, request, **kwargs)
-        labels = {"status": "예약 상태", "partner_note": "업체 메모"}
+        labels = {"status": "예약 상태", "partner_note": "업체 메모", "duration_minutes": "예상 작업 시간(분)"}
         if field and db_field.name in labels:
             field.label = labels[db_field.name]
         if field and db_field.name == "status":
             field.widget.attrs.update({"class": "partner-booking-status"})
+        if field and db_field.name == "duration_minutes":
+            choices = [(value, str(value // 60) + "시간" + (" " + str(value % 60) + "분" if value % 60 else "")) for value in range(30, 481, 30)]
+            field.widget = forms.Select(choices=choices)
         return field
 
     def get_queryset(self, request):
@@ -570,10 +598,23 @@ class PartnerBookingAdmin(admin.ModelAdmin):
             scheduled_at__lt=timezone.make_aware(datetime.combine(next_month, time.min)),
         ).order_by("scheduled_at", "pk")
         events_by_day = {}
-        for booking in bookings:
+        booking_rows = list(bookings)
+        for booking in booking_rows:
             vehicle = booking.vehicle
+            start = booking.scheduled_at
+            end = start + timedelta(minutes=booking.duration_minutes or 60)
+            has_conflict = any(
+                other.pk != booking.pk and other.partner_id == booking.partner_id
+                and other.scheduled_at < end
+                and other.scheduled_at + timedelta(minutes=other.duration_minutes or 60) > start
+                and other.status in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED)
+                and booking.status in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED)
+                for other in booking_rows
+            )
             event = {
                 "time": timezone.localtime(booking.scheduled_at).strftime("%H:%M"),
+                "ends_at": timezone.localtime(end).strftime("%H:%M"),
+                "has_conflict": has_conflict,
                 "plate": vehicle.plate_number if vehicle and vehicle.plate_number else "차량번호 미등록",
                 "phone": booking.contact_phone or "연락처 미등록",
                 "service": booking.service_type,
@@ -627,9 +668,14 @@ class PartnerBookingAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         if not change or obj.partner_id not in staff_partners(request, booking=True):
             raise Http404
-        previous = PartnerBooking.objects.filter(pk=obj.pk, partner_id=obj.partner_id).values("status", "partner_note").first()
+        previous = PartnerBooking.objects.filter(pk=obj.pk, partner_id=obj.partner_id).values("status", "partner_note", "scheduled_at", "duration_minutes").first()
         if previous is None:
             raise Http404
+        from .booking_schedule import is_slot_available
+        available, reason = is_slot_available(obj.partner, obj.scheduled_at, obj.duration_minutes, exclude_booking_id=obj.pk)
+        duration_extension = obj.duration_minutes > previous["duration_minutes"] and obj.scheduled_at == previous["scheduled_at"]
+        if not available and not duration_extension:
+            raise ValidationError({"duration_minutes": reason})
         allowed = {
             PartnerBooking.Status.REQUESTED: {PartnerBooking.Status.CONFIRMED, PartnerBooking.Status.REJECTED},
             PartnerBooking.Status.CONFIRMED: {PartnerBooking.Status.COMPLETED},
@@ -646,6 +692,74 @@ class PartnerBookingAdmin(admin.ModelAdmin):
                     import logging
                     logging.getLogger(__name__).exception("Partner admin booking notification failed (booking_id=%s)", obj.pk)
             transaction.on_commit(notify_customer)
+        elif obj.scheduled_at != previous["scheduled_at"] or obj.duration_minutes != previous["duration_minutes"]:
+            def notify_customer_schedule():
+                try:
+                    from .push import send_booking_schedule_notification
+                    send_booking_schedule_notification(obj)
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception("Partner admin booking schedule notification failed (booking_id=%s)", obj.pk)
+            transaction.on_commit(notify_customer_schedule)
+
+
+class PartnerScopedScheduleAdmin(admin.ModelAdmin):
+    """Keep workshop schedule controls inside the signed-in staff member's scope."""
+    booking_scope = True
+    list_filter = ()
+    search_fields = ("partner__name", "partner__branch_label")
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(partner_id__in=staff_partners(request, booking=self.booking_scope))
+
+    def has_module_permission(self, request):
+        return active_staff_for(request).filter(can_manage_bookings=True).exists() or is_system_admin(request)
+
+    def has_view_permission(self, request, obj=None):
+        return self.has_module_permission(request) and (obj is None or obj.partner_id in staff_partners(request, booking=self.booking_scope))
+
+    def has_change_permission(self, request, obj=None):
+        return self.has_view_permission(request, obj)
+
+    def has_add_permission(self, request):
+        return self.has_module_permission(request)
+
+    def has_delete_permission(self, request, obj=None):
+        return self.has_view_permission(request, obj)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        field = super().formfield_for_foreignkey(db_field, request, **kwargs)
+        if db_field.name == "partner" and field:
+            field.queryset = Partner.objects.filter(pk__in=staff_partners(request, booking=self.booking_scope))
+        return field
+
+
+@admin.register(PartnerServiceDuration, site=partner_admin_site)
+class PartnerServiceDurationAdmin(PartnerScopedScheduleAdmin):
+    list_display = ("partner", "service_name", "duration_minutes", "is_active")
+    list_editable = ("duration_minutes", "is_active")
+    fields = ("partner", "service_name", "duration_minutes", "is_active")
+
+
+@admin.register(PartnerWeeklySchedule, site=partner_admin_site)
+class PartnerWeeklyScheduleAdmin(PartnerScopedScheduleAdmin):
+    list_display = ("partner", "weekday", "opens_at", "closes_at", "slot_interval_minutes", "is_closed")
+    list_editable = ("opens_at", "closes_at", "slot_interval_minutes", "is_closed")
+    fields = ("partner", "weekday", "opens_at", "closes_at", "slot_interval_minutes", "is_closed")
+
+
+@admin.register(PartnerScheduleException, site=partner_admin_site)
+class PartnerScheduleExceptionAdmin(PartnerScopedScheduleAdmin):
+    list_display = ("partner", "date", "is_closed", "opens_at", "closes_at", "note")
+    list_editable = ("is_closed", "opens_at", "closes_at", "note")
+    fields = ("partner", "date", "is_closed", "opens_at", "closes_at", "note")
+
+
+@admin.register(PartnerScheduleBlock, site=partner_admin_site)
+class PartnerScheduleBlockAdmin(PartnerScopedScheduleAdmin):
+    list_display = ("partner", "starts_at", "ends_at", "reason")
+    list_editable = ("ends_at", "reason")
+    fields = ("partner", "starts_at", "ends_at", "reason")
 
 
 @admin.register(LedgerEntry, site=partner_admin_site)

@@ -128,6 +128,8 @@ body.model-partnerbooking.change-form #content-main > .object-tools { display: n
 .partner-event.status-confirmed { border-left-color: #24854d; }
 .partner-event.status-completed { border-left-color: #5863a5; }
 .partner-event.status-rejected, .partner-event.status-cancelled { border-left-color: #9b9ca2; }
+.partner-event.is-conflicted { outline: 1px solid #c92a3f; background: #fff4f4; }
+.partner-event .partner-conflict-label { color: #b21f35; font-weight: 800; }
 .partner-more-events { color: var(--body-quiet-color, #737780); font-size: 11px; }
 .partner-calendar-empty { margin: 13px 0 0; color: var(--body-quiet-color, #737780); font-size: 12px; }
 .partner-calendar--mini .partner-day-cell { min-height: 82px; padding: 7px; }

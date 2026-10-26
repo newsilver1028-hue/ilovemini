@@ -204,10 +204,10 @@ class PartnerBookingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PartnerBooking
-        fields = ["id", "partner", "partner_name", "partner_branch_label", "partner_region", "vehicle", "vehicle_name", "vehicle_plate_number", "scheduled_at",
+        fields = ["id", "partner", "partner_name", "partner_branch_label", "partner_region", "vehicle", "vehicle_name", "vehicle_plate_number", "scheduled_at", "duration_minutes",
                   "service_type", "customer_note", "contact_phone", "status", "status_label", "can_manage", "can_verify_records", "is_customer",
                   "cancellation_reason", "partner_note", "requested_at", "updated_at"]
-        read_only_fields = ["id", "partner_name", "vehicle_name", "status", "cancellation_reason", "partner_note", "requested_at", "updated_at"]
+        read_only_fields = ["id", "partner_name", "vehicle_name", "duration_minutes", "status", "cancellation_reason", "partner_note", "requested_at", "updated_at"]
 
     def get_can_manage(self, obj):
         request = self.context.get("request")
@@ -250,4 +250,26 @@ class PartnerBookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"vehicle": "차량을 선택해 주세요."})
         if not vehicle.plate_number:
             raise serializers.ValidationError({"vehicle": "차량 번호판을 먼저 등록해야 예약을 요청할 수 있습니다."})
+        partner = attrs.get("partner", getattr(self.instance, "partner", None))
+        scheduled_at = attrs.get("scheduled_at", getattr(self.instance, "scheduled_at", None))
+        if partner and scheduled_at:
+            from .booking_schedule import is_slot_available, service_duration
+            duration = service_duration(partner, attrs.get("service_type", getattr(self.instance, "service_type", "")))
+            available, reason = is_slot_available(partner, scheduled_at, duration,
+                exclude_booking_id=self.instance.pk if self.instance else None)
+            if not available:
+                raise serializers.ValidationError({"scheduled_at": reason})
         return attrs
+
+    def create(self, validated_data):
+        from django.db import transaction
+        from .booking_schedule import is_slot_available, service_duration
+        partner = validated_data["partner"]
+        with transaction.atomic():
+            # Serialize competing booking requests for the same workshop.
+            partner.__class__.objects.select_for_update().get(pk=partner.pk)
+            duration = service_duration(partner, validated_data["service_type"])
+            available, reason = is_slot_available(partner, validated_data["scheduled_at"], duration)
+            if not available:
+                raise serializers.ValidationError({"scheduled_at": reason})
+            return PartnerBooking.objects.create(duration_minutes=duration, **validated_data)

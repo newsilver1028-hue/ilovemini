@@ -461,6 +461,7 @@ class PartnerBooking(models.Model):
     vehicle = models.ForeignKey(Vehicle, on_delete=models.SET_NULL, null=True, blank=True, related_name="bookings")
     requested_at = models.DateTimeField(default=timezone.now)
     scheduled_at = models.DateTimeField()
+    duration_minutes = models.PositiveSmallIntegerField("예상 작업 시간(분)", default=60, help_text="30분 단위. 기존 예약의 작업 시간은 저장 당시 값으로 유지됩니다.")
     service_type = models.CharField(max_length=100)
     customer_note = models.CharField(max_length=500, blank=True)
     contact_phone = models.CharField(max_length=24, blank=True)
@@ -477,6 +478,97 @@ class PartnerBooking(models.Model):
 
     def __str__(self):
         return f"{self.partner} · {self.scheduled_at:%Y-%m-%d %H:%M} · {self.get_status_display()}"
+
+
+class PartnerServiceDuration(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="booking_service_durations")
+    service_name = models.CharField("정비 항목", max_length=100)
+    duration_minutes = models.PositiveSmallIntegerField("기본 작업 시간(분)", default=60, help_text="30분 단위, 30~480분")
+    is_active = models.BooleanField("예약 가능", default=True)
+
+    class Meta:
+        verbose_name = "예약 정비 시간"
+        verbose_name_plural = "예약 정비 시간"
+        ordering = ["partner", "service_name"]
+        constraints = [models.UniqueConstraint(fields=["partner", "service_name"], name="unique_partner_booking_service")]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.duration_minutes < 30 or self.duration_minutes > 480 or self.duration_minutes % 30:
+            raise ValidationError({"duration_minutes": "작업 시간은 30분 단위로 30~480분 사이에서 설정해 주세요."})
+
+    def __str__(self):
+        return f"{self.partner} · {self.service_name} ({self.duration_minutes}분)"
+
+
+class PartnerWeeklySchedule(models.Model):
+    WEEKDAYS = [(0, "월요일"), (1, "화요일"), (2, "수요일"), (3, "목요일"), (4, "금요일"), (5, "토요일"), (6, "일요일")]
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="weekly_booking_schedule")
+    weekday = models.PositiveSmallIntegerField("요일", choices=WEEKDAYS)
+    opens_at = models.TimeField("예약 시작", null=True, blank=True)
+    closes_at = models.TimeField("마감", null=True, blank=True)
+    is_closed = models.BooleanField("휴무", default=False)
+    slot_interval_minutes = models.PositiveSmallIntegerField("예약 시작 간격(분)", default=30)
+
+    class Meta:
+        verbose_name = "주간 예약 운영시간"
+        verbose_name_plural = "주간 예약 운영시간"
+        ordering = ["partner", "weekday"]
+        constraints = [models.UniqueConstraint(fields=["partner", "weekday"], name="unique_partner_booking_weekday")]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.slot_interval_minutes not in (30, 60):
+            raise ValidationError({"slot_interval_minutes": "예약 시작 간격은 30분 또는 60분으로 설정해 주세요."})
+        if not self.is_closed and (not self.opens_at or not self.closes_at or self.opens_at >= self.closes_at):
+            raise ValidationError({"closes_at": "운영일에는 예약 시작과 마감 시간을 입력하고, 마감은 시작보다 늦게 설정해 주세요."})
+
+    def __str__(self):
+        label = dict(self.WEEKDAYS).get(self.weekday, "요일")
+        return f"{self.partner} · {label} · {'휴무' if self.is_closed else f'{self.opens_at:%H:%M}–{self.closes_at:%H:%M}'}"
+
+
+class PartnerScheduleException(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="booking_schedule_exceptions")
+    date = models.DateField("적용 날짜")
+    is_closed = models.BooleanField("종일 휴무", default=False)
+    opens_at = models.TimeField("해당일 예약 시작", null=True, blank=True)
+    closes_at = models.TimeField("해당일 마감", null=True, blank=True)
+    note = models.CharField("메모", max_length=160, blank=True)
+
+    class Meta:
+        verbose_name = "날짜별 예약 일정 변경"
+        verbose_name_plural = "날짜별 예약 일정 변경"
+        ordering = ["date", "partner"]
+        constraints = [models.UniqueConstraint(fields=["partner", "date"], name="unique_partner_booking_exception")]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if not self.is_closed and (not self.opens_at or not self.closes_at or self.opens_at >= self.closes_at):
+            raise ValidationError("휴무가 아니면 예약 시작과 마감 시간을 올바르게 입력해 주세요.")
+
+    def __str__(self):
+        return f"{self.partner} · {self.date} · {'휴무' if self.is_closed else '운영시간 변경'}"
+
+
+class PartnerScheduleBlock(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="booking_schedule_blocks")
+    starts_at = models.DateTimeField("차단 시작")
+    ends_at = models.DateTimeField("차단 종료")
+    reason = models.CharField("사유", max_length=160, blank=True)
+
+    class Meta:
+        verbose_name = "예약 시간 차단"
+        verbose_name_plural = "예약 시간 차단"
+        ordering = ["starts_at"]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.ends_at <= self.starts_at:
+            raise ValidationError({"ends_at": "차단 종료는 시작보다 늦어야 합니다."})
+
+    def __str__(self):
+        return f"{self.partner} · {self.starts_at:%Y-%m-%d %H:%M}–{self.ends_at:%H:%M}"
 
 
 class PartnerWorkOrder(models.Model):

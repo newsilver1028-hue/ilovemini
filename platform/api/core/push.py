@@ -151,6 +151,26 @@ def send_booking_status_notification(booking):
     return messaging.send_each_for_multicast(message).success_count
 
 
+def send_booking_schedule_notification(booking):
+    """Tell a customer when the workshop changes the booked start time or duration."""
+    if not _ensure_firebase():
+        return 0
+    devices = list(booking.customer.push_devices.all())
+    if not devices:
+        return 0
+    hours, minutes = divmod(booking.duration_minutes or 60, 60)
+    duration = (f"{hours}시간 " if hours else "") + (f"{minutes}분" if minutes else "")
+    message = messaging.MulticastMessage(
+        notification=messaging.Notification(
+            title=f"예약 일정 변경 · {booking.partner.name}" + (f" · {booking.partner.branch_label}" if booking.partner.branch_label else ""),
+            body=f"{booking.scheduled_at:%m월 %d일 %H:%M} · {booking.service_type} · 예상 {duration.strip()}",
+        ),
+        data={"type": "partner_booking_status", "booking_id": str(booking.pk), "status": booking.status},
+        tokens=[device.installation_id for device in devices],
+    )
+    return messaging.send_each_for_multicast(message).success_count
+
+
 def send_booking_cancel_notification(booking):
     sent = send_partner_web_push(booking, cancelled=True)
     if not _ensure_firebase():

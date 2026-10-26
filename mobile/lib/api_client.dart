@@ -76,6 +76,14 @@ class ApiClient {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> partnerBookingSlots(int partnerId, DateTime date, String serviceType) async {
+    final day = '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    final uri = _uri('partners/$partnerId/booking-slots').replace(queryParameters: {'date': day, 'service_type': serviceType});
+    final response = await _client.get(uri);
+    if (response.statusCode != 200) throw Exception(_message(response));
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
   Future<void> cancelPartnerBooking(int bookingId) async {
     final token = await _storage.read(key: 'access_token');
     if (token == null) throw Exception('로그인이 필요합니다.');

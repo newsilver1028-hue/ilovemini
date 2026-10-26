@@ -1048,6 +1048,24 @@ class PartnerViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [SafeMethodsOrStaff]
     queryset = Partner.objects.filter(is_active=True).prefetch_related("introduction_images").annotate(review_count=Count("reviews"), average_rating=Avg("reviews__rating"))
 
+    @action(detail=True, methods=["get"], url_path="booking-slots", permission_classes=[permissions.AllowAny], throttle_classes=[ScopedRateThrottle], throttle_scope="booking")
+    def booking_slots(self, request, pk=None):
+        """Return service-duration-aware 30-minute start times for a local date."""
+        from datetime import date
+        from rest_framework.exceptions import ValidationError
+        from .booking_schedule import available_slots
+        partner = self.get_object()
+        try:
+            day = date.fromisoformat(request.query_params.get("date", ""))
+        except ValueError:
+            raise ValidationError({"date": "날짜는 YYYY-MM-DD 형식으로 입력해 주세요."})
+        if day < timezone.localdate() or day > timezone.localdate() + timedelta(days=180):
+            raise ValidationError({"date": "오늘부터 180일 이내 날짜를 선택해 주세요."})
+        service_name = request.query_params.get("service_type", "").strip()[:100]
+        if not service_name:
+            raise ValidationError({"service_type": "정비 항목을 입력해 주세요."})
+        return Response(available_slots(partner, day, service_name))
+
     @action(detail=True, methods=["get"], url_path=r"images/(?P<image_id>[^/.]+)")
     def introduction_image(self, request, pk=None, image_id=None):
         partner = self.get_object()
