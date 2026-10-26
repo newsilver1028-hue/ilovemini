@@ -4,9 +4,11 @@ from django.db.models import Q
 from django.db import transaction
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpResponse
+from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
 from django.utils.html import format_html_join
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 from django.conf import settings
 from datetime import datetime, time, timedelta
 
@@ -16,6 +18,8 @@ from .models import (
     Partner,
     PartnerBooking,
     PartnerStaff,
+    PartnerWorkOrder,
+    ServiceEstimate,
 )
 from .member_display import member_nickname
 
@@ -91,6 +95,16 @@ class PartnerAdminSite(AdminSite):
     def get_urls(self):
         return [
             path(
+                "work-orders/<int:work_order_id>/quote/",
+                self.admin_view(self.print_work_order_quote),
+                name="partner-workorder-quote",
+            ),
+            path(
+                "estimates/<int:estimate_id>/print/",
+                self.admin_view(self.print_service_estimate),
+                name="partner-estimate-print",
+            ),
+            path(
                 "exports/bookings.xlsx",
                 self.admin_view(self.export_bookings),
                 name="partner-booking-export",
@@ -106,6 +120,96 @@ class PartnerAdminSite(AdminSite):
                 name="ledger-evidence",
             ),
         ] + super().get_urls()
+
+    @never_cache
+    def index(self, request, extra_context=None):
+        context = self.each_context(request)
+        context.update(extra_context or {})
+        context["title"] = self.index_title
+        context["app_list"] = self.get_app_list(request)
+
+        can_manage_work = is_system_admin(request) or active_staff_for(request).filter(can_manage_bookings=True).exists()
+        can_verify_records = is_system_admin(request) or active_staff_for(request).filter(can_verify_records=True).exists()
+        partner_ids = staff_partners(request, booking=True)
+        bookings = PartnerBooking.objects.filter(partner_id__in=partner_ids)
+        orders = PartnerWorkOrder.objects.filter(partner_id__in=partner_ids).select_related("partner", "booking", "vehicle")
+        today = timezone.localdate()
+        active_statuses = [
+            PartnerWorkOrder.Status.RECEIVED,
+            PartnerWorkOrder.Status.INSPECTING,
+            PartnerWorkOrder.Status.QUOTE,
+            PartnerWorkOrder.Status.WAITING_APPROVAL,
+            PartnerWorkOrder.Status.WAITING_PARTS,
+            PartnerWorkOrder.Status.IN_PROGRESS,
+            PartnerWorkOrder.Status.READY,
+        ]
+        context["partner_dashboard"] = {
+            "can_manage_work": can_manage_work,
+            "can_verify_records": can_verify_records,
+            "today_bookings": bookings.filter(scheduled_at__date=today).count(),
+            "booking_requests": bookings.filter(status=PartnerBooking.Status.REQUESTED).count(),
+            "active_orders": orders.filter(status__in=active_statuses).count(),
+            "awaiting_approval": orders.filter(status=PartnerWorkOrder.Status.WAITING_APPROVAL).count(),
+            "recent_orders": orders.order_by("-updated_at", "-pk")[:8],
+            "today": today,
+        }
+        return render(request, self.index_template, context)
+
+    def print_work_order_quote(self, request, work_order_id):
+        work_order = get_object_or_404(
+            PartnerWorkOrder.objects.select_related("partner", "booking", "vehicle"),
+            pk=work_order_id,
+            partner_id__in=staff_partners(request, booking=True),
+        )
+        return render(request, "core/partner_quote_print.html", {
+            "document_title": "정비 견적서",
+            "document_number": f"WO-{work_order.created_at:%y%m%d}-{work_order.pk:05d}",
+            "issued_at": work_order.updated_at,
+            "partner": work_order.partner,
+            "customer_name": work_order.customer_name,
+            "contact_phone": work_order.contact_phone,
+            "vehicle_model": work_order.vehicle_model or (work_order.vehicle.model_name if work_order.vehicle else "미입력"),
+            "plate_number": work_order.plate_number or (work_order.vehicle.plate_number if work_order.vehicle else "미입력"),
+            "odometer_km": work_order.odometer_km,
+            "customer_concern": work_order.customer_concern,
+            "inspection_notes": work_order.inspection_notes,
+            "items": work_order.items if isinstance(work_order.items, list) else [],
+            "total_krw": work_order.quoted_total_krw or sum(
+                item.get("amount_krw", 0) for item in work_order.items
+                if isinstance(item, dict) and type(item.get("amount_krw")) is int
+            ),
+            "note": work_order.customer_message,
+            "status": work_order.get_status_display(),
+        })
+
+    def print_service_estimate(self, request, estimate_id):
+        estimate = get_object_or_404(
+            ServiceEstimate.objects.select_related(
+                "booking__partner", "booking__vehicle", "booking__customer__naver_identity",
+                "booking__customer__apple_identity",
+            ),
+            pk=estimate_id,
+            booking__partner_id__in=staff_partners(request, booking=True),
+        )
+        booking = estimate.booking
+        customer_name = member_nickname(booking.customer)
+        return render(request, "core/partner_quote_print.html", {
+            "document_title": "정비 견적서",
+            "document_number": f"EST-{booking.pk:06d}-{estimate.revision:02d}",
+            "issued_at": estimate.created_at,
+            "partner": booking.partner,
+            "customer_name": customer_name,
+            "contact_phone": booking.contact_phone,
+            "vehicle_model": booking.vehicle.model_name if booking.vehicle else "미입력",
+            "plate_number": booking.vehicle.plate_number if booking.vehicle else "미입력",
+            "odometer_km": booking.vehicle.current_odometer_km if booking.vehicle else None,
+            "customer_concern": booking.customer_note,
+            "inspection_notes": "",
+            "items": estimate.items if isinstance(estimate.items, list) else [],
+            "total_krw": estimate.total_krw,
+            "note": estimate.note,
+            "status": estimate.get_status_display(),
+        })
 
     @staticmethod
     def _excel_response(filename, title, headers, rows):
