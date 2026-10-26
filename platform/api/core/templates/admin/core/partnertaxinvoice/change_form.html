@@ -152,7 +152,7 @@
         var body = document.createElement("div");
         body.className = "invoice-section__body";
         section.append(heading,body);
-        form.insertBefore(section, rows[0]);
+        rows[0].parentNode.insertBefore(section, rows[0]);
         rows.forEach(function (row) { body.appendChild(row); });
       });
     }());
