@@ -3,6 +3,8 @@ from django.contrib import admin
 from django.contrib.admin.widgets import AdminDateWidget
 from django.db import transaction
 from django.core.exceptions import PermissionDenied
+from django.urls import reverse
+from django.utils.html import format_html
 from .models import ServiceEstimate, MaintenanceRecommendation, PartnerBooking, LedgerEntry, VehicleOwnership, PartnerStaff
 from .phase_one_views import EstimateSerializer, RecommendationSerializer
 
@@ -90,7 +92,13 @@ class PhaseOneAdmin(admin.ModelAdmin):
 
 class EstimateAdmin(PhaseOneAdmin):
     form=EstimateForm
-    list_display=['id','booking','revision','total_krw','status','created_at']
+    change_list_template = "admin/core/serviceestimate/change_list.html"
+    list_display=['id','booking','revision','total_krw','status','created_at','print_document']
+
+    @admin.display(description='견적서 출력')
+    def print_document(self, obj):
+        url = reverse('partner_admin:partner-estimate-print', args=[obj.pk])
+        return format_html('<a href="{}" target="_blank" rel="noopener">인쇄 · PDF</a>', url)
 class RecommendationAdmin(PhaseOneAdmin):
     form=RecommendationForm
     list_display=['id','entry','title','due_date','due_odometer_km','status']
