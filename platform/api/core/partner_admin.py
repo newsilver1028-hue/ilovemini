@@ -231,7 +231,7 @@ class PartnerAdminSite(AdminSite):
         work_orders = PartnerWorkOrder.objects.filter(
             partner_id__in=partner_ids, created_at__year=report_month.year,
             created_at__month=report_month.month,
-        )
+        ).exclude(status=PartnerWorkOrder.Status.CANCELLED)
         receivable = work_orders.aggregate(total=Sum(F("final_total_krw") - F("paid_amount_krw")))["total"] or 0
         parts = PartnerPart.objects.filter(partner_id__in=partner_ids, is_active=True)
         stock_value = parts.aggregate(total=Sum(F("stock_quantity") * F("purchase_price_krw")))["total"] or 0
