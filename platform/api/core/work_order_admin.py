@@ -248,7 +248,10 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
             )
 
     def get_inline_instances(self, request, obj=None):
-        return [PartnerWorkOrderLineInline(self, self.admin_site), PartnerPaymentInline(self, self.admin_site)]
+        return [
+            PartnerWorkOrderLineInline(self.model, self.admin_site),
+            PartnerPaymentInline(self.model, self.admin_site),
+        ]
 
 
 class PartnerWorkOrderLineForm(forms.ModelForm):
