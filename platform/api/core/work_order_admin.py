@@ -1,13 +1,14 @@
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.db.models import F
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils import timezone
 
 from .member_display import member_nickname
-from .models import PartnerBooking, PartnerStaff, PartnerWorkOrder, Partner, PartnerCustomer, PartnerVehicle, PartnerPart, PartnerWorkOrderLine
+from .models import PartnerBooking, PartnerStaff, PartnerWorkOrder, Partner, PartnerCustomer, PartnerVehicle, PartnerPart, PartnerWorkOrderLine, PartnerStockMovement, PartnerPayment
 from .partner_admin import is_system_admin, staff_partners
 
 
@@ -139,8 +140,16 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
         partner_ids = list(staff_partners(request, booking=True))
         if obj.partner_id not in partner_ids:
             raise PermissionDenied("담당 협력업체의 작업만 저장할 수 있습니다.")
-        if change and not PartnerWorkOrder.objects.filter(pk=obj.pk, partner_id__in=partner_ids).exists():
-            raise PermissionDenied("해당 작업에 접근할 수 없습니다.")
+        previous = None
+        if change:
+            previous = PartnerWorkOrder.objects.select_for_update().filter(
+                pk=obj.pk, partner_id__in=partner_ids
+            ).values("status").first()
+            if previous is None:
+                raise PermissionDenied("해당 작업에 접근할 수 없습니다.")
+        # Keep request-specific state on the form; ModelAdmin instances are shared
+        # between requests and must not hold mutable per-save state.
+        form._previous_status = previous["status"] if previous else None
         booking = form.cleaned_data.get("booking")
         customer = form.cleaned_data.get("customer")
         partner_vehicle = form.cleaned_data.get("partner_vehicle")
@@ -181,9 +190,65 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
         if lines:
             PartnerWorkOrder.objects.filter(pk=order.pk).update(quoted_total_krw=line_total)
             order.quoted_total_krw = line_total
+            if order.status == PartnerWorkOrder.Status.COMPLETED and not order.final_total_krw:
+                PartnerWorkOrder.objects.filter(pk=order.pk).update(final_total_krw=line_total)
+                order.final_total_krw = line_total
+        was_completed = getattr(form, "_previous_status", None) == PartnerWorkOrder.Status.COMPLETED
+        if order.status != PartnerWorkOrder.Status.COMPLETED or was_completed:
+            return
+
+        required = {}
+        unlinked_parts = []
+        for line in lines:
+            if line.kind == PartnerWorkOrderLine.Kind.PART and not line.part_id:
+                unlinked_parts.append(line.description)
+            if line.kind == PartnerWorkOrderLine.Kind.PART and line.part_id:
+                required[line.part_id] = required.get(line.part_id, 0) + int(line.quantity)
+        if not required and not unlinked_parts:
+            return
+        parts = {
+            part.pk: part for part in PartnerPart.objects.select_for_update().filter(
+                pk__in=required, partner_id=order.partner_id, is_active=True
+            ).order_by("pk")
+        }
+        missing = [part_id for part_id in required if part_id not in parts]
+        insufficient = [
+            parts[part_id].name for part_id, quantity in required.items()
+            if part_id in parts and parts[part_id].stock_quantity < quantity
+        ]
+        if missing or insufficient or unlinked_parts:
+            old_status = getattr(self, "_previous_status", None) or PartnerWorkOrder.Status.RECEIVED
+            PartnerWorkOrder.objects.filter(pk=order.pk).update(status=old_status, completed_at=None)
+            order.status = old_status
+            order.completed_at = None
+            detail_parts = insufficient + unlinked_parts
+            if missing:
+                detail_parts.append("비활성화되었거나 다른 업체에 속한 재고 부품")
+            detail = ", ".join(detail_parts) if detail_parts else "업체 재고 부품"
+            self.message_user(
+                request,
+                f"재고가 부족해 정비 완료 처리하지 않았습니다: {detail}. 재고를 보충한 뒤 다시 완료해 주세요.",
+                level=messages.ERROR,
+            )
+            return
+        for part_id, quantity in required.items():
+            part = parts[part_id]
+            next_stock = part.stock_quantity - quantity
+            PartnerPart.objects.filter(pk=part_id).update(stock_quantity=F("stock_quantity") - quantity)
+            PartnerStockMovement.objects.create(
+                partner_id=order.partner_id,
+                part=part,
+                work_order=order,
+                direction=PartnerStockMovement.Direction.OUT,
+                reason=PartnerStockMovement.Reason.REPAIR_USE,
+                quantity=quantity,
+                balance_after=next_stock,
+                note=f"작업 완료 WO-{order.pk}",
+                created_by=request.user,
+            )
 
     def get_inline_instances(self, request, obj=None):
-        return [PartnerWorkOrderLineInline(self, self.admin_site)]
+        return [PartnerWorkOrderLineInline(self, self.admin_site), PartnerPaymentInline(self, self.admin_site)]
 
 
 class PartnerWorkOrderLineForm(forms.ModelForm):
@@ -203,14 +268,22 @@ class PartnerWorkOrderLineForm(forms.ModelForm):
         partner_id = getattr(self.parent, "partner_id", None) or (self.request.POST.get("partner") if self.request and self.request.method == "POST" else None)
         if part and str(part.partner_id) != str(partner_id):
             self.add_error("part", "다른 업체의 재고 부품은 선택할 수 없습니다.")
-        if data.get("kind") == PartnerWorkOrderLine.Kind.PART and not part and not data.get("description"):
-            self.add_error("description", "부품명 또는 재고 부품을 선택해 주세요.")
+        if data.get("kind") == PartnerWorkOrderLine.Kind.PART and not part:
+            self.add_error("part", "재고 자동 차감을 위해 등록된 부품을 선택해 주세요.")
+        quantity = data.get("quantity")
+        if data.get("kind") == PartnerWorkOrderLine.Kind.PART and quantity is not None and quantity != quantity.to_integral_value():
+            self.add_error("quantity", "재고 부품 수량은 정수로 입력해 주세요.")
         if part and not data.get("description"):
             data["description"] = part.name
         if part and not data.get("unit"):
             data["unit"] = part.unit
         if part and not data.get("unit_price_krw"):
             data["unit_price_krw"] = part.sale_price_krw
+        if part and data.get("kind") != PartnerWorkOrderLine.Kind.PART:
+            data["kind"] = PartnerWorkOrderLine.Kind.PART
+        quantity = data.get("quantity")
+        if part and quantity is not None and quantity != quantity.to_integral_value():
+            self.add_error("quantity", "재고 차감 수량은 정수로 입력해 주세요.")
         return data
 
 
@@ -228,4 +301,15 @@ class PartnerWorkOrderLineInline(admin.TabularInline):
                 form_kwargs["form_kwargs"] = {"request": request, "parent": obj}
                 super().__init__(*args, **form_kwargs)
         return RequestFormSet
+
+
+class PartnerPaymentInline(admin.TabularInline):
+    model = PartnerPayment
+    extra = 0
+    can_delete = False
+    fields = ("paid_at", "provider_name", "provider_transaction_id", "method", "status", "amount_krw", "approval_code")
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
 
