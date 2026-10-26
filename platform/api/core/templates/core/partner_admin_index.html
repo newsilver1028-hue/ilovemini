@@ -1,7 +1,7 @@
 {% extends "admin/base_site.html" %}
 {% load i18n static partner_format %}
 
-{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=20261026-operations-2">{% endblock %}
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/partner_admin.css' %}?v=20261026-workshop-3">{% endblock %}
 
 {% block content %}
 <main class="workshop-dashboard" aria-labelledby="workshop-title">
@@ -87,6 +87,8 @@
     {% if partner_dashboard.can_manage_work %}
     <a href="{% url 'partner_admin:core_partnerbooking_changelist' %}"><span>예약</span><strong>예약 일정과 고객 요청 확인</strong><b aria-hidden="true">↗</b></a>
     <a href="{% url 'partner_admin:core_partnerworkorder_changelist' %}"><span>작업지시</span><strong>입고 차량의 정비 과정 관리</strong><b aria-hidden="true">↗</b></a>
+    <a href="{% url 'partner_admin:core_partnercustomer_changelist' %}"><span>고객 대장</span><strong>고객 연락처와 거래 정보를 관리</strong><b aria-hidden="true">↗</b></a>
+    <a href="{% url 'partner_admin:core_partnervehicle_changelist' %}"><span>차량 대장</span><strong>차량번호·차종·주행거리 이력 관리</strong><b aria-hidden="true">↗</b></a>
     <a href="{% url 'partner_admin:core_serviceestimate_changelist' %}"><span>견적</span><strong>견적 확인 및 출력</strong><b aria-hidden="true">↗</b></a>
     {% endif %}
     {% if partner_dashboard.can_verify_records %}<a href="{% url 'partner_admin:core_ledgerentry_changelist' %}"><span>정비 이력</span><strong>인증 기록과 증빙 확인</strong><b aria-hidden="true">↗</b></a>{% endif %}

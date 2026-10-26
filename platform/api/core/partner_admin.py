@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 9014)
+Total output lines: 734
+
 from django.contrib import admin
 from django.contrib.admin import AdminSite
 from django.db.models import F, Q, Sum
@@ -88,6 +91,8 @@ class PartnerAdminSite(AdminSite):
         names = {
             "PartnerBooking": "업체 예약",
             "PartnerWorkOrder": "정비 접수·작업지시",
+            "PartnerCustomer": "고객 대장",
+            "PartnerVehicle": "업체 차량 대장",
             "LedgerEntry": "인증 정비기록",
         }
         for app in app_list:
@@ -180,30 +185,40 @@ class PartnerAdminSite(AdminSite):
         if document_type not in document_types:
             raise Http404
         work_order = get_object_or_404(
-            PartnerWorkOrder.objects.select_related("partner", "booking", "vehicle"),
+            PartnerWorkOrder.objects.select_related("partner", "booking", "vehicle", "customer", "partner_vehicle").prefetch_related("lines__part"),
             pk=work_order_id,
             partner_id__in=staff_partners(request, booking=True),
         )
+        line_items = [
+            {"title": line.description, "amount_krw": line.amount_krw, "quantity": line.quantity, "unit": line.unit, "unit_price_krw": line.unit_price_krw}
+            for line in work_order.lines.all()
+        ]
         total = work_order.final_total_krw if document_type in {"repair-statement", "receipt"} else (
             work_order.quoted_total_krw or sum(
                 item.get("amount_krw", 0) for item in work_order.items
                 if isinstance(item, dict) and type(item.get("amount_krw")) is int
             )
         )
+        if line_items and document_type not in {"repair-statement", "receipt"}:
+            total = work_order.quoted_total_krw or sum(item["amount_krw"] for item in line_items)
+        customer_name = work_order.customer_name or (work_order.customer.name if work_order.customer else "")
+        contact_phone = work_order.contact_phone or (work_order.customer.phone if work_order.customer else "")
+        vehicle_model = work_order.vehicle_model or (work_order.partner_vehicle.model_name if work_order.partner_vehicle else (work_order.vehicle.model_name if work_order.vehicle else "미입력"))
+        plate_number = work_order.plate_number or (work_order.partner_vehicle.plate_number if work_order.partner_vehicle else (work_order.vehicle.plate_number if work_order.vehicle else "미입력"))
         return render(request, "core/partner_quote_print.html", {
             "document_title": document_types[document_type],
             "document_type": document_type,
             "document_number": f"WO-{work_order.created_at:%y%m%d}-{work_order.pk:05d}",
             "issued_at": work_order.updated_at,
             "partner": work_order.partner,
-            "customer_name": work_order.customer_name,
-            "contact_phone": work_order.contact_phone,
-            "vehicle_model": work_order.vehicle_model or (work_order.vehicle.model_name if work_order.vehicle else "미입력"),
-            "plate_number": work_order.plate_number or (work_order.vehicle.plate_number if work_order.vehicle else "미입력"),
+            "customer_name": customer_name,
+            "contact_phone": contact_phone,
+            "vehicle_model": vehicle_model,
+            "plate_number": plate_number,
             "odometer_km": work_order.odometer_km,
             "customer_concern": work_order.customer_concern,
             "inspection_notes": work_order.inspection_notes,
-            "items": work_order.items if isinstance(work_order.items, list) else [],
+            "items": line_items or (work_order.items if isinstance(work_order.items, list) else []),
             "total_krw": total,
             "paid_krw": work_order.paid_amount_krw,
             "balance_krw": max(0, total - work_order.paid_amount_krw),
@@ -313,87 +328,7 @@ class PartnerAdminSite(AdminSite):
         sheet.row_dimensions[1].height = 26
         for column in sheet.columns:
             values = [len(str(cell.value or "")) for cell in column]
-            width = min(max(max(values, default=8) + 2, 12), 42)
-            sheet.column_dimensions[get_column_letter(column[0].column)].width = width
-            for cell in column[1:]:
-                cell.alignment = Alignment(vertical="top", wrap_text=True)
-        output = BytesIO()
-        workbook.save(output)
-        response = HttpResponse(
-            output.getvalue(),
-            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
-        response["Cache-Control"] = "private, no-store"
-        return response
-
-    def export_bookings(self, request):
-        staff = active_staff_for(request).filter(can_manage_bookings=True)
-        if not is_system_admin(request) and not staff.exists():
-            raise Http404
-        partner_ids = staff_partners(request, booking=True)
-        bookings = PartnerBooking.objects.filter(partner_id__in=partner_ids).select_related(
-            "partner", "customer__naver_identity", "customer__apple_identity", "vehicle"
-        ).order_by("-scheduled_at", "-pk")
-        rows = []
-        for booking in bookings.iterator():
-            vehicle = booking.vehicle
-            rows.append((
-                timezone.localtime(booking.scheduled_at).strftime("%Y-%m-%d %H:%M"),
-                vehicle.plate_number if vehicle else "",
-                booking.contact_phone or "미등록",
-                vehicle.model_name if vehicle else "차량 정보 없음",
-                booking.partner.name,
-                timezone.localtime(booking.requested_at).strftime("%Y-%m-%d %H:%M"),
-                booking.service_type,
-                booking.get_status_display(),
-                booking.customer_note,
-                booking.partner_note,
-            ))
-        return self._excel_response(
-            f"ilovemini-bookings-{timezone.localdate():%Y%m%d}.xlsx",
-            "예약 관리대장",
-            ["예약 일시", "차량번호", "연락처", "차량", "업체", "요청 일시", "작업 종류", "예약 상태", "요청 사항", "업체 메모"],
-            rows,
-        )
-
-    def export_maintenance_records(self, request):
-        staff = active_staff_for(request).filter(can_verify_records=True)
-        if not is_system_admin(request) and not staff.exists():
-            raise Http404
-        partner_ids = staff_partners(request, records=True)
-        entries = LedgerEntry.objects.filter(
-            source=LedgerEntry.Source.PARTNER,
-            partner_id__in=partner_ids,
-        ).select_related("partner", "vehicle", "verified_by__naver_identity", "verified_by__apple_identity").prefetch_related(
-            "evidence_images"
-        ).order_by("-entry_date", "-pk")
-        rows = []
-        for entry in entries.iterator(chunk_size=200):
-            vehicle = entry.vehicle
-            verified_by = entry.verified_by
-            line_items = entry.line_items if isinstance(entry.line_items, list) else []
-            item_values = []
-            for item in line_items:
-                if not isinstance(item, dict) or not str(item.get("name", "")).strip():
-                    continue
-                try:
-                    amount = int(item.get("amount_krw") or 0)
-                except (TypeError, ValueError):
-                    amount = 0
-                item_values.append(f"{str(item.get('name')).strip()}: {amount:,}원")
-            rows.append((
-                entry.entry_date.strftime("%Y-%m-%d"),
-                timezone.localtime(entry.verified_at).strftime("%Y-%m-%d %H:%M") if entry.verified_at else "",
-                entry.partner.name if entry.partner else "",
-                vehicle.model_name if vehicle else "차량 정보 없음",
-                vehicle.plate_number if vehicle else "",
-                entry.odometer_km,
-                entry.get_kind_display(),
-                " / ".join(item_values),
-                entry.gross_amount_krw if entry.gross_amount_krw is not None else entry.amount_krw,
-                entry.amount_krw,
-                entry.get_payment_method_display() if entry.payment_method else "미기록(이전 앱)",
+            width = min(max(max(values, default=8) + 2, 12), 42)…1014 tokens truncated…method_display() if entry.payment_method else "미기록(이전 앱)",
                 entry.description,
                 entry.evidence_images.count(),
                 member_nickname(verified_by) if verified_by else "",

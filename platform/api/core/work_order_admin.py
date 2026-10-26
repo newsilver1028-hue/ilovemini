@@ -1,14 +1,13 @@
 from django import forms
 from django.contrib import admin
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils import timezone
 
 from .member_display import member_nickname
-from .models import PartnerBooking, PartnerStaff, PartnerWorkOrder, Partner
-from .phase_one_admin import EstimateItemsWidget
+from .models import PartnerBooking, PartnerStaff, PartnerWorkOrder, Partner, PartnerCustomer, PartnerVehicle, PartnerPart, PartnerWorkOrderLine
 from .partner_admin import is_system_admin, staff_partners
 
 
@@ -17,12 +16,12 @@ class PartnerWorkOrderForm(forms.ModelForm):
         model = PartnerWorkOrder
         fields = (
             "partner", "booking", "customer_name", "contact_phone", "vehicle_model",
+            "customer", "partner_vehicle",
             "plate_number", "odometer_km", "customer_concern", "inspection_notes",
-            "items", "quoted_total_krw", "final_total_krw", "paid_amount_krw",
+            "quoted_total_krw", "final_total_krw", "paid_amount_krw",
             "payment_method", "status", "technician_name", "work_notes",
             "customer_message", "internal_note",
         )
-        widgets = {"items": EstimateItemsWidget}
 
     def __init__(self, *args, request=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -38,25 +37,11 @@ class PartnerWorkOrderForm(forms.ModelForm):
         self.fields["booking"].queryset = PartnerBooking.objects.filter(partner_id__in=partner_ids).select_related(
             "partner", "vehicle", "customer__naver_identity", "customer__apple_identity"
         )
+        self.fields["customer"].queryset = PartnerCustomer.objects.filter(partner_id__in=partner_ids, is_active=True)
+        self.fields["partner_vehicle"].queryset = PartnerVehicle.objects.filter(partner_id__in=partner_ids, is_active=True).select_related("customer")
         if self.instance.pk:
             self.fields["partner"].disabled = True
             self.fields["booking"].disabled = True
-
-    def clean_items(self):
-        items = self.cleaned_data.get("items") or []
-        if not isinstance(items, list) or len(items) > 50:
-            raise ValidationError("부품·공임 항목은 50개 이하로 입력해 주세요.")
-        cleaned = []
-        for item in items:
-            if not isinstance(item, dict):
-                raise ValidationError("각 항목의 형식이 올바르지 않습니다.")
-            title, amount = item.get("title"), item.get("amount_krw")
-            if not isinstance(title, str) or not title.strip() or len(title.strip()) > 160:
-                raise ValidationError("각 항목의 작업명 또는 부품명을 입력해 주세요.")
-            if type(amount) is not int or not 0 <= amount <= 100_000_000:
-                raise ValidationError("항목별 금액은 0원 이상 1억원 이하로 입력해 주세요.")
-            cleaned.append({"title": title.strip(), "amount_krw": amount})
-        return cleaned
 
     def clean(self):
         data = super().clean()
@@ -64,6 +49,13 @@ class PartnerWorkOrderForm(forms.ModelForm):
         partner = data.get("partner") or getattr(self.instance, "partner", None)
         if booking and partner and booking.partner_id != partner.pk:
             self.add_error("booking", "선택한 예약과 협력업체가 일치하지 않습니다.")
+        customer, partner_vehicle = data.get("customer"), data.get("partner_vehicle")
+        if customer and partner and customer.partner_id != partner.pk:
+            self.add_error("customer", "고객 대장과 협력업체가 일치하지 않습니다.")
+        if partner_vehicle and partner and partner_vehicle.partner_id != partner.pk:
+            self.add_error("partner_vehicle", "차량 대장과 협력업체가 일치하지 않습니다.")
+        if customer and partner_vehicle and customer.pk != partner_vehicle.customer_id:
+            self.add_error("partner_vehicle", "차량 대장의 고객을 확인해 주세요.")
         if data.get("paid_amount_krw", 0) > data.get("final_total_krw", 0):
             self.add_error("paid_amount_krw", "수납 금액이 최종 정비 금액보다 클 수 없습니다.")
         if data.get("status") == PartnerWorkOrder.Status.COMPLETED and data.get("final_total_krw", 0) < 0:
@@ -84,13 +76,14 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
     ordering = ("-created_at", "-pk")
     actions = None
     fieldsets = (
-        ("접수 정보", {"fields": ("partner", "booking", ("customer_name", "contact_phone"), ("vehicle_model", "plate_number", "odometer_km"), "customer_concern", "status")}),
-        ("점검·작업", {"fields": ("inspection_notes", "items", ("quoted_total_krw", "final_total_krw"), ("technician_name", "work_notes"), "customer_message")}),
+        ("접수 정보", {"fields": ("partner", "booking", ("customer", "partner_vehicle"), ("customer_name", "contact_phone"), ("vehicle_model", "plate_number", "odometer_km"), "customer_concern", "status")}),
+        ("점검·작업", {"fields": ("inspection_notes", ("quoted_total_krw", "final_total_krw"), ("technician_name", "work_notes"), "customer_message")}),
         ("수납", {"fields": (("paid_amount_krw", "payment_method"),)}),
         ("업체 메모", {"fields": ("internal_note",)}),
         ("기록", {"fields": ("created_by", "created_at", "updated_at", "completed_at"), "classes": ("collapse",)}),
     )
     readonly_fields = ("created_by", "created_at", "updated_at", "completed_at")
+    inlines = []
 
     class Media:
         css = {"all": ("core/partner_admin.css",)}
@@ -149,6 +142,19 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
         if change and not PartnerWorkOrder.objects.filter(pk=obj.pk, partner_id__in=partner_ids).exists():
             raise PermissionDenied("해당 작업에 접근할 수 없습니다.")
         booking = form.cleaned_data.get("booking")
+        customer = form.cleaned_data.get("customer")
+        partner_vehicle = form.cleaned_data.get("partner_vehicle")
+        if customer:
+            if customer.partner_id != obj.partner_id:
+                raise PermissionDenied("고객 대장과 업체가 일치하지 않습니다.")
+            obj.customer_name = obj.customer_name or customer.name
+            obj.contact_phone = obj.contact_phone or customer.phone
+        if partner_vehicle:
+            if partner_vehicle.partner_id != obj.partner_id or (customer and partner_vehicle.customer_id != customer.pk):
+                raise PermissionDenied("차량 대장과 고객을 확인해 주세요.")
+            obj.vehicle_model = obj.vehicle_model or partner_vehicle.model_name
+            obj.plate_number = obj.plate_number or partner_vehicle.plate_number
+            obj.odometer_km = obj.odometer_km or partner_vehicle.current_odometer_km
         if booking:
             if booking.partner_id != obj.partner_id:
                 raise PermissionDenied("예약과 업체가 일치하지 않습니다.")
@@ -163,10 +169,63 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
                 obj.odometer_km = obj.odometer_km or booking.vehicle.current_odometer_km
         if not change:
             obj.created_by = request.user
-        items = form.cleaned_data.get("items") or []
-        if items:
-            obj.quoted_total_krw = sum(row["amount_krw"] for row in items)
         if obj.status == PartnerWorkOrder.Status.COMPLETED and not obj.completed_at:
             obj.completed_at = timezone.now()
         super().save_model(request, obj, form, change)
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        order = form.instance
+        lines = list(order.lines.all())
+        line_total = sum(line.amount_krw for line in lines)
+        if lines:
+            PartnerWorkOrder.objects.filter(pk=order.pk).update(quoted_total_krw=line_total)
+            order.quoted_total_krw = line_total
+
+    def get_inline_instances(self, request, obj=None):
+        return [PartnerWorkOrderLineInline(self, self.admin_site)]
+
+
+class PartnerWorkOrderLineForm(forms.ModelForm):
+    class Meta:
+        model = PartnerWorkOrderLine
+        fields = ("kind", "part", "description", "quantity", "unit", "unit_price_krw", "sort_order")
+
+    def __init__(self, *args, request=None, parent=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.request, self.parent = request, parent
+        partner_id = getattr(parent, "partner_id", None) or (request.POST.get("partner") if request and request.method == "POST" else None)
+        self.fields["part"].queryset = PartnerPart.objects.filter(partner_id=partner_id, is_active=True) if partner_id else PartnerPart.objects.none()
+
+    def clean(self):
+        data = super().clean()
+        part = data.get("part")
+        partner_id = getattr(self.parent, "partner_id", None) or (self.request.POST.get("partner") if self.request and self.request.method == "POST" else None)
+        if part and str(part.partner_id) != str(partner_id):
+            self.add_error("part", "다른 업체의 재고 부품은 선택할 수 없습니다.")
+        if data.get("kind") == PartnerWorkOrderLine.Kind.PART and not part and not data.get("description"):
+            self.add_error("description", "부품명 또는 재고 부품을 선택해 주세요.")
+        if part and not data.get("description"):
+            data["description"] = part.name
+        if part and not data.get("unit"):
+            data["unit"] = part.unit
+        if part and not data.get("unit_price_krw"):
+            data["unit_price_krw"] = part.sale_price_krw
+        return data
+
+
+class PartnerWorkOrderLineInline(admin.TabularInline):
+    model = PartnerWorkOrderLine
+    form = PartnerWorkOrderLineForm
+    extra = 1
+    fields = ("kind", "part", "description", "quantity", "unit", "unit_price_krw", "sort_order")
+    ordering = ("sort_order", "pk")
+
+    def get_formset(self, request, obj=None, **kwargs):
+        base = super().get_formset(request, obj, **kwargs)
+        class RequestFormSet(base):
+            def __init__(self, *args, **form_kwargs):
+                form_kwargs["form_kwargs"] = {"request": request, "parent": obj}
+                super().__init__(*args, **form_kwargs)
+        return RequestFormSet
 
