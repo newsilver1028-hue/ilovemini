@@ -432,9 +432,15 @@ class PartnerTaxInvoiceAdmin(PartnerScopedAdmin):
         ("seller_business_number", "seller_name"), ("seller_representative", "seller_email"), "seller_address",
         ("buyer_business_number", "buyer_name"), ("buyer_representative", "buyer_email"), "buyer_address",
         ("supply_cost_krw", "tax_krw", "total_krw"), "items",
-        ("provider_name", "provider_user_id", "provider_document_id"), "provider_error_code", "issued_at", "created_by", "created_at",
+        ("provider_name", "provider_user_id", "provider_document_id"), "provider_error_code", "issued_at", "created_by_display", "created_at",
     )
-    readonly_fields = ("status", "provider_error_code", "issued_at", "created_by", "created_at")
+    readonly_fields = ("status", "provider_error_code", "issued_at", "created_by_display", "created_at")
+
+    @admin.display(description="등록자")
+    def created_by_display(self, obj):
+        if not obj or not obj.pk:
+            return "저장 시 로그인 계정 자동 기록"
+        return obj.created_by or "기록 없음"
 
     def has_change_permission(self, request, obj=None):
         return self.has_view_permission(request, obj) and (obj is None or obj.status == PartnerTaxInvoice.Status.DRAFT)
