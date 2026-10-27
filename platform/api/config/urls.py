@@ -4,7 +4,7 @@ from core.app_views import AppContentView, ShoppingSearchView, MemberPreferenceV
 from rest_framework_simplejwt.views import TokenRefreshView
 from django.contrib import admin
 from django.urls import include, path
-from django.http import HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
 from django.conf import settings
 from django.views.generic import RedirectView
 from rest_framework.routers import DefaultRouter
@@ -38,7 +38,14 @@ def public_home(request):
     return HttpResponseRedirect("/privacy/")
 
 
+def robots_txt(request):
+    response = HttpResponse("User-agent: *\nDisallow: /\n", content_type="text/plain; charset=utf-8")
+    response["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
+
+
 urlpatterns = [
+    path("robots.txt", robots_txt, name="robots_txt"),
     path("", public_home, name="public_home"),
     path("partner/", RedirectView.as_view(url="/partner-admin/login/", permanent=False), name="partner_admin_shortcut"),
     path("privacy/", privacy_policy, name="privacy_policy"),
