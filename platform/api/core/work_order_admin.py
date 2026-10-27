@@ -217,7 +217,8 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
             if part_id in parts and parts[part_id].stock_quantity < quantity
         ]
         if missing or insufficient or unlinked_parts:
-            old_status = getattr(self, "_previous_status", None) or PartnerWorkOrder.Status.RECEIVED
+            # Prior status belongs to this request's form, not the shared admin instance.
+            old_status = getattr(form, "_previous_status", None) or PartnerWorkOrder.Status.RECEIVED
             PartnerWorkOrder.objects.filter(pk=order.pk).update(status=old_status, completed_at=None)
             order.status = old_status
             order.completed_at = None
