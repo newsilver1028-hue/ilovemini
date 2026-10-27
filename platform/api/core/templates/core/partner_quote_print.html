@@ -13,41 +13,133 @@
     .sheet{width:min(100% - 32px,820px);min-height:1050px;margin:24px auto;padding:58px 64px;background:var(--paper);box-shadow:0 12px 40px #18202b16}
     .doc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;padding-bottom:22px;border-bottom:3px solid var(--ink)}.brand{font-size:13px;font-weight:850;letter-spacing:.14em}.brand span{display:block;margin-top:4px;color:var(--muted);font-size:10px;letter-spacing:.16em}.doc-kind{text-align:right;color:var(--red);font-size:12px;font-weight:800;letter-spacing:.18em}
     h1{margin:30px 0 4px;font-size:36px;letter-spacing:-.05em}.doc-number{color:var(--muted);font-size:13px}.status{display:inline-flex;margin-top:14px;padding:5px 10px;border-radius:999px;background:#f7e9ec;color:#9b1d35;font-size:12px;font-weight:800}
-    .party-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:28px 0}.party{min-width:0;padding:16px 18px;border:1px solid var(--line);border-radius:10px}.party h2{margin:0 0 10px;color:var(--muted);font-size:11px;letter-spacing:.12em}.party strong{display:block;font-size:18px}.party p{margin:3px 0;color:var(--muted);overflow-wrap:anywhere}
+    .party-grid{display:grid;grid-template-columns:1fr 1fr;align-items:stretch;gap:12px;margin:28px 0}.party{min-width:0;padding:16px 18px;border:1px solid var(--line);border-radius:10px}.party h2{margin:0 0 10px;color:var(--muted);font-size:11px;letter-spacing:.12em}.party strong{display:block;font-size:18px}.party p{margin:3px 0;color:var(--muted);overflow-wrap:anywhere}
     .vehicle{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 28px;padding:16px;background:var(--wash);border-radius:10px}.vehicle div{min-width:0}.vehicle span{display:block;color:var(--muted);font-size:11px}.vehicle strong{display:block;margin-top:3px;overflow-wrap:anywhere}
-    .section{margin-top:26px}.section h2{margin:0 0 10px;font-size:15px}.copy-box{min-height:42px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}
+    .section{margin-top:26px}.section h2{margin:0 0 10px;font-size:15px}.copy-box{min-height:42px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;white-space:normal;line-height:1.65;letter-spacing:0;word-spacing:normal;overflow-wrap:break-word;word-break:keep-all}
     table{width:100%;border-collapse:collapse}th,td{padding:12px 10px;border-bottom:1px solid var(--line);text-align:left}th{background:var(--wash);font-size:12px}td.amount,th.amount{text-align:right;white-space:nowrap}.total{display:flex;justify-content:space-between;gap:16px;margin-top:18px;padding:20px 18px;border-radius:10px;background:#17181b;color:#fff}.total span{font-weight:700}.total strong{font-size:26px;letter-spacing:-.03em}.note{color:var(--muted)}
     .signatures{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:54px}.signature{height:86px;padding:12px;border:1px solid var(--line);border-radius:8px;color:var(--muted);font-size:12px}.signature b{display:block;margin-bottom:20px;color:var(--ink)}.foot{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:11px;text-align:center}
-    @media(max-width:600px){.sheet{width:100%;min-height:0;margin:0;padding:28px 20px;box-shadow:none}.doc-top{gap:12px}.doc-top h1{font-size:30px}.party-grid{grid-template-columns:1fr}.vehicle{grid-template-columns:1fr 1fr}.vehicle div:last-child{grid-column:1/-1}.total strong{font-size:22px}}
-    @page{size:A4;margin:14mm}@media print{body{background:#fff;font-size:11pt}.toolbar{display:none}.sheet{width:auto;min-height:0;margin:0;padding:0;box-shadow:none}.doc-top{break-inside:avoid}.party-grid,.vehicle,.total,.signatures{break-inside:avoid}a{color:inherit;text-decoration:none}}
+    /* Refined service-document hierarchy for screen and print. */
+    .sheet{border-top:5px solid var(--red)}
+    .doc-top{align-items:center;padding-bottom:18px;border-bottom:1px solid var(--line)}
+    .brand{position:relative;padding-left:12px;letter-spacing:.12em}.brand:before{position:absolute;top:1px;bottom:1px;left:0;width:3px;border-radius:3px;background:var(--red);content:""}
+    .doc-kind{font-size:10px;letter-spacing:.16em}
+    .doc-heading{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin:26px 0 22px}
+    .doc-kicker{color:var(--red);font-size:10px;font-weight:800;letter-spacing:.16em}
+    .doc-heading h1{margin:7px 0 0;font-size:34px;line-height:1.15;letter-spacing:0}
+    .doc-meta{display:grid;grid-template-columns:auto auto;gap:8px 18px;align-items:end;text-align:right}
+    .doc-meta div span{display:block;margin-bottom:2px;color:var(--muted);font-size:10px}
+    .doc-meta div strong{font-size:12px;font-weight:750}
+    .status{background:#f8edf0}
+    .party{background:#fbfbfc;border-color:#e2e4e8;border-radius:12px;line-height:1.55}
+    .party h2{display:flex;align-items:center;gap:7px;color:#777b83}
+    .party h2:before{width:6px;height:6px;border-radius:50%;background:var(--red);content:""}
+    .party strong{line-height:1.45;letter-spacing:.005em;overflow-wrap:anywhere}
+    .party p{margin:7px 0;line-height:1.55;letter-spacing:0}.partner-details{margin-top:10px;padding-top:7px;border-top:1px solid var(--line)}.partner-details p:first-child{margin-top:0}.partner-details p:last-child{margin-bottom:0}
+    .customer-vehicle{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 14px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+    .customer-vehicle div{min-width:0}.customer-vehicle span{display:block;color:var(--muted);font-size:10px}.customer-vehicle strong{display:block;margin-top:3px;font-size:13px;line-height:1.35;overflow-wrap:anywhere}.customer-vehicle div:first-child{grid-column:1/-1}
+    .vehicle{border-left:3px solid var(--red);background:#f6f6f7}
+    .vehicle:before{grid-column:1/-1;color:#656972;font-size:10px;font-weight:800;letter-spacing:.12em}
+    .vehicle:before{content:"차량 정보"}
+    .vehicle span{letter-spacing:.02em}
+    .section h2{display:flex;align-items:center;gap:8px;font-weight:800}
+    .section h2:before{width:3px;height:15px;border-radius:2px;background:var(--red);content:""}
+    table{font-size:13px}th:first-child,td:first-child{width:58%}th:nth-child(2),td:nth-child(2){width:16%;white-space:nowrap}th.amount,td.amount{width:26%}
+    th{background:#202125;color:#fff;font-weight:700}
+    tbody tr:nth-child(even){background:#fafafb}
+    .total{border-radius:8px;background:#1b1c20}
+    .signature{border-color:#dfe1e5;border-radius:10px}
+    .doc-top,.doc-heading,.doc-title,.doc-meta,.party-grid,.party,.vehicle,.section,.signatures,.signature,.signature-fields,.signature-field{min-width:0}
+    .doc-meta div strong,.party strong,.party p,.vehicle strong,td{overflow-wrap:anywhere;word-break:normal}
+    .signatures{margin-top:32px}.signature{height:auto;min-height:78px;padding:10px}.signature> b{display:block;margin-bottom:6px;color:var(--ink)}
+    .signature-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:4px}
+    .signature-field{display:flex;align-items:center;gap:6px;min-width:0;color:var(--muted);font-size:11px}.signature-field b{display:inline;margin:0;color:var(--muted);font-size:inherit;white-space:nowrap}
+    .signature-field input{display:block;flex:1 1 4ch;width:100%;min-width:0;padding:4px 2px;border:0;border-bottom:1px solid #aeb2ba;border-radius:0;background:transparent;color:var(--ink);font:inherit;outline:none}
+    .signature-field input:focus{border-bottom:2px solid var(--red)}
+    .foot{letter-spacing:.01em}
+    @media(max-width:600px){.sheet{width:100%;min-height:0;margin:0;padding:24px 16px;box-shadow:none}.party{min-height:0}.doc-top{gap:10px}.doc-kind{max-width:42%;overflow-wrap:anywhere}.doc-heading{align-items:flex-start;flex-direction:column;gap:12px;margin:20px 0}.doc-heading h1{font-size:30px}.doc-meta{width:100%;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 12px;text-align:left}.doc-meta .status{grid-column:1/-1;justify-self:start}.party-grid{grid-template-columns:minmax(0,1fr);gap:10px}.vehicle{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.vehicle div:last-child{grid-column:1/-1}.signatures{grid-template-columns:minmax(0,1fr);gap:10px;margin-top:24px}.signature{min-height:0}.signature-fields{grid-template-columns:minmax(0,1fr);gap:8px}.signature-field input{min-width:0}.total strong{font-size:22px}table{font-size:12px}th:first-child,td:first-child{width:54%}th:nth-child(2),td:nth-child(2){width:16%}th.amount,td.amount{width:30%}}
+    @media(max-width:360px){.sheet{padding:20px 12px}.doc-meta{grid-template-columns:minmax(0,1fr)}.doc-meta .status{grid-column:1}.vehicle{grid-template-columns:minmax(0,1fr)}.vehicle div:last-child{grid-column:1}table{font-size:11px}th,td{padding:5px 3px}th:first-child,td:first-child{width:52%}th:nth-child(2),td:nth-child(2){width:16%}th.amount,td.amount{width:32%;font-size:clamp(9.5px,2.9vw,11px)}}
+    @page{size:A4;margin:7mm 10mm}@media print{
+      html,body{width:auto!important;background:#fff!important;font-size:8.5pt;line-height:1.2;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      .toolbar{display:none!important}
+      .sheet{width:auto;min-height:0;margin:0;padding:0;box-shadow:none}
+      .doc-top{gap:10px;padding-bottom:6px;border-bottom-width:2px;break-inside:avoid}
+      .doc-heading{align-items:center;gap:10px;margin:8px 0;break-inside:avoid}.doc-kicker{font-size:7pt}.doc-heading h1{margin-top:4px;font-size:23pt}.doc-meta{gap:5px 12px}.doc-meta div span{font-size:7pt}.doc-meta div strong{font-size:8pt}.status{margin:0;padding:3px 8px;font-size:7.5pt}
+      .party-grid{gap:7px;margin:8px 0;break-inside:avoid}.party{padding:9px 11px;line-height:1.5}.customer-vehicle{gap:8px 10px;margin-top:8px;padding-top:8px}.customer-party .customer-vehicle{margin-top:8px}.party h2{margin-bottom:5px;font-size:8pt}.party strong{font-size:11pt}.party p{margin:3px 0;font-size:8.5pt;line-height:1.5;letter-spacing:0}.partner-details{margin-top:6px;padding-top:5px}
+      .vehicle{gap:8px;margin:0 0 14px;padding:9px}.vehicle span{font-size:8pt}
+      .section{margin-top:8px}.section h2{margin-bottom:3px;font-size:9pt;break-after:avoid}
+      .copy-box{min-height:0;padding:4px 7px;line-height:1.3;letter-spacing:0;white-space:normal;word-break:keep-all}
+      table{table-layout:fixed}th,td{padding:3px 6px;vertical-align:top}th{font-size:8pt}th:first-child,td:first-child{width:58%}th:nth-child(2),td:nth-child(2){width:16%}th.amount,td.amount{width:26%}
+      thead{display:table-header-group}tfoot{display:table-footer-group}tr{break-inside:avoid;page-break-inside:avoid}
+      .total{gap:10px;margin-top:7px;padding:7px 10px}.total strong{font-size:18pt}
+      .signatures{gap:8px;margin-top:8px}.signature{height:auto;min-height:38px;padding:5px;font-size:8pt}.signature b{margin-bottom:5px}.signature-fields{gap:8px;margin-top:3px}.signature-field{font-size:7.5pt}.signature-field input{padding:1px;border:0;border-bottom:1px solid #777;border-radius:0;background:transparent;color:#111;outline:0}
+      .foot{margin-top:8px;padding-top:5px;font-size:7.5pt}
+      .party,.vehicle,.copy-box,.total,.signatures,.signature,.foot{break-inside:avoid;page-break-inside:avoid}
+      a{color:inherit;text-decoration:none}
+    }
+    .toolbar .share{border-color:#fee500;background:#fee500;color:#191919}.toolbar .button{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:0 18px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font:inherit;font-weight:700;text-decoration:none}.toolbar .channel{border-color:#d9dbe0;background:#fff;color:#191919}
+    @media(max-width:600px){.toolbar{position:sticky;gap:6px;padding:8px}.toolbar button{flex:1;min-width:0;padding:0 8px;font-size:12px}}
   </style>
 </head>
 <body>
-  <nav class="toolbar" aria-label="견적서 출력 도구"><button type="button" onclick="history.back()">뒤로</button><button class="primary" type="button" onclick="window.print()">인쇄 · PDF 저장</button></nav>
+  <nav class="toolbar" aria-label="견적서 도구">
+    {% if share_endpoint and not public_share %}<button class="share" id="quote-share" type="button">카카오톡으로 견적 보내기</button><button id="quote-copy" type="button">견적 링크 복사</button>{% endif %}
+    {% if partner.kakao_channel_url %}<a class="toolbar button channel" href="{{ partner.kakao_channel_url }}" target="_blank" rel="noopener noreferrer">업체 카카오톡 상담</a>{% endif %}
+    <button type="button" onclick="history.back()">뒤로</button><button class="primary" type="button" onclick="window.print()">인쇄 · PDF 저장</button>
+  </nav>
+  {% if share_endpoint and not public_share %}<form id="quote-share-csrf" hidden>{% csrf_token %}</form>{% endif %}
   <main class="sheet">
-    <header class="doc-top"><div class="brand">I LOVE MINI<span>PARTNER SERVICE</span></div><div class="doc-kind">SERVICE DOCUMENT</div></header>
-    <h1>{{ document_title }}</h1>
-    <div class="doc-number">문서 번호 {{ document_number }} · 작성 {{ issued_at|date:"Y년 n월 j일" }}</div>
-    <span class="status">{{ status }}</span>
+    <header class="doc-top"><div class="brand">I LOVE MINI<span>PARTNER SERVICE</span></div><div class="doc-kind">정비 서비스 센터</div></header>
+    <div class="doc-heading">
+      <div class="doc-title"><div class="doc-kicker">SERVICE DOCUMENT</div><h1>{{ document_title }}</h1></div>
+      <div class="doc-meta"><div><span>문서 번호</span><strong>{{ document_number }}</strong></div><div><span>작성일</span><strong>{{ issued_at|date:"Y년 n월 j일" }}</strong></div><span class="status">{{ status }}</span></div>
+    </div>
 
     <section class="party-grid" aria-label="업체 및 고객 정보">
-      <div class="party"><h2>정비 업체</h2><strong>{{ partner.name }}{% if partner.branch_label %} · {{ partner.branch_label }}{% endif %}</strong>{% if partner.representative_name %}<p>담당 {{ partner.representative_name }}</p>{% endif %}{% if partner.phone %}<p>{{ partner.phone }}</p>{% endif %}{% if partner.address %}<p>{{ partner.address }}</p>{% endif %}{% if partner.business_info %}<p>{{ partner.business_info|linebreaksbr }}</p>{% endif %}</div>
-      <div class="party"><h2>고객</h2><strong>{{ customer_name|default:"고객 정보 미등록" }}</strong><p>{{ contact_phone|default:"연락처 미등록" }}</p></div>
+      <div class="party"><h2>정비 업체</h2><strong>{{ partner.name }}{% if partner.branch_label %} · {{ partner.branch_label }}{% endif %}</strong><div class="partner-details">{% if partner.representative_name %}<p>담당자 {{ partner.representative_name }}</p>{% endif %}{% if partner.phone %}<p>연락처 {{ partner.phone }}</p>{% endif %}{% if partner.address %}<p>{{ partner.address }}</p>{% endif %}{% if partner.business_info %}<p>{{ partner.business_info|linebreaksbr }}</p>{% endif %}</div></div>
+      <div class="party customer-party"><h2>고객 정보</h2><p>연락처 {{ contact_phone|default:"미등록" }}</p><div class="customer-vehicle" aria-label="차량 정보"><div><span>차량</span><strong>{{ vehicle_model }}</strong></div><div><span>차량 번호</span><strong>{{ plate_number }}</strong></div><div><span>입고 주행거리</span><strong>{% if odometer_km %}{{ odometer_km|comma }} km{% else %}미기록{% endif %}</strong></div></div></div>
     </section>
 
-    <section class="vehicle" aria-label="차량 정보"><div><span>차량</span><strong>{{ vehicle_model }}</strong></div><div><span>차량 번호</span><strong>{{ plate_number }}</strong></div><div><span>입고 주행거리</span><strong>{% if odometer_km %}{{ odometer_km|comma }} km{% else %}미기록{% endif %}</strong></div></section>
     {% if customer_concern %}<section class="section"><h2>고객 요청 사항</h2><div class="copy-box">{{ customer_concern }}</div></section>{% endif %}
     {% if inspection_notes %}<section class="section"><h2>점검 및 진단</h2><div class="copy-box">{{ inspection_notes }}</div></section>{% endif %}
 
     {% if work_notes %}<section class="section"><h2>작업 내용</h2><div class="copy-box">{{ work_notes }}</div></section>{% endif %}
-    <section class="section"><h2>{% if document_type == "job-card" %}작업 예정 항목{% elif document_type == "repair-statement" %}정비 완료 항목{% else %}정비 항목{% endif %}</h2><table><thead><tr><th>항목</th><th>수량</th><th class="amount">단가</th><th class="amount">금액</th></tr></thead><tbody>
-      {% for item in items %}<tr><td>{% if item.title %}{{ item.title }}{% elif item.name %}{{ item.name }}{% else %}정비 항목{% endif %}</td><td>{% if item.quantity %}{{ item.quantity }} {{ item.unit }}{% else %}1{% endif %}</td><td class="amount">{% if item.unit_price_krw %}{{ item.unit_price_krw|comma }}원{% else %}—{% endif %}</td><td class="amount">{{ item.amount_krw|default:0|comma }}원</td></tr>{% empty %}<tr><td colspan="4">등록된 견적 항목이 없습니다.</td></tr>{% endfor %}
-    </tbody></table><div class="total"><span>{% if document_type == "repair-statement" or document_type == "receipt" %}정비 합계{% else %}견적 합계{% endif %}</span><strong>{{ total_krw|comma }}원</strong></div>
+    <section class="section"><h2>{% if document_type == "job-card" %}작업 예정 항목{% elif document_type == "repair-statement" %}정비 완료 항목{% else %}정비 항목{% endif %}</h2><table><thead><tr><th>정비 항목</th><th>수량</th><th class="amount">금액</th></tr></thead><tbody>
+      {% for item in items %}<tr><td>{% if item.title %}{{ item.title }}{% elif item.name %}{{ item.name }}{% else %}정비 항목{% endif %}</td><td>{% if item.quantity %}{{ item.quantity }}{% else %}1{% endif %}</td><td class="amount">{{ item.amount_krw|default:0|comma }}원</td></tr>{% empty %}<tr><td colspan="3">등록된 견적 항목이 없습니다.</td></tr>{% endfor %}
+    </tbody></table><div class="total"><span>{% if document_type == "repair-statement" or document_type == "receipt" %}정비 합계{% else %}견적 합계{% endif %}{% if tax_included %} <small>(부가세 포함)</small>{% endif %}</span><strong>{{ total_krw|comma }}원</strong></div>
       {% if document_type == "receipt" %}<table style="margin-top:12px"><tbody><tr><th>수납 금액</th><td class="amount">{{ paid_krw|comma }}원</td></tr><tr><th>잔액</th><td class="amount">{{ balance_krw|comma }}원</td></tr></tbody></table>{% endif %}
     </section>
     {% if note %}<section class="section"><h2>안내 사항</h2><div class="copy-box note">{{ note }}</div></section>{% endif %}
-    <section class="signatures"><div class="signature"><b>고객 확인</b>견적 내용을 확인했습니다.　서명:　　　　　　　　　</div><div class="signature"><b>정비 업체 확인</b>담당자:　　　　　　　　　　확인:　　　　　　　　　</div></section>
-    <footer class="foot">I LOVE MINI 협력업체 {{ document_title }} · 인쇄 대화상자에서 실제 프린터 또는 PDF 저장을 선택하세요.</footer>
+    <section class="signatures"><div class="signature"><b>고객 확인</b><div class="signature-fields customer-signature"><label class="signature-field">서명<input type="text" name="customer-signature" aria-label="고객 서명" autocomplete="off"></label></div></div><div class="signature"><b>정비 업체 확인</b><div class="signature-fields"><label class="signature-field">담당자<input type="text" name="technician-name" aria-label="담당자" autocomplete="off"></label><label class="signature-field">확인·서명<input type="text" name="partner-signature" aria-label="업체 확인 또는 서명" autocomplete="off"></label></div></div></section>
+    {% if public_share and partner.kakao_channel_url %}<section class="section"><a href="{{ partner.kakao_channel_url }}" target="_blank" rel="noopener noreferrer">{{ partner.name }} 카카오톡 채널로 문의하기</a></section>{% endif %}
+    <footer class="foot">I LOVE MINI · 협력업체 {{ document_title }}</footer>
   </main>
+  {% if share_endpoint and not public_share %}<script>
+    async function createQuoteShareUrl() {
+      const csrf = document.querySelector('#quote-share-csrf [name=csrfmiddlewaretoken]').value;
+      const response = await fetch('{{ share_endpoint }}', {method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':csrf, 'Accept':'application/json'}});
+      if (!response.ok) throw new Error('견적 공유 링크를 만들지 못했습니다.');
+      return (await response.json()).url;
+    }
+    document.getElementById('quote-share').addEventListener('click', async function () {
+      const button = this; button.disabled = true;
+      try {
+        const url = await createQuoteShareUrl();
+        const shareData = {title:'{{ document_title|escapejs }} · {{ document_number|escapejs }}', text:'{{ partner.name|escapejs }}에서 보내드린 견적서입니다. 링크는 3일간 열 수 있습니다.', url};
+        if (navigator.share) await navigator.share(shareData);
+        else if (navigator.clipboard) { await navigator.clipboard.writeText(url); alert('견적 링크를 복사했습니다. 카카오톡 대화방에 붙여 넣어 보내세요. (3일간 유효)'); }
+        else { window.prompt('견적 링크를 복사해 카카오톡으로 보내세요. (3일간 유효)', url); }
+      } catch (error) { if (error.name !== 'AbortError') alert(error.message || '공유를 완료하지 못했습니다.'); }
+      finally { button.disabled = false; }
+    });
+    document.getElementById('quote-copy').addEventListener('click', async function () {
+      const button = this; button.disabled = true;
+      try {
+        const url = await createQuoteShareUrl();
+        if (navigator.clipboard) { await navigator.clipboard.writeText(url); alert('3일간 유효한 견적 링크를 복사했습니다. 카카오톡 대화방에 붙여 넣어 보내세요.'); }
+        else { window.prompt('견적 링크를 복사해 카카오톡으로 보내세요. (3일간 유효)', url); }
+      } catch (error) { alert(error.message || '견적 링크를 만들지 못했습니다.'); }
+      finally { button.disabled = false; }
+    });
+  </script>{% endif %}
 </body>
 </html>
