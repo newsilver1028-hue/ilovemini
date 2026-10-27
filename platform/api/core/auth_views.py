@@ -51,7 +51,9 @@ class PartnerNaverLoginStartView(APIView):
         if not settings.NAVER_CLIENT_ID or not settings.NAVER_CLIENT_SECRET or not settings.NAVER_REDIRECT_URI:
             messages.error(request, "네이버 로그인 설정을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.")
             return redirect("partner_admin:login")
-        partner_id = request.query_params.get("partner_id", "")
+        partner_id = request.query_params.get("partner_id", "").strip()
+        if not partner_id.isdecimal():
+            return partner_login_redirect("application_invalid")
         partner = Partner.objects.filter(pk=partner_id, is_active=True).first()
         if partner is None:
             return partner_login_redirect("application_invalid")

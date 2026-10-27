@@ -15,6 +15,7 @@ from .models import (
     PartnerBooking,
     PartnerReview,
     PartnerStaff,
+    PartnerAccessRequest,
     Vehicle,
     WebPushSubscription,
 )
@@ -72,7 +73,7 @@ class PartnerPortalTests(TestCase):
             NAVER_CLIENT_SECRET="client-secret",
             NAVER_REDIRECT_URI="https://example.test/api/auth/naver/callback/",
         ):
-            response = client.get(reverse("partner_naver_start"))
+            response = client.get(reverse("partner_naver_start"), {"partner_id": self.partner.pk})
             self.assertEqual(response.status_code, 302)
             self.assertIn("nid.naver.com/oauth2.0/authorize", response["Location"])
             state = parse_qs(urlparse(response["Location"]).query)["state"][0]
@@ -110,7 +111,7 @@ class PartnerPortalTests(TestCase):
             NAVER_CLIENT_SECRET="client-secret",
             NAVER_REDIRECT_URI="https://example.test/api/auth/naver/callback/",
         ):
-            start_response = client.get(reverse("partner_naver_start"))
+            start_response = client.get(reverse("partner_naver_start"), {"partner_id": self.partner.pk})
             state = parse_qs(urlparse(start_response["Location"]).query)["state"][0]
             with patch("core.auth_views.exchange_code", return_value="access-token"), patch(
                 "core.auth_views.get_profile", return_value={"id": "unknown-subject"}
@@ -118,10 +119,13 @@ class PartnerPortalTests(TestCase):
                 response = client.get(reverse("naver_callback") + f"?state={state}&code=authorization-code")
         self.assertRedirects(
             response,
-            "https://admin.ilovemini.co.kr/partner-admin/login/?naver_error=not_registered",
+            "https://admin.ilovemini.co.kr/partner-admin/login/?naver_error=approval_pending",
             fetch_redirect_response=False,
         )
-        self.assertFalse(get_user_model().objects.filter(username__startswith="naver_").exclude(pk=self.user.pk).exists())
+        self.assertTrue(PartnerAccessRequest.objects.filter(
+            partner=self.partner, user__naver_identity__subject="unknown-subject",
+            status=PartnerAccessRequest.Status.PENDING,
+        ).exists())
 
     def test_partner_staff_sees_only_own_partner_and_cannot_delete(self):
         request = self.request_for_partner()
