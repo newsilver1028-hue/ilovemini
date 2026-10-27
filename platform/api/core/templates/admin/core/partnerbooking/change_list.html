@@ -50,7 +50,7 @@
               {% if event.change_url %}<a class="partner-event status-{{ event.status_code }}{% if event.has_conflict %} is-conflicted{% endif %}" href="{{ event.change_url }}">{% else %}<div class="partner-event status-{{ event.status_code }}{% if event.has_conflict %} is-conflicted{% endif %}">{% endif %}
                 <strong>{{ event.time }}–{{ event.ends_at }} · {{ event.service }}</strong>
                 <span>{{ event.plate }}</span>
-                <span>{{ event.phone }}</span>
+                <span>{{ event.phone }} · {{ event.resource }}</span>
                 <small>{{ event.status }}</small>
                 {% if event.has_conflict %}<small class="partner-conflict-label">일정 겹침 · 재조정 필요</small>{% endif %}
               {% if event.change_url %}</a>{% else %}</div>{% endif %}

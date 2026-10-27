@@ -8,7 +8,7 @@ from django.utils.html import format_html
 from django.utils import timezone
 
 from .member_display import member_nickname
-from .models import PartnerBooking, PartnerStaff, PartnerWorkOrder, Partner, PartnerCustomer, PartnerVehicle, PartnerPart, PartnerWorkOrderLine, PartnerStockMovement, PartnerPayment
+from .models import PartnerBooking, PartnerStaff, PartnerWorkOrder, Partner, PartnerCustomer, PartnerVehicle, PartnerPart, PartnerWorkOrderLine, PartnerStockMovement, PartnerPayment, PartnerServicePreset, PartnerWorkResource, PartnerQuoteShare
 from .partner_admin import is_system_admin, staff_partners
 
 
@@ -19,8 +19,8 @@ class PartnerWorkOrderForm(forms.ModelForm):
             "partner", "booking", "customer_name", "contact_phone", "vehicle_model",
             "customer", "partner_vehicle",
             "plate_number", "odometer_km", "customer_concern", "inspection_notes",
-            "quoted_total_krw", "final_total_krw", "paid_amount_krw",
-            "payment_method", "status", "technician_name", "work_notes",
+            "quoted_total_krw", "quote_status", "quote_revision", "quote_responded_at", "quote_decline_reason", "final_total_krw", "paid_amount_krw",
+            "payment_method", "status", "technician_name", "assigned_resource", "work_notes",
             "customer_message", "internal_note",
         )
 
@@ -40,6 +40,11 @@ class PartnerWorkOrderForm(forms.ModelForm):
         )
         self.fields["customer"].queryset = PartnerCustomer.objects.filter(partner_id__in=partner_ids, is_active=True)
         self.fields["partner_vehicle"].queryset = PartnerVehicle.objects.filter(partner_id__in=partner_ids, is_active=True).select_related("customer")
+        self.fields["assigned_resource"].queryset = PartnerWorkResource.objects.filter(partner_id__in=partner_ids, is_active=True)
+        self.fields["quote_status"].disabled = True
+        self.fields["quote_revision"].disabled = True
+        self.fields["quote_responded_at"].disabled = True
+        self.fields["quote_decline_reason"].disabled = True
         if self.instance.pk:
             self.fields["partner"].disabled = True
             self.fields["booking"].disabled = True
@@ -55,6 +60,9 @@ class PartnerWorkOrderForm(forms.ModelForm):
             self.add_error("customer", "고객 대장과 협력업체가 일치하지 않습니다.")
         if partner_vehicle and partner and partner_vehicle.partner_id != partner.pk:
             self.add_error("partner_vehicle", "차량 대장과 협력업체가 일치하지 않습니다.")
+        assigned_resource = data.get("assigned_resource")
+        if assigned_resource and partner and assigned_resource.partner_id != partner.pk:
+            self.add_error("assigned_resource", "담당 정비사·작업대가 협력업체와 일치하지 않습니다.")
         if customer and partner_vehicle and customer.pk != partner_vehicle.customer_id:
             self.add_error("partner_vehicle", "차량 대장의 고객을 확인해 주세요.")
         if data.get("paid_amount_krw", 0) > data.get("final_total_krw", 0):
@@ -78,7 +86,7 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
     actions = None
     fieldsets = (
         ("접수 정보", {"fields": ("partner", "booking", ("customer", "partner_vehicle"), ("customer_name", "contact_phone"), ("vehicle_model", "plate_number", "odometer_km"), "customer_concern", "status")}),
-        ("점검·작업", {"fields": ("inspection_notes", ("quoted_total_krw", "final_total_krw"), ("technician_name", "work_notes"), "customer_message")}),
+        ("점검·작업", {"fields": ("inspection_notes", ("quoted_total_krw", "quote_status", "quote_revision"), ("quote_responded_at", "quote_decline_reason"), "final_total_krw", ("technician_name", "assigned_resource"), "work_notes", "customer_message")}),
         ("수납", {"fields": (("paid_amount_krw", "payment_method"),)}),
         ("업체 메모", {"fields": ("internal_note",)}),
         ("기록", {"fields": ("created_by", "created_at", "updated_at", "completed_at"), "classes": ("collapse",)}),
@@ -144,7 +152,7 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
         if change:
             previous = PartnerWorkOrder.objects.select_for_update().filter(
                 pk=obj.pk, partner_id__in=partner_ids
-            ).values("status").first()
+            ).values("status", "quote_status").first()
             if previous is None:
                 raise PermissionDenied("해당 작업에 접근할 수 없습니다.")
         # Keep request-specific state on the form; ModelAdmin instances are shared
@@ -176,10 +184,23 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
                 obj.vehicle_model = obj.vehicle_model or booking.vehicle.model_name
                 obj.plate_number = obj.plate_number or booking.vehicle.plate_number
                 obj.odometer_km = obj.odometer_km or booking.vehicle.current_odometer_km
+            obj.assigned_resource = obj.assigned_resource or booking.assigned_resource
         if not change:
             obj.created_by = request.user
         if obj.status == PartnerWorkOrder.Status.COMPLETED and not obj.completed_at:
             obj.completed_at = timezone.now()
+        if change and previous["quote_status"] == PartnerWorkOrder.QuoteStatus.SENT:
+            # Any edit may change the customer-facing quote (inline items are
+            # saved immediately afterwards), so revoke the issued document
+            # before persisting the edit and require a fresh share.
+            now = timezone.now()
+            PartnerQuoteShare.objects.filter(work_order=obj, revoked_at__isnull=True).update(revoked_at=now)
+            obj.quote_revision += 1
+            obj.quote_status = PartnerWorkOrder.QuoteStatus.DRAFT
+            obj.quote_responded_at = None
+            obj.quote_decline_reason = ""
+            if obj.status == PartnerWorkOrder.Status.WAITING_APPROVAL:
+                obj.status = PartnerWorkOrder.Status.QUOTE
         super().save_model(request, obj, form, change)
 
     def save_related(self, request, form, formsets, change):
@@ -217,7 +238,9 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
             if part_id in parts and parts[part_id].stock_quantity < quantity
         ]
         if missing or insufficient or unlinked_parts:
-            # Prior status belongs to this request's form, not the shared admin instance.
+            # The prior value belongs to this request's form, not the shared
+            # ModelAdmin instance. Keep a READY/IN_PROGRESS order in its actual
+            # previous state when stock validation prevents completion.
             old_status = getattr(form, "_previous_status", None) or PartnerWorkOrder.Status.RECEIVED
             PartnerWorkOrder.objects.filter(pk=order.pk).update(status=old_status, completed_at=None)
             order.status = old_status
@@ -258,18 +281,33 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
 class PartnerWorkOrderLineForm(forms.ModelForm):
     class Meta:
         model = PartnerWorkOrderLine
-        fields = ("kind", "part", "description", "quantity", "unit", "unit_price_krw", "sort_order")
+        fields = ("preset", "kind", "part", "description", "quantity", "unit", "unit_price_krw", "sort_order")
 
     def __init__(self, *args, request=None, parent=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.request, self.parent = request, parent
         partner_id = getattr(parent, "partner_id", None) or (request.POST.get("partner") if request and request.method == "POST" else None)
         self.fields["part"].queryset = PartnerPart.objects.filter(partner_id=partner_id, is_active=True) if partner_id else PartnerPart.objects.none()
+        self.fields["preset"].queryset = PartnerServicePreset.objects.filter(partner_id=partner_id, is_active=True) if partner_id else PartnerServicePreset.objects.none()
 
     def clean(self):
         data = super().clean()
         part = data.get("part")
+        preset = data.get("preset")
         partner_id = getattr(self.parent, "partner_id", None) or (self.request.POST.get("partner") if self.request and self.request.method == "POST" else None)
+        if preset and str(preset.partner_id) != str(partner_id):
+            self.add_error("preset", "다른 업체의 정비 항목은 선택할 수 없습니다.")
+        elif preset:
+            data["kind"] = preset.kind
+            data["description"] = preset.name
+            data["quantity"] = preset.default_quantity
+            data["unit"] = preset.unit
+            data["unit_price_krw"] = preset.default_price_krw
+            if preset.part_id:
+                if preset.part.partner_id != int(partner_id):
+                    self.add_error("preset", "연결 재고 부품의 업체가 일치하지 않습니다.")
+                else:
+                    data["part"] = preset.part
         if part and str(part.partner_id) != str(partner_id):
             self.add_error("part", "다른 업체의 재고 부품은 선택할 수 없습니다.")
         if data.get("kind") == PartnerWorkOrderLine.Kind.PART and not part:
@@ -295,7 +333,7 @@ class PartnerWorkOrderLineInline(admin.TabularInline):
     model = PartnerWorkOrderLine
     form = PartnerWorkOrderLineForm
     extra = 1
-    fields = ("kind", "part", "description", "quantity", "unit", "unit_price_krw", "sort_order")
+    fields = ("preset", "kind", "part", "description", "quantity", "unit", "unit_price_krw", "sort_order")
     ordering = ("sort_order", "pk")
 
     def get_formset(self, request, obj=None, **kwargs):

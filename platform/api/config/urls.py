@@ -16,6 +16,7 @@ from core.privacy_views import privacy_policy, terms_of_service
 from core.partner_push_views import web_push_subscribe, web_push_unsubscribe, partner_service_worker
 from core.partner_pos_views import partner_pos_event
 from core.media_views import app_content_image, season_banner_image, partner_image
+from core.quote_sharing import public_partner_quote
 
 router = DefaultRouter()
 from core.app_sync import AppSyncView, MemberPointHistoryView
@@ -42,6 +43,7 @@ urlpatterns = [
     path("partner/", RedirectView.as_view(url="/partner-admin/login/", permanent=False), name="partner_admin_shortcut"),
     path("privacy/", privacy_policy, name="privacy_policy"),
     path("terms/", terms_of_service, name="terms_of_service"),
+    path("quote/shared/<uuid:token>/", public_partner_quote, name="public_partner_quote"),
     path("api/app/content/", AppContentView.as_view(), name="app_content"),
     path("api/media/app-content/<int:pk>/", app_content_image, name="app_content_image"),
     path("api/media/season-banner/<int:pk>/", season_banner_image, name="season_banner_image"),

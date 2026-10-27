@@ -101,7 +101,9 @@ def partner_pos_event(request):
                 integration.save(update_fields=("last_received_at", "updated_at"))
                 return JsonResponse({"ok": True, "duplicate": True, "payment_id": existing.pk})
             existing.status = PartnerPayment.Status.CANCELLED
-            existing.save(update_fields=("status",))
+            existing.cancelled_at = timezone.now()
+            existing.cancelled_amount_krw = existing.amount_krw
+            existing.save(update_fields=("status", "cancelled_at", "cancelled_amount_krw"))
             payment = existing
 
         # Keep payments entered manually in the work order while syncing POS totals.
@@ -121,4 +123,10 @@ def partner_pos_event(request):
         order.save(update_fields=("paid_amount_krw", "payment_method", "updated_at"))
         integration.last_received_at = timezone.now()
         integration.save(update_fields=("last_received_at", "updated_at"))
+        from .partner_accounting import refresh_daily_close_expected
+        affected_days = {timezone.localtime(payment.paid_at).date()}
+        if payment.cancelled_at:
+            affected_days.add(timezone.localtime(payment.cancelled_at).date())
+        for affected_day in affected_days:
+            refresh_daily_close_expected(integration.partner_id, affected_day)
         return JsonResponse({"ok": True, "duplicate": False, "payment_id": payment.pk, "paid_amount_krw": order.paid_amount_krw})

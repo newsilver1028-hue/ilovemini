@@ -11,7 +11,7 @@
       <h1 id="workshop-title">정비 운영</h1>
       <p>{{ partner_dashboard.today|date:"Y년 n월 j일" }} 업무와 차량 입고부터 출고까지 한곳에서 관리합니다.</p>
     </div>
-    {% if partner_dashboard.can_manage_work %}<a class="workshop-primary-action" href="{% url 'partner_admin:core_partnerworkorder_add' %}">＋ 정비 접수</a>{% endif %}
+    {% if partner_dashboard.can_manage_work %}<div class="workshop-header-actions"><a class="workshop-queue-open" href="{{ kakao_channel_settings_url }}">카카오톡 채널 설정</a><a class="workshop-primary-action" href="{% url 'partner_admin:core_partnerworkorder_add' %}">＋ 정비 접수</a></div>{% endif %}
   </header>
 
   {% if partner_dashboard.can_manage_work and partner_dashboard.partners_without_weekly_hours %}
@@ -117,6 +117,8 @@
     <a href="{% url 'partner_admin:core_partnerbooking_changelist' %}"><span>예약</span><strong>예약 일정과 고객 요청 확인</strong></a>
     <a href="{% url 'partner_admin:core_partnerweeklyschedule_changelist' %}"><span>예약 운영시간</span><strong>요일별 영업시간과 예약 간격 설정</strong></a>
     <a href="{% url 'partner_admin:core_partnerworkorder_changelist' %}"><span>작업지시</span><strong>입고 차량의 정비 과정 관리</strong></a>
+    <a href="{% url 'partner_admin:core_partnerworkresource_changelist' %}"><span>정비사·작업대</span><strong>예약·작업 자원 등록과 배정</strong></a>
+    <a href="{% url 'partner_admin:core_partnerservicepreset_changelist' %}"><span>표준 정비 항목</span><strong>공임·부품·기본 작업시간 템플릿</strong></a>
     <a href="{% url 'partner_admin:core_partnercustomer_changelist' %}"><span>고객 대장</span><strong>고객 연락처와 거래 정보를 관리</strong></a>
     <a href="{% url 'partner_admin:core_partnervehicle_changelist' %}"><span>차량 대장</span><strong>차량번호·차종·주행거리 이력 관리</strong></a>
     <a href="{% url 'partner_admin:core_serviceestimate_changelist' %}"><span>견적</span><strong>견적 확인 및 출력</strong></a>
@@ -128,7 +130,9 @@
     <a href="{% url 'partner_admin:core_partnerpurchaseline_changelist' %}"><span>매입</span><strong>부품 매입 등록과 재고 입고 반영</strong></a>
     <a href="{% url 'partner_admin:core_partnerstockmovement_changelist' %}"><span>재고 조정</span><strong>입고·출고 이력과 재고 보정</strong></a>
     <a href="{% url 'partner_admin:core_partnerfinancialentry_changelist' %}"><span>입금·경비</span><strong>현금 흐름과 지출 기록</strong></a>
+    <a href="{% url 'partner_admin:core_partnerdailyclose_changelist' %}"><span>일일 매출 마감</span><strong>POS 수신액과 실제 정산액 대조</strong></a>
     <a href="{% url 'partner_admin:partner-operations-report' %}"><span>월간 리포트</span><strong>매출 장부, 미수금, 재고 평가 확인</strong></a>
+    <a href="{% url 'partner_admin:partner-workshop-export' %}"><span>운영자료 내보내기</span><strong>고객·차량·예약·일정·재고·결제 자료 엑셀 저장</strong></a>
     {% endif %}
   </section>
 </main>

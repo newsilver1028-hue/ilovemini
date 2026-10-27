@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Vehicle, VehicleOwnership, LedgerEntry, Reminder, Notice, Partner, PartnerReview, Offer, PartnerBooking, PartnerStaff
+from .models import Vehicle, VehicleOwnership, LedgerEntry, Reminder, Notice, Partner, PartnerReview, Offer, PartnerBooking, PartnerStaff, PartnerWorkResource
 from .integrity import ledger_record_hash, legacy_ledger_record_hash
 from .vehicle_identity import normalize_plate_number
 from .media_views import uploaded_image_url
@@ -167,7 +167,7 @@ class PartnerSerializer(serializers.ModelSerializer):
     average_rating = serializers.FloatField(read_only=True)
     class Meta:
         model = Partner
-        fields = ["id", "name", "branch_label", "region", "service_categories", "description", "business_info", "storefront_photo_url", "introduction_images", "representative_name", "representative_title", "representative_experience_years", "representative_photo_url", "address", "phone", "hours", "cafe_url", "map_url", "is_sponsored", "display_order", "review_count", "average_rating"]
+        fields = ["id", "name", "branch_label", "region", "service_categories", "description", "business_info", "storefront_photo_url", "introduction_images", "representative_name", "representative_title", "representative_experience_years", "representative_photo_url", "address", "phone", "hours", "cafe_url", "kakao_channel_url", "map_url", "is_sponsored", "display_order", "review_count", "average_rating"]
 
 
 class PartnerReviewSerializer(serializers.ModelSerializer):
@@ -204,10 +204,12 @@ class PartnerBookingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PartnerBooking
-        fields = ["id", "partner", "partner_name", "partner_branch_label", "partner_region", "vehicle", "vehicle_name", "vehicle_plate_number", "scheduled_at", "duration_minutes",
+        fields = ["id", "partner", "partner_name", "partner_branch_label", "partner_region", "vehicle", "vehicle_name", "vehicle_plate_number", "scheduled_at", "duration_minutes", "assigned_resource",
                   "service_type", "customer_note", "contact_phone", "status", "status_label", "can_manage", "can_verify_records", "is_customer",
                   "cancellation_reason", "partner_note", "requested_at", "updated_at"]
-        read_only_fields = ["id", "partner_name", "vehicle_name", "duration_minutes", "status", "cancellation_reason", "partner_note", "requested_at", "updated_at"]
+        # Resource allocation is workshop-managed. Public booking callers must
+        # not choose a technician/bay to bypass capacity checks.
+        read_only_fields = ["id", "partner_name", "vehicle_name", "duration_minutes", "assigned_resource", "status", "cancellation_reason", "partner_note", "requested_at", "updated_at"]
 
     def get_can_manage(self, obj):
         request = self.context.get("request")

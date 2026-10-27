@@ -600,7 +600,7 @@ class PartnerAdmin(AdminCalendarMixin, admin.ModelAdmin):
         ("매장 상세 안내", {"description": "앱의 업체 정보에 표시할 방문 및 이용 안내입니다.", "fields": ("business_info",)}),
         ("대표 매장 사진", {"fields": ("storefront_upload_status", "storefront_photo_url", "storefront_photo_upload", "clear_storefront_photo_upload")}),
         ("대표 정비사", {"fields": ("representative_name", "representative_title", "representative_experience_years", "representative_upload_status", "representative_photo_url", "representative_photo_upload", "clear_representative_photo_upload")}),
-        ("연락처 및 연결", {"fields": ("address", "phone", "hours", "cafe_url", "map_url")}),
+        ("연락처 및 연결", {"fields": ("address", "phone", "hours", "cafe_url", "kakao_channel_url", "map_url")}),
         ("앱 노출 설정", {"fields": ("is_active", "is_sponsored", "display_order")}),
     )
 

@@ -27,6 +27,10 @@ from .models import (
     PartnerPosIntegration,
     PartnerPayment,
     PartnerTaxInvoice,
+    PartnerWorkResource,
+    PartnerServicePreset,
+    PartnerDailyClose,
+    PartnerServiceDuration,
 )
 from .partner_admin import active_staff_for, is_system_admin, partner_admin_site, staff_partners
 
@@ -134,6 +138,122 @@ class PartnerVehicleAdmin(PartnerScopedAdmin):
         if obj:
             form.base_fields["partner"].disabled = True
         return form
+
+
+class PartnerServicePresetForm(forms.ModelForm):
+    class Meta:
+        model = PartnerServicePreset
+        fields = ("partner", "name", "kind", "duration_minutes", "default_quantity", "unit", "default_price_krw", "part", "is_active")
+
+    def clean(self):
+        data = super().clean()
+        partner, part = data.get("partner"), data.get("part")
+        if partner and part and part.partner_id != partner.pk:
+            self.add_error("part", "연결 부품과 협력업체가 일치하지 않습니다.")
+        duration = data.get("duration_minutes")
+        if duration is not None and (duration < 30 or duration > 480 or duration % 30):
+            self.add_error("duration_minutes", "정비 소요시간은 30분 단위, 30~480분으로 입력해 주세요.")
+        return data
+
+
+class PartnerWorkResourceAdmin(PartnerScopedAdmin):
+    list_display = ("partner", "kind", "name", "is_active")
+    list_filter = ("partner", "kind", "is_active")
+    search_fields = ("name", "partner__name", "partner__branch_label")
+    fields = ("partner", "kind", "name", "is_active")
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj:
+            form.base_fields["partner"].disabled = True
+        return form
+
+
+class PartnerServicePresetAdmin(PartnerScopedAdmin):
+    form = PartnerServicePresetForm
+    list_display = ("name", "partner", "kind", "duration_minutes", "default_quantity", "unit", "default_price_krw", "part", "is_active")
+    list_filter = ("partner", "kind", "is_active")
+    search_fields = ("name", "part__name", "part__sku")
+    fields = ("partner", "name", "kind", "duration_minutes", "default_quantity", "unit", "default_price_krw", "part", "is_active")
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj:
+            form.base_fields["partner"].disabled = True
+        return form
+
+    @transaction.atomic
+    def save_model(self, request, obj, form, change):
+        if obj.partner_id not in self.allowed_partner_ids(request):
+            raise PermissionDenied("접근 권한이 없는 업체의 정비 항목입니다.")
+        previous_name = PartnerServicePreset.objects.filter(pk=obj.pk).values_list("name", flat=True).first() if change else None
+        super().save_model(request, obj, form, change)
+        # Reuse the preset's duration for public booking slot calculation.
+        if previous_name and previous_name != obj.name:
+            PartnerServiceDuration.objects.filter(partner_id=obj.partner_id, service_name=previous_name).update(is_active=False)
+        PartnerServiceDuration.objects.update_or_create(
+            partner_id=obj.partner_id, service_name=obj.name,
+            defaults={"duration_minutes": obj.duration_minutes, "is_active": obj.is_active},
+        )
+
+
+class PartnerDailyCloseForm(forms.ModelForm):
+    class Meta:
+        model = PartnerDailyClose
+        fields = ("partner", "business_date", "expected_cash_krw", "counted_cash_krw", "expected_card_krw", "counted_card_krw", "expected_transfer_krw", "counted_transfer_krw", "expected_refund_krw", "counted_refund_krw", "note")
+
+
+class PartnerDailyCloseAdmin(PartnerScopedAdmin):
+    form = PartnerDailyCloseForm
+    list_display = ("business_date", "partner", "expected_cash_krw", "counted_cash_krw", "cash_variance", "expected_card_krw", "counted_card_krw", "card_variance", "expected_transfer_krw", "counted_transfer_krw", "transfer_variance", "expected_refund_krw", "counted_refund_krw", "refund_variance", "closed_by", "closed_at")
+    list_filter = ("partner", "business_date")
+    date_hierarchy = "business_date"
+    fields = ("partner", "business_date", ("expected_cash_krw", "counted_cash_krw"), ("expected_card_krw", "counted_card_krw"), ("expected_transfer_krw", "counted_transfer_krw"), ("expected_refund_krw", "counted_refund_krw"), "note", "closed_by", "closed_at")
+    readonly_fields = ("expected_cash_krw", "expected_card_krw", "expected_transfer_krw", "expected_refund_krw", "closed_by", "closed_at")
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj:
+            form.base_fields["partner"].disabled = True
+            form.base_fields["business_date"].disabled = True
+        return form
+
+    def _variance(self, obj, expected, counted):
+        return getattr(obj, counted) - getattr(obj, expected)
+
+    @admin.display(description="현금 차이")
+    def cash_variance(self, obj):
+        return f"{self._variance(obj, 'expected_cash_krw', 'counted_cash_krw'):+,}원"
+
+    @admin.display(description="카드 차이")
+    def card_variance(self, obj):
+        return f"{self._variance(obj, 'expected_card_krw', 'counted_card_krw'):+,}원"
+
+    @admin.display(description="이체 차이")
+    def transfer_variance(self, obj):
+        return f"{self._variance(obj, 'expected_transfer_krw', 'counted_transfer_krw'):+,}원"
+
+    @admin.display(description="환불 차이")
+    def refund_variance(self, obj):
+        return f"{self._variance(obj, 'expected_refund_krw', 'counted_refund_krw'):+,}원"
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        field = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if field and db_field.name.startswith("expected_"):
+            field.help_text = "POS 승인·취소 웹훅이 도착하면 해당 영업일의 시스템 합계가 다시 계산됩니다. 외부 단말 수납·환불은 실제 정산액에 직접 입력하세요."
+        return field
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            super().save_model(request, obj, form, change)
+            from .partner_accounting import refresh_daily_close_expected
+            refresh_daily_close_expected(obj.partner_id, obj.business_date)
+            obj.refresh_from_db()
+            obj.closed_by = request.user
+        super().save_model(request, obj, form, change)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class PartStockFilter(admin.SimpleListFilter):
@@ -262,11 +382,6 @@ class PartnerStockMovementForm(forms.ModelForm):
             self.add_error("part", "부품과 업체가 일치하지 않습니다.")
         if data.get("work_order") and data.get("partner") and data["work_order"].partner_id != data["partner"].pk:
             self.add_error("work_order", "작업과 업체가 일치하지 않습니다.")
-        if data.get("reason") == PartnerStockMovement.Reason.REPAIR_USE:
-            if data.get("direction") != PartnerStockMovement.Direction.OUT:
-                self.add_error("direction", "정비 사용은 재고 출고로 등록해 주세요.")
-            if not data.get("work_order"):
-                self.add_error("work_order", "정비 사용에는 연결 작업을 지정해야 합니다.")
         return data
 
 
@@ -339,6 +454,9 @@ partner_admin_site.register(PartnerSupplier, PartnerSupplierAdmin)
 partner_admin_site.register(PartnerPart, PartnerPartAdmin)
 partner_admin_site.register(PartnerCustomer, PartnerCustomerAdmin)
 partner_admin_site.register(PartnerVehicle, PartnerVehicleAdmin)
+partner_admin_site.register(PartnerWorkResource, PartnerWorkResourceAdmin)
+partner_admin_site.register(PartnerServicePreset, PartnerServicePresetAdmin)
+partner_admin_site.register(PartnerDailyClose, PartnerDailyCloseAdmin)
 partner_admin_site.register(PartnerPurchaseLine, PartnerPurchaseAdmin)
 partner_admin_site.register(PartnerStockMovement, PartnerStockMovementAdmin)
 partner_admin_site.register(PartnerFinancialEntry, PartnerFinancialEntryAdmin)
@@ -408,11 +526,11 @@ class PartnerPosIntegrationAdmin(PartnerScopedAdmin):
 
 
 class PartnerPaymentAdmin(PartnerScopedAdmin):
-    list_display = ("paid_at", "work_order", "provider_name", "method", "status", "amount_krw", "provider_transaction_id", "approval_code")
+    list_display = ("paid_at", "work_order", "provider_name", "method", "status", "amount_krw", "cancelled_amount_krw", "cancelled_at", "provider_transaction_id", "approval_code")
     list_filter = ("provider_name", "method", "status", "paid_at")
     search_fields = ("provider_transaction_id", "approval_code", "work_order__plate_number", "work_order__customer_name")
     readonly_fields = tuple(field.name for field in PartnerPayment._meta.fields)
-    fields = ("partner", "work_order", "provider_name", "provider_transaction_id", "method", "status", "amount_krw", "approval_code", "paid_at", "created_at")
+    fields = ("partner", "work_order", "provider_name", "provider_transaction_id", "method", "status", "amount_krw", "cancelled_amount_krw", "cancelled_at", "approval_code", "paid_at", "created_at")
 
     def has_add_permission(self, request):
         return False

@@ -339,6 +339,7 @@ class Partner(models.Model):
     phone = models.CharField(max_length=40, blank=True)
     hours = models.CharField(max_length=160, blank=True)
     cafe_url = models.URLField(blank=True)
+    kakao_channel_url = models.URLField("카카오톡 채널 상담 주소", max_length=2048, blank=True, help_text="예: https://pf.kakao.com/_채널ID/chat")
     map_url = models.URLField(blank=True)
     storefront_photo_url = models.URLField(max_length=2048, blank=True)
     storefront_photo_data = models.BinaryField(null=True, blank=True, editable=False)
@@ -360,6 +361,29 @@ class Partner(models.Model):
 
     def __str__(self):
         return f"{self.name} · {self.branch_label}" if self.branch_label else self.name
+
+
+class PartnerQuoteShare(models.Model):
+    """Short-lived, opaque customer link for a partner quote document."""
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    work_order = models.ForeignKey("PartnerWorkOrder", null=True, blank=True, on_delete=models.CASCADE, related_name="quote_shares")
+    estimate = models.ForeignKey("ServiceEstimate", null=True, blank=True, on_delete=models.CASCADE, related_name="quote_shares")
+    quote_revision = models.PositiveSmallIntegerField("견적 버전", default=0)
+    snapshot = models.JSONField("공유 당시 견적 내용", default=dict, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(db_index=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [models.CheckConstraint(
+            condition=(models.Q(work_order__isnull=False, estimate__isnull=True) | models.Q(work_order__isnull=True, estimate__isnull=False)),
+            name="partner_quote_share_exactly_one_source",
+        )]
+
+    def __str__(self):
+        return f"견적 공유 · {self.token}"
 
 
 class PartnerServiceCategoryOption(models.Model):
@@ -462,6 +486,7 @@ class PartnerBooking(models.Model):
     requested_at = models.DateTimeField(default=timezone.now)
     scheduled_at = models.DateTimeField()
     duration_minutes = models.PositiveSmallIntegerField("예상 작업 시간(분)", default=60, help_text="30분 단위. 기존 예약의 작업 시간은 저장 당시 값으로 유지됩니다.")
+    assigned_resource = models.ForeignKey("PartnerWorkResource", on_delete=models.SET_NULL, null=True, blank=True, related_name="bookings", verbose_name="담당 정비사·작업대")
     service_type = models.CharField(max_length=100)
     customer_note = models.CharField(max_length=500, blank=True)
     contact_phone = models.CharField(max_length=24, blank=True)
@@ -593,6 +618,12 @@ class PartnerWorkOrder(models.Model):
         EASY_PAY = "easy_pay", "간편결제"
         OTHER = "other", "기타"
 
+    class QuoteStatus(models.TextChoices):
+        DRAFT = "draft", "미발송"
+        SENT = "sent", "고객 확인 대기"
+        APPROVED = "approved", "고객 승인"
+        DECLINED = "declined", "고객 거절"
+
     partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="work_orders", verbose_name="협력업체")
     booking = models.OneToOneField(PartnerBooking, on_delete=models.PROTECT, null=True, blank=True, related_name="work_order", verbose_name="연결 예약")
     customer = models.ForeignKey("PartnerCustomer", on_delete=models.SET_NULL, null=True, blank=True, related_name="work_orders", verbose_name="등록 고객")
@@ -608,8 +639,13 @@ class PartnerWorkOrder(models.Model):
     work_notes = models.TextField("작업 내용", blank=True)
     customer_message = models.CharField("고객 안내", max_length=500, blank=True)
     technician_name = models.CharField("담당 정비사", max_length=100, blank=True)
+    assigned_resource = models.ForeignKey("PartnerWorkResource", on_delete=models.SET_NULL, null=True, blank=True, related_name="work_orders", verbose_name="담당 정비사·작업대")
     items = models.JSONField("부품·공임 항목", default=list, blank=True)
     quoted_total_krw = models.PositiveIntegerField("견적 금액(원)", default=0)
+    quote_status = models.CharField("견적 확인 상태", max_length=12, choices=QuoteStatus.choices, default=QuoteStatus.DRAFT)
+    quote_revision = models.PositiveSmallIntegerField("견적 버전", default=0)
+    quote_responded_at = models.DateTimeField("고객 응답 시각", null=True, blank=True)
+    quote_decline_reason = models.CharField("고객 거절 사유", max_length=500, blank=True)
     final_total_krw = models.PositiveIntegerField("최종 정비 금액(원)", default=0)
     paid_amount_krw = models.PositiveIntegerField("수납 금액(원)", default=0)
     payment_method = models.CharField("결제 수단", max_length=16, choices=PaymentMethod.choices, blank=True)
@@ -683,6 +719,7 @@ class PartnerWorkOrderLine(models.Model):
         OTHER = "other", "기타"
 
     work_order = models.ForeignKey(PartnerWorkOrder, on_delete=models.CASCADE, related_name="lines", verbose_name="작업지시")
+    preset = models.ForeignKey("PartnerServicePreset", on_delete=models.SET_NULL, null=True, blank=True, related_name="work_order_lines", verbose_name="표준 정비 항목")
     kind = models.CharField("유형", max_length=12, choices=Kind.choices, default=Kind.LABOR)
     part = models.ForeignKey("PartnerPart", null=True, blank=True, on_delete=models.PROTECT, related_name="work_order_lines", verbose_name="재고 부품")
     description = models.CharField("작업·부품명", max_length=160)
@@ -702,6 +739,72 @@ class PartnerWorkOrderLine(models.Model):
 
     def __str__(self):
         return self.description
+
+
+class PartnerWorkResource(models.Model):
+    class Kind(models.TextChoices):
+        TECHNICIAN = "technician", "정비사"
+        BAY = "bay", "작업대·리프트"
+
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="work_resources", verbose_name="협력업체")
+    name = models.CharField("이름·작업대", max_length=100)
+    kind = models.CharField("구분", max_length=16, choices=Kind.choices, default=Kind.TECHNICIAN)
+    is_active = models.BooleanField("사용", default=True)
+
+    class Meta:
+        verbose_name = "정비사·작업대"
+        verbose_name_plural = "정비사·작업대"
+        ordering = ["partner", "kind", "name"]
+        constraints = [models.UniqueConstraint(fields=["partner", "kind", "name"], name="unique_partner_work_resource")]
+
+    def __str__(self):
+        return f"{self.get_kind_display()} · {self.name}"
+
+
+class PartnerServicePreset(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name="service_presets", verbose_name="협력업체")
+    name = models.CharField("정비 항목", max_length=160)
+    kind = models.CharField("유형", max_length=12, choices=PartnerWorkOrderLine.Kind.choices, default=PartnerWorkOrderLine.Kind.LABOR)
+    duration_minutes = models.PositiveSmallIntegerField("예상 소요시간(분)", default=60)
+    default_quantity = models.DecimalField("기본 수량", max_digits=9, decimal_places=2, default=1)
+    unit = models.CharField("단위", max_length=24, blank=True)
+    default_price_krw = models.PositiveIntegerField("기본 단가(원)", default=0)
+    part = models.ForeignKey("PartnerPart", on_delete=models.SET_NULL, null=True, blank=True, related_name="service_presets", verbose_name="연결 재고 부품")
+    is_active = models.BooleanField("사용", default=True)
+
+    class Meta:
+        verbose_name = "표준 정비 항목·공임"
+        verbose_name_plural = "표준 정비 항목·공임"
+        ordering = ["partner", "name"]
+        constraints = [models.UniqueConstraint(fields=["partner", "name"], name="unique_partner_service_preset")]
+
+    def __str__(self):
+        return self.name
+
+
+class PartnerDailyClose(models.Model):
+    partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="daily_closes", verbose_name="협력업체")
+    business_date = models.DateField("영업일")
+    expected_cash_krw = models.PositiveIntegerField("시스템 현금 합계(원)", default=0)
+    counted_cash_krw = models.PositiveIntegerField("실제 현금(원)", default=0)
+    expected_card_krw = models.PositiveIntegerField("시스템 카드 합계(원)", default=0)
+    counted_card_krw = models.PositiveIntegerField("실제 카드 정산액(원)", default=0)
+    expected_transfer_krw = models.PositiveIntegerField("시스템 이체 합계(원)", default=0)
+    counted_transfer_krw = models.PositiveIntegerField("실제 이체 합계(원)", default=0)
+    expected_refund_krw = models.PositiveIntegerField("시스템 환불 합계(원)", default=0)
+    counted_refund_krw = models.PositiveIntegerField("실제 환불 합계(원)", default=0)
+    note = models.CharField("마감 메모", max_length=500, blank=True)
+    closed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="partner_daily_closes")
+    closed_at = models.DateTimeField("마감 시각", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "일일 매출 마감"
+        verbose_name_plural = "일일 매출 마감"
+        ordering = ["-business_date", "partner"]
+        constraints = [models.UniqueConstraint(fields=["partner", "business_date"], name="unique_partner_daily_close")]
+
+    def __str__(self):
+        return f"{self.partner} · {self.business_date} 마감"
 
 
 class PartnerSupplier(models.Model):
@@ -881,6 +984,8 @@ class PartnerPayment(models.Model):
     amount_krw = models.PositiveIntegerField("결제 금액(원)")
     approval_code = models.CharField("승인 번호", max_length=80, blank=True)
     paid_at = models.DateTimeField("결제 일시", default=timezone.now)
+    cancelled_at = models.DateTimeField("취소 처리 일시", null=True, blank=True)
+    cancelled_amount_krw = models.PositiveIntegerField("취소 금액(원)", default=0)
     created_at = models.DateTimeField("수신 일시", auto_now_add=True)
 
     class Meta:
