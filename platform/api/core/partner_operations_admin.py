@@ -238,6 +238,24 @@ class PartnerStockMovementForm(forms.ModelForm):
         model = PartnerStockMovement
         fields = ("partner", "part", "work_order", "direction", "reason", "quantity", "note")
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Purchases and completed repairs already create stock movements. Prevent
+        # manual entries for these reasons to avoid double-counting inventory.
+        automatic_reasons = {
+            PartnerStockMovement.Reason.PURCHASE,
+            PartnerStockMovement.Reason.REPAIR_USE,
+        }
+        self.fields["reason"].choices = [
+            (value, label)
+            for value, label in self.fields["reason"].choices
+            if value not in automatic_reasons
+        ]
+        self.fields["reason"].help_text = (
+            "매입 입고와 정비 사용 출고는 매입 등록·작업 완료 시 자동 반영됩니다. "
+            "이 화면에서는 수동 조정, 반품, 파손·폐기만 기록하세요."
+        )
+
     def clean(self):
         data = super().clean()
         if data.get("part") and data.get("partner") and data["part"].partner_id != data["partner"].pk:
