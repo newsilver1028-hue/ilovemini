@@ -680,17 +680,27 @@ class PartnerBookingAdmin(admin.ModelAdmin):
         previous = PartnerBooking.objects.filter(pk=obj.pk, partner_id=obj.partner_id).values("status", "partner_note", "scheduled_at", "duration_minutes").first()
         if previous is None:
             raise Http404
-        from .booking_schedule import is_slot_available
-        available, reason = is_slot_available(obj.partner, obj.scheduled_at, obj.duration_minutes, exclude_booking_id=obj.pk)
-        duration_extension = obj.duration_minutes > previous["duration_minutes"] and obj.scheduled_at == previous["scheduled_at"]
-        if not available and not duration_extension:
-            raise ValidationError({"duration_minutes": reason})
         allowed = {
             PartnerBooking.Status.REQUESTED: {PartnerBooking.Status.CONFIRMED, PartnerBooking.Status.REJECTED},
             PartnerBooking.Status.CONFIRMED: {PartnerBooking.Status.COMPLETED},
         }
         if obj.status != previous["status"] and obj.status not in allowed.get(previous["status"], set()):
             raise PermissionDenied("현재 상태에서 선택할 수 없는 예약 변경입니다.")
+        # Capacity matters while a booking still occupies a live slot. A
+        # conflicting request must remain rejectable, and completed bookings
+        # must not be blocked by another reservation's current schedule.
+        from .booking_schedule import ACTIVE_BOOKING_STATUSES, is_slot_available
+        if obj.status in ACTIVE_BOOKING_STATUSES:
+            available, reason = is_slot_available(
+                obj.partner, obj.scheduled_at, obj.duration_minutes,
+                exclude_booking_id=obj.pk,
+            )
+            duration_extension = (
+                obj.duration_minutes > previous["duration_minutes"]
+                and obj.scheduled_at == previous["scheduled_at"]
+            )
+            if not available and not duration_extension:
+                raise ValidationError({"duration_minutes": reason})
         super().save_model(request, obj, form, change)
         if obj.status != previous["status"]:
             def notify_customer():
