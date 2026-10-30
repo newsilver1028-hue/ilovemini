@@ -34,9 +34,9 @@
       <p class="partner-calendar-description">날짜별 예약을 확인하고 선택하면 예약 내용을 볼 수 있습니다.</p>
     </div>
     <nav class="partner-calendar-nav" aria-label="월 이동">
-      <a href="?scheduled_at__year={{ partner_calendar_prev|slice:':4' }}&amp;scheduled_at__month={{ partner_calendar_prev|slice:'5:' }}" aria-label="이전 달">‹</a>
-      <a href="?scheduled_at__year={{ partner_calendar_month|date:'Y' }}&amp;scheduled_at__month={{ partner_calendar_month|date:'n' }}" class="partner-calendar-today">이번 달</a>
-      <a href="?scheduled_at__year={{ partner_calendar_next|slice:':4' }}&amp;scheduled_at__month={{ partner_calendar_next|slice:'5:' }}" aria-label="다음 달">›</a>
+      <a href="?scheduled_at__year={{ partner_calendar_prev|slice:':4' }}&amp;scheduled_at__month={{ partner_calendar_prev|slice:'5:' }}{% if partner_calendar_status %}&amp;status={{ partner_calendar_status|urlencode }}{% endif %}" aria-label="이전 달">‹</a>
+      <a href="?scheduled_at__year={{ partner_calendar_month|date:'Y' }}&amp;scheduled_at__month={{ partner_calendar_month|date:'n' }}{% if partner_calendar_status %}&amp;status={{ partner_calendar_status|urlencode }}{% endif %}" class="partner-calendar-today">이번 달</a>
+      <a href="?scheduled_at__year={{ partner_calendar_next|slice:':4' }}&amp;scheduled_at__month={{ partner_calendar_next|slice:'5:' }}{% if partner_calendar_status %}&amp;status={{ partner_calendar_status|urlencode }}{% endif %}" aria-label="다음 달">›</a>
     </nav>
   </div>
   <div class="partner-calendar-grid" role="grid" aria-label="월간 예약 캘린더">
@@ -61,7 +61,7 @@
       {% endfor %}
     {% endfor %}
   </div>
-  <p class="partner-calendar-empty">예약이 있는 날짜에만 일정이 표시됩니다.</p>
+  <p class="partner-calendar-empty">{% if partner_calendar_status %}{{ partner_calendar_status_label }} 상태의 예약만 표시 중입니다. 해당 월에 예약이 없으면 일정이 비어 있습니다.{% else %}예약이 있는 날짜에만 일정이 표시됩니다.{% endif %}</p>
 </section>
 {{ block.super }}
 {% endblock %}
