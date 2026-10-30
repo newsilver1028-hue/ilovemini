@@ -83,7 +83,6 @@ class PartnerAdminSite(AdminSite):
     def each_context(self, request):
         context = super().each_context(request)
         context["is_partner_admin"] = True
-        context["partner_application_options"] = Partner.objects.filter(is_active=True).order_by("name", "branch_label")
         context["partner_web_push_public_key"] = (
             getattr(settings, "WEB_PUSH_VAPID_PUBLIC_KEY", "") if self.has_permission(request) else ""
         )
@@ -95,9 +94,7 @@ class PartnerAdminSite(AdminSite):
             and request.user.is_active
             and (
                 is_system_admin(request)
-                or active_staff_for(request).filter(
-                    Q(can_manage_bookings=True) | Q(can_verify_records=True)
-                ).exists()
+                or active_staff_for(request).exists()
             )
         )
 
