@@ -794,6 +794,12 @@ class PartnerBookingAdmin(admin.ModelAdmin):
             scheduled_at__gte=timezone.make_aware(datetime.combine(month_start, time.min)),
             scheduled_at__lt=timezone.make_aware(datetime.combine(next_month, time.min)),
         ).order_by("scheduled_at", "pk")
+        selected_status = request.GET.get("status", "")
+        valid_statuses = {value for value, _label in PartnerBooking.Status.choices}
+        if selected_status in valid_statuses:
+            bookings = bookings.filter(status=selected_status)
+        else:
+            selected_status = ""
         events_by_day = {}
         booking_rows = list(bookings)
         for booking in booking_rows:
@@ -842,6 +848,8 @@ class PartnerBookingAdmin(admin.ModelAdmin):
             "partner_calendar_next": next_month.strftime("%Y-%m"),
             "partner_calendar_weeks": weeks,
             "partner_calendar_weekdays": ["월", "화", "수", "목", "금", "토", "일"],
+            "partner_calendar_status": selected_status,
+            "partner_calendar_status_label": dict(PartnerBooking.Status.choices).get(selected_status, ""),
         })
         return super().changelist_view(request, extra_context=extra_context)
 
