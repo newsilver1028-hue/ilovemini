@@ -119,12 +119,11 @@ class PartnerPortalTests(TestCase):
                 response = client.get(reverse("naver_callback") + f"?state={state}&code=authorization-code")
         self.assertRedirects(
             response,
-            "https://admin.ilovemini.co.kr/partner-admin/login/?naver_error=approval_pending",
+            "https://admin.ilovemini.co.kr/partner-admin/login/?naver_error=not_partner",
             fetch_redirect_response=False,
         )
-        self.assertTrue(PartnerAccessRequest.objects.filter(
+        self.assertFalse(PartnerAccessRequest.objects.filter(
             partner=self.partner, user__naver_identity__subject="unknown-subject",
-            status=PartnerAccessRequest.Status.PENDING,
         ).exists())
 
     def test_partner_staff_sees_only_own_partner_and_cannot_delete(self):
