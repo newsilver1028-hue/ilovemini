@@ -12,29 +12,21 @@
   {% endif %}
   {% if request.GET.naver_error == "cancelled" %}<p class="errornote">네이버 로그인이 취소되었습니다. 다시 시도해 주세요.</p>{% endif %}
   {% if request.GET.naver_error == "provider" %}<p class="errornote">네이버 인증을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.</p>{% endif %}
-  {% if request.GET.naver_error == "not_registered" %}<p class="errornote">등록된 협력업체 담당자 계정이 아닙니다. 운영자에게 권한을 확인해 주세요.</p>{% endif %}
-  {% if request.GET.naver_error == "approval_pending" %}<p class="successnote">권한 승인 신청을 접수했습니다. 관리자가 확인한 뒤 승인되면 선택한 업체 계정으로 로그인할 수 있습니다.</p>{% endif %}
-  {% if request.GET.naver_error == "application_invalid" %}<p class="errornote">로그인할 업체를 선택해 주세요. 활성 업체가 보이지 않으면 운영자에게 문의해 주세요.</p>{% endif %}
+  {% if request.GET.naver_error == "not_partner" or request.GET.naver_error == "not_registered" or request.GET.naver_error == "approval_pending" %}<p class="errornote">협력업체 등급이 아니면 로그인이 불가능합니다. 운영자가 해당 업체의 담당자로 등록한 뒤 다시 로그인해 주세요.</p>{% endif %}
+  {% if request.GET.naver_error == "application_invalid" %}<p class="errornote">로그인 요청이 올바르지 않습니다. 다시 시작해 주세요.</p>{% endif %}
   {% if request.GET.naver_error == "expired" or request.GET.naver_error == "invalid" %}<p class="errornote">로그인 요청이 만료되었거나 이미 사용되었습니다. 다시 시작해 주세요.</p>{% endif %}
   <div id="content-main">
-    <p>업체를 선택하고 네이버 아이디로 로그인하세요. 권한이 아직 없으면 승인 신청이 접수됩니다.</p>
+    <p>운영자가 업체 담당자로 등록한 계정만 로그인할 수 있습니다. 일반 회원은 이용할 수 없습니다.</p>
     <form method="get" action="{% url 'partner_naver_start' %}">
-      <label for="partner-choice">업체</label>
-      <select id="partner-choice" name="partner_id" required>
-        <option value="">업체 선택</option>
-        {% for partner in partner_application_options %}<option value="{{ partner.pk }}">{{ partner }}</option>{% endfor %}
-      </select>
-      <button class="button" type="submit">네이버 아이디로 로그인 / 승인 신청</button>
+      <button class="button" type="submit">네이버 아이디로 로그인</button>
     </form>
-    <p style="margin-top:1.5rem"><a href="{% url 'admin:login' %}">관리자 로그인으로 이동</a></p>
+    <p style="margin-top:1.5rem"><a href="/admin/login/">운영자 관리자 로그인</a></p>
   </div>
 {% endblock %}
 {% block extrastyle %}{{ block.super }}
 <style>
 #content-main { max-width: 420px; }
 #content-main p { line-height: 1.65; }
-#content-main label { display: block; margin: 1rem 0 .4rem; font-weight: 700; }
-#content-main select { box-sizing: border-box; width: 100%; min-height: 44px; margin: 0 0 .8rem; padding: .6rem .75rem; border: 1px solid #c8ccd0; border-radius: 6px; background: #fff; color: #202124; }
 #content-main .button { display: inline-block; box-sizing: border-box; width: 100%; padding: 12px 16px; border-radius: 8px; background: #c8102e; color: white; text-align: center; font-weight: 700; text-decoration: none; }
 #content-main button.button { border: 0; cursor: pointer; font: inherit; font-weight: 700; }
 #content-main .button:hover { background: #a50c26; }
