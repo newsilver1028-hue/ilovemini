@@ -829,12 +829,21 @@ class PartnerBookingAdmin(admin.ModelAdmin):
         selected_status = request.GET.get("status", "")
         valid_statuses = {value for value, _label in PartnerBooking.Status.choices}
         if selected_status in valid_statuses:
-            bookings = bookings.filter(status=selected_status)
+            display_status = selected_status
         else:
             selected_status = ""
+            display_status = ""
         events_by_day = {}
         booking_rows = list(bookings)
-        for booking in booking_rows:
+        # Keep the status filter for visible calendar events, but compare each
+        # event against every active booking in the month. Filtering first
+        # would hide conflicts with bookings in another status (for example,
+        # a requested job overlapping a confirmed appointment).
+        visible_bookings = [
+            booking for booking in booking_rows
+            if not display_status or booking.status == display_status
+        ]
+        for booking in visible_bookings:
             vehicle = booking.vehicle
             start = booking.scheduled_at
             end = start + timedelta(minutes=booking.duration_minutes or 60)
