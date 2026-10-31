@@ -209,6 +209,37 @@ class PartnerPortalTests(TestCase):
         self.assertContains(response, "예약대장 엑셀 다운로드")
         self.assertNotContains(response, "다른 업체")
 
+    def test_calendar_status_filter_still_detects_conflicts_with_hidden_statuses(self):
+        from datetime import timedelta
+
+        confirmed = PartnerBooking.objects.create(
+            customer=self.other_user,
+            partner=self.partner,
+            vehicle=self.own_vehicle,
+            scheduled_at=self.booking.scheduled_at + timedelta(minutes=30),
+            duration_minutes=60,
+            service_type="확정 정비",
+            contact_phone="010-1234-5678",
+            status=PartnerBooking.Status.CONFIRMED,
+        )
+        client = Client()
+        client.force_login(self.user)
+        year, month = self.booking.scheduled_at.strftime("%Y-%m").split("-")
+        response = client.get(
+            reverse("partner_admin:core_partnerbooking_changelist"),
+            {"scheduled_at__year": year, "scheduled_at__month": month, "status": PartnerBooking.Status.REQUESTED},
+        )
+        self.assertEqual(response.status_code, 200)
+        visible_events = [
+            event
+            for week in response.context["partner_calendar_weeks"]
+            for cell in week
+            for event in cell["events"]
+        ]
+        self.assertEqual(len(visible_events), 1)
+        self.assertTrue(visible_events[0]["has_conflict"])
+        self.assertNotIn(confirmed.service_type, str(visible_events))
+
     def test_partner_booking_export_is_xlsx_and_only_contains_assigned_partner_rows(self):
         client = Client()
         client.force_login(self.user)
