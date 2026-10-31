@@ -695,8 +695,18 @@ class PartnerBookingAdmin(admin.ModelAdmin):
     date_hierarchy = None
     ordering = ("-requested_at",)
     actions = None
-    fields = ("vehicle_registration", "contact_phone_display", "booking_time", "scheduled_at", "service_label", "duration_minutes", "assigned_resource", "customer_note_display", "status", "partner_note")
-    readonly_fields = ("vehicle_registration", "contact_phone_display", "booking_time", "service_label", "customer_note_display")
+    # `booking_time` remains the compact list column. On the edit form, show
+    # only the editable `scheduled_at` field so the same appointment time is
+    # not presented twice as a read-only value and an input.
+    fields = ("vehicle_registration", "contact_phone_display", "scheduled_at", "service_label", "duration_minutes", "assigned_resource", "customer_note_display", "status", "partner_note")
+    readonly_fields = ("vehicle_registration", "contact_phone_display", "service_label", "customer_note_display")
+
+    def get_form(self, request, obj=None, **kwargs):
+        # Use only valid next steps in the status selector. The save guard
+        # already enforces these transitions; matching the UI avoids a form
+        # that offers actions which can only fail after submit.
+        request._partner_booking_status = obj.status if obj else None
+        return super().get_form(request, obj, **kwargs)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "assigned_resource":
@@ -763,7 +773,26 @@ class PartnerBookingAdmin(admin.ModelAdmin):
         labels = {"status": "예약 상태", "partner_note": "업체 메모", "duration_minutes": "예상 작업 시간(분)"}
         if field and db_field.name in labels:
             field.label = labels[db_field.name]
+        if field and db_field.name == "scheduled_at":
+            field.label = "예약 날짜와 시간"
+            field.help_text = "일정을 변경하면 고객에게 변경 알림이 전송됩니다."
         if field and db_field.name == "status":
+            current = getattr(request, "_partner_booking_status", None)
+            if current == PartnerBooking.Status.REQUESTED:
+                allowed = {
+                    PartnerBooking.Status.REQUESTED,
+                    PartnerBooking.Status.CONFIRMED,
+                    PartnerBooking.Status.REJECTED,
+                }
+            elif current == PartnerBooking.Status.CONFIRMED:
+                allowed = {
+                    PartnerBooking.Status.CONFIRMED,
+                    PartnerBooking.Status.COMPLETED,
+                }
+            else:
+                allowed = {current} if current else {value for value, _label in PartnerBooking.Status.choices}
+            field.choices = [(value, label) for value, label in PartnerBooking.Status.choices if value in allowed]
+            field.help_text = "접수 대기는 확정 또는 거절할 수 있고, 확정된 예약은 완료 처리할 수 있습니다."
             field.widget.attrs.update({"class": "partner-booking-status"})
         if field and db_field.name == "duration_minutes":
             choices = [(value, str(value // 60) + "시간" + (" " + str(value % 60) + "분" if value % 60 else "")) for value in range(30, 481, 30)]
