@@ -90,13 +90,13 @@
     {% if partner_dashboard.recent_orders %}
       <div class="workshop-table-wrap">
         <table class="workshop-table">
-          <thead><tr><th>작업 번호</th><th>차량</th><th>고객</th><th>작업 상태</th><th>견적</th><th>최근 변경</th><th></th></tr></thead>
+          <thead><tr><th>작업 번호</th><th>차량</th><th>연락처</th><th>작업 상태</th><th>견적</th><th>최근 변경</th><th></th></tr></thead>
           <tbody>
           {% for order in partner_dashboard.recent_orders %}
             <tr>
               <td><a href="{% url 'partner_admin:core_partnerworkorder_change' order.pk %}">WO-{{ order.created_at|date:"ymd" }}-{{ order.pk|stringformat:"05d" }}</a></td>
               <td><strong>{{ order.plate_number|default:"번호 미등록" }}</strong><small>{{ order.vehicle_model|default:"차량 미입력" }}</small></td>
-              <td>{{ order.customer_name|default:"고객 미입력" }}<small>{{ order.contact_phone|default:"연락처 미입력" }}</small></td>
+              <td>{{ order.contact_phone|default:"연락처 미등록" }}</td>
               <td><span class="workshop-status workshop-status--{{ order.status }}">{{ order.get_status_display }}</span></td>
               <td>{{ order.quoted_total_krw|comma }}원</td>
               <td>{{ order.updated_at|date:"m월 d일 H:i" }}</td>
