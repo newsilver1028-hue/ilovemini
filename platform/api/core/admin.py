@@ -1,5 +1,7 @@
 from datetime import date, datetime, time, timedelta
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
+from django.template.response import TemplateResponse
+from django.http import HttpResponseRedirect
 from django.utils.html import format_html
 from django import forms
 from django.contrib import admin
@@ -998,22 +1000,64 @@ from .member_roles import GRADES, assign_member_grade, member_grade
 def grade_action(code):
     @admin.action(description=f"회원 등급을 {GRADES[code]}(으)로 변경")
     def action(modeladmin, request, queryset):
+        partner_form = None
+        if code == "partner":
+            confirming = "confirm_partner_assignment" in request.POST
+            partner_form = PartnerGradeAssignmentForm(request.POST if confirming else None)
+            if not confirming:
+                return TemplateResponse(request, "admin/core/assign_partner_grade.html", {
+                    **modeladmin.admin_site.each_context(request),
+                    "opts": modeladmin.model._meta,
+                    "title": "협력업체 등급 적용",
+                    "form": partner_form,
+                    "selected_members": list(queryset),
+                    "action_name": "set_grade_partner",
+                })
+            if not partner_form.is_valid():
+                return TemplateResponse(request, "admin/core/assign_partner_grade.html", {
+                    **modeladmin.admin_site.each_context(request),
+                    "opts": modeladmin.model._meta,
+                    "title": "협력업체 등급 적용",
+                    "form": partner_form,
+                    "selected_members": list(queryset),
+                    "action_name": "set_grade_partner",
+                })
         updated = 0
         rejected = 0
         for user in queryset:
             try:
-                assign_member_grade(request.user, user, code)
+                assignment = {}
+                if code == "partner":
+                    assignment = {
+                        "partner": partner_form.cleaned_data["partner"],
+                        "can_manage_bookings": partner_form.cleaned_data["can_manage_bookings"],
+                        "can_verify_records": partner_form.cleaned_data["can_verify_records"],
+                    }
+                assign_member_grade(request.user, user, code, **assignment)
                 modeladmin.log_change(request, user, f"회원 등급: {GRADES[code]}")
                 updated += 1
-            except ValidationError as exc:
-                modeladmin.message_user(request, f"{user}: {' '.join(exc.messages)}", level="ERROR")
+            except (ValidationError, PermissionDenied) as exc:
+                details = " ".join(exc.messages) if isinstance(exc, ValidationError) else str(exc)
+                modeladmin.message_user(request, f"{user}: {details}", level="ERROR")
                 rejected += 1
         if updated:
             modeladmin.message_user(request, f"{updated}명의 회원 등급을 {GRADES[code]}(으)로 변경했습니다.", level=messages.SUCCESS)
         if rejected:
             modeladmin.message_user(request, f"{rejected}명은 조건을 충족하지 않아 변경하지 않았습니다. 위 안내를 확인해 주세요.", level=messages.WARNING)
+        if code == "partner" and updated:
+            return HttpResponseRedirect(reverse("admin:auth_user_changelist"))
     action.__name__ = f"set_grade_{code}"
     return action
+
+
+class PartnerGradeAssignmentForm(forms.Form):
+    partner = forms.ModelChoiceField(
+        label="소속 업체",
+        queryset=Partner.objects.filter(is_active=True).order_by("name", "id"),
+        empty_label="업체 선택",
+    )
+    can_manage_bookings = forms.BooleanField(label="예약 관리", required=False, initial=True)
+    can_verify_records = forms.BooleanField(label="정비기록 인증", required=False, initial=True)
 
 
 class NaverProfileInline(admin.StackedInline):
@@ -1144,7 +1188,6 @@ class MemberUserAdmin(AdminCalendarMixin, UserAdmin):
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
         extra_context["member_grade_help"] = True
-        extra_context["partner_staff_admin_url"] = reverse("admin:core_partnerstaff_changelist")
         return super().changelist_view(request, extra_context=extra_context)
 
     @admin.display(description="소속 협력업체")
@@ -1285,7 +1328,7 @@ for _model, _label in _MODEL_LABELS.items():
             _field.verbose_name = _FIELD_LABELS[_field.name]
 PartnerStaff._meta.get_field("can_verify_records").help_text = "담당자가 앱에서 QR로 차량을 조회하고 업체 인증 정비기록을 등록할 수 있습니다."
 PartnerStaff._meta.get_field("can_manage_bookings").help_text = "소속 업체의 예약을 확인하고 처리할 수 있습니다."
-PartnerStaff._meta.get_field("is_active").help_text = "활성화하면 해당 계정에 협력업체 등급을 부여하고 업체 관리자 네이버 로그인을 허용합니다. 업체별 자료는 연결된 업체만 조회할 수 있습니다."
+PartnerStaff._meta.get_field("is_active").help_text = "활성화하면 해당 계정에 협력업체 등급을 부여하고 업체 관리자 네이버 로그인을 허용합니다. 회원 등급 목록에서 업체와 담당 권한을 한 번에 지정할 수도 있습니다. 업체별 자료는 연결된 업체만 조회할 수 있습니다."
 PartnerAdminForm.base_fields["service_categories"].label = "서비스 분야"
 admin.site.index_title = "운영 대시보드"
 
