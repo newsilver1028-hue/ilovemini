@@ -239,8 +239,8 @@ class PartnerAdminSite(AdminSite):
                 queue.append({
                     "priority": priority, "sort_at": row.updated_at, "title": title,
                     "instruction": instruction,
-                    "primary": row.plate_number or row.vehicle_model or row.customer_name or "차량 미입력",
-                    "secondary": f"{row.customer_name or '고객 미입력'} · {row.updated_at:%m-%d %H:%M} 변경",
+                    "primary": " · ".join(value for value in (row.plate_number, row.vehicle_model) if value) or "차량 정보 미입력",
+                    "secondary": f"{row.contact_phone or '연락처 미등록'} · {row.updated_at:%m-%d %H:%M} 변경",
                     "url": reverse("partner_admin:core_partnerworkorder_change", args=[row.pk]),
                     "status": row.status,
                 })
@@ -253,8 +253,11 @@ class PartnerAdminSite(AdminSite):
                 "priority": 2, "sort_at": booking.requested_at,
                 "title": "예약 요청 24시간 초과",
                 "instruction": "고객에게 예약 가능 여부 회신",
-                "primary": booking.vehicle.model_name if booking.vehicle else booking.service_type,
-                "secondary": f"{member_nickname(booking.customer)} · {booking.requested_at:%m-%d %H:%M} 요청",
+                "primary": " · ".join(value for value in (
+                    booking.vehicle.plate_number if booking.vehicle else "",
+                    booking.vehicle.model_name if booking.vehicle else booking.service_type,
+                ) if value) or "차량 정보 미입력",
+                "secondary": f"{booking.contact_phone or '연락처 미등록'} · {booking.requested_at:%m-%d %H:%M} 요청",
                 "url": reverse("partner_admin:core_partnerbooking_change", args=[booking.pk]),
                 "status": "booking",
             })
