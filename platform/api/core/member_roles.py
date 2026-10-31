@@ -27,7 +27,7 @@ def assign_member_grade(actor, user, grade):
     if AppReviewAccount.objects.filter(user=user).exists() and grade != "general":
         raise ValidationError("앱 심사용 계정은 일반회원 권한으로만 유지할 수 있습니다.")
     if grade == "partner" and not PartnerStaff.objects.filter(user=user, is_active=True, partner__is_active=True).exists():
-        raise ValidationError("먼저 협력업체 담당자에 소속 업체를 연결해주세요.")
+        raise ValidationError("먼저 관리자 메뉴의 ‘협력업체 담당자’에서 이 회원의 소속 업체와 담당 권한을 지정하고 ‘활성화’한 뒤 다시 적용해 주세요.")
     group, _ = Group.objects.get_or_create(name=MINI_GROUP)
     if grade == "mini":
         user.groups.add(group)
