@@ -3,6 +3,7 @@ from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.utils.html import format_html
 from django import forms
 from django.contrib import admin
+from django.contrib import messages
 from django.contrib.admin.widgets import AdminDateWidget, AdminSplitDateTime
 from django.contrib.auth.models import Group
 from django.contrib.auth import get_user_model
@@ -997,12 +998,20 @@ from .member_roles import GRADES, assign_member_grade, member_grade
 def grade_action(code):
     @admin.action(description=f"회원 등급을 {GRADES[code]}(으)로 변경")
     def action(modeladmin, request, queryset):
+        updated = 0
+        rejected = 0
         for user in queryset:
             try:
                 assign_member_grade(request.user, user, code)
                 modeladmin.log_change(request, user, f"회원 등급: {GRADES[code]}")
+                updated += 1
             except ValidationError as exc:
                 modeladmin.message_user(request, f"{user}: {' '.join(exc.messages)}", level="ERROR")
+                rejected += 1
+        if updated:
+            modeladmin.message_user(request, f"{updated}명의 회원 등급을 {GRADES[code]}(으)로 변경했습니다.", level=messages.SUCCESS)
+        if rejected:
+            modeladmin.message_user(request, f"{rejected}명은 조건을 충족하지 않아 변경하지 않았습니다. 위 안내를 확인해 주세요.", level=messages.WARNING)
     action.__name__ = f"set_grade_{code}"
     return action
 
@@ -1125,6 +1134,18 @@ class MemberUserAdmin(AdminCalendarMixin, UserAdmin):
                 .prefetch_related("partner_memberships__partner", "groups")
                 .annotate(_point_balance=Coalesce(Subquery(point_total, output_field=IntegerField()), Value(0))))
     actions = [grade_action(code) for code in GRADES] + ["export_members_csv"]
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if not request.user.is_superuser:
+            actions = {name: value for name, value in actions.items() if not name.startswith("set_grade_")}
+        return actions
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context["member_grade_help"] = True
+        extra_context["partner_staff_admin_url"] = reverse("admin:core_partnerstaff_changelist")
+        return super().changelist_view(request, extra_context=extra_context)
 
     @admin.display(description="소속 협력업체")
     def display_workplaces(self, obj):
