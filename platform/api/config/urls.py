@@ -86,6 +86,7 @@ urlpatterns = [
     path("api/me/account/", AccountDeletionView.as_view(), name="account_delete"),
     path("api/push/devices/", PushDeviceView.as_view(), name="push_devices"),
     path("api/attendance/", AttendanceView.as_view(), name="attendance"),
+    path("api/v1/onclass/", include("onclass_control.urls")),
     path("api/points/balance/", PartnerPointBalanceView.as_view(), name="partner_point_balance"),
     path("api/points/redemptions/", PartnerPointRedemptionView.as_view(), name="partner_point_redemptions"),
     path("api/points/redemptions/pending/", MemberPointRedemptionView.as_view(), name="member_pending_point_redemption"),
