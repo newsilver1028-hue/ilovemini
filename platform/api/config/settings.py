@@ -25,7 +25,7 @@ if ADMIN_CUSTOM_ORIGIN not in CSRF_TRUSTED_ORIGINS:
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
     "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles", "django.contrib.humanize",
-    "rest_framework", "corsheaders", "core",
+    "rest_framework", "corsheaders", "core", "onclass_control",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware", "core.middleware.PartnerAdminSecurityHeadersMiddleware",
@@ -94,6 +94,7 @@ REST_FRAMEWORK = {
         "naver_complete": "10/minute", "apple_login": "10/minute",
         "vehicle_transfer": "5/minute", "verified_record": "10/minute",
         "attendance": "30/minute",
+        "onclass_login": "10/minute",
         "cafe_search": "20/minute",
         "booking": "20/minute",
         "point_redemption": "120/minute",
@@ -113,6 +114,7 @@ APPLE_PRIVATE_KEY = os.getenv("APPLE_PRIVATE_KEY", "").replace("\\n", "\n")
 MOBILE_AUTH_REDIRECT_URI = os.getenv("MOBILE_AUTH_REDIRECT_URI", "ilovemini://auth")
 FCM_ENABLED = os.getenv("FCM_ENABLED", "0") == "1"
 FCM_CREDENTIALS_JSON = os.getenv("FCM_CREDENTIALS_JSON", "")
+ONCLASS_MASTER_EMAIL = os.getenv("ONCLASS_MASTER_EMAIL", "").strip().casefold()
 WEB_PUSH_VAPID_PUBLIC_KEY = os.getenv("WEB_PUSH_VAPID_PUBLIC_KEY", "")
 WEB_PUSH_VAPID_PRIVATE_KEY = os.getenv("WEB_PUSH_VAPID_PRIVATE_KEY", "")
 WEB_PUSH_VAPID_SUBJECT = os.getenv("WEB_PUSH_VAPID_SUBJECT", "https://ilovemini.onrender.com/privacy/")
