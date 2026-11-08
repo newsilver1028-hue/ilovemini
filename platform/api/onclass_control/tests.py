@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import override_settings
@@ -18,6 +19,7 @@ from .models import (
     TeacherAssignment,
     digest_secret,
 )
+from .views import _new_command
 
 User = get_user_model()
 
@@ -113,6 +115,7 @@ class OnClassRemoteCommandTests(APITestCase):
         self.assertEqual(result.status_code, 200)
         lock = self.android.commands.get(action=RemoteCommand.Action.LOCK)
         self.assertEqual(lock.state, RemoteCommand.State.PENDING)
+        self.assertEqual(lock.expires_at, session.started_at + timedelta(hours=4))
 
         poll = self.device_client.get("/api/v1/onclass/devices/commands/")
         lock_id = poll.data["commands"][0]["command_id"]
@@ -126,6 +129,22 @@ class OnClassRemoteCommandTests(APITestCase):
         self.assertTrue(self.android.lock_active)
         roster = self.client.get("/api/v1/onclass/roster/")
         self.assertEqual(roster.data["students"][0]["state"], "locked")
+
+    def test_background_wake_is_visible_and_sent_after_command_commit(self):
+        self.android.fcm_token = "test-fcm-token"
+        self.android.save(update_fields=["fcm_token"])
+
+        with patch("onclass_control.views._ensure_firebase", return_value=True), patch(
+            "firebase_admin.messaging.send"
+        ) as send:
+            with self.captureOnCommitCallbacks(execute=True):
+                command = _new_command(self.android, RemoteCommand.Action.CONSENT)
+
+        send.assert_called_once()
+        message = send.call_args.args[0]
+        self.assertEqual(message.data["command_id"], str(command.command_id))
+        self.assertEqual(message.notification.title, "수업쉼표 · 수업 집중 요청")
+        self.assertIn("앱을 열어", message.notification.body)
 
     def test_decline_is_reported_separately_for_follow_up(self):
         response = self.client.post(f"/api/v1/onclass/classes/{self.room.pk}/sessions/", {}, format="json")
@@ -197,3 +216,88 @@ class OnClassRemoteCommandTests(APITestCase):
         self.assertEqual(ended.status_code, 200)
         unlock = self.android.commands.get(action=RemoteCommand.Action.UNLOCK)
         self.assertEqual(unlock.state, RemoteCommand.State.PENDING)
+
+    def test_session_end_cancels_unanswered_consent_before_device_can_lock(self):
+        response = self.client.post(f"/api/v1/onclass/classes/{self.room.pk}/sessions/", {}, format="json")
+        session_id = response.data["session_id"]
+        poll = self.device_client.get("/api/v1/onclass/devices/commands/")
+        consent_id = poll.data["commands"][0]["command_id"]
+
+        ended = self.client.post(f"/api/v1/onclass/sessions/{session_id}/end/", {}, format="json")
+        self.assertEqual(ended.status_code, 200)
+        self.assertEqual(
+            self.android.commands.get(command_id=consent_id).state,
+            RemoteCommand.State.EXPIRED,
+        )
+        self.assertEqual(self.client.get("/api/v1/onclass/roster/").data["students"][0]["state"], "ready")
+
+        late_response = self.device_client.post("/api/v1/onclass/devices/commands/", {
+            "command_id": consent_id,
+            "outcome": "accepted",
+            "permission_granted": True,
+        }, format="json")
+        self.assertEqual(late_response.status_code, 409)
+        self.assertFalse(self.android.commands.filter(action=RemoteCommand.Action.LOCK).exists())
+
+    def test_session_end_cancels_queued_lock_and_late_delivery_cannot_relock(self):
+        response = self.client.post(f"/api/v1/onclass/classes/{self.room.pk}/sessions/", {}, format="json")
+        session_id = response.data["session_id"]
+        consent = self.device_client.get("/api/v1/onclass/devices/commands/").data["commands"][0]
+        self.device_client.post("/api/v1/onclass/devices/commands/", {
+            "command_id": consent["command_id"],
+            "outcome": "accepted",
+            "permission_granted": True,
+        }, format="json")
+        pending_lock = self.android.commands.get(action=RemoteCommand.Action.LOCK)
+        queued_lock_id = str(pending_lock.command_id)
+
+        ended = self.client.post(f"/api/v1/onclass/sessions/{session_id}/end/", {}, format="json")
+        self.assertEqual(ended.status_code, 200)
+        pending_lock.refresh_from_db()
+        self.assertEqual(pending_lock.state, RemoteCommand.State.EXPIRED)
+        self.assertFalse(self.android.lock_active)
+
+        late_response = self.device_client.post("/api/v1/onclass/devices/commands/", {
+            "command_id": queued_lock_id,
+            "outcome": "applied",
+            "permission_granted": True,
+        }, format="json")
+        self.assertEqual(late_response.status_code, 409)
+        self.android.refresh_from_db()
+        self.assertFalse(self.android.lock_active)
+
+    def test_session_end_releases_device_when_lock_was_delivered_but_not_acknowledged(self):
+        response = self.client.post(f"/api/v1/onclass/classes/{self.room.pk}/sessions/", {}, format="json")
+        session_id = response.data["session_id"]
+        consent = self.device_client.get("/api/v1/onclass/devices/commands/").data["commands"][0]
+        self.device_client.post("/api/v1/onclass/devices/commands/", {
+            "command_id": consent["command_id"],
+            "outcome": "accepted",
+            "permission_granted": True,
+        }, format="json")
+        delivered_lock = self.device_client.get("/api/v1/onclass/devices/commands/").data["commands"][0]
+        lock = self.android.commands.get(command_id=delivered_lock["command_id"])
+        self.assertEqual(lock.state, RemoteCommand.State.DELIVERED)
+
+        ended = self.client.post(f"/api/v1/onclass/sessions/{session_id}/end/", {}, format="json")
+        self.assertEqual(ended.status_code, 200)
+        lock.refresh_from_db()
+        self.assertEqual(lock.state, RemoteCommand.State.EXPIRED)
+        release = self.android.commands.get(action=RemoteCommand.Action.UNLOCK)
+        self.assertEqual(release.state, RemoteCommand.State.PENDING)
+
+        late_lock_ack = self.device_client.post("/api/v1/onclass/devices/commands/", {
+            "command_id": delivered_lock["command_id"],
+            "outcome": "applied",
+            "permission_granted": True,
+        }, format="json")
+        self.assertEqual(late_lock_ack.status_code, 409)
+        queued_release = self.device_client.get("/api/v1/onclass/devices/commands/").data["commands"][0]
+        result = self.device_client.post("/api/v1/onclass/devices/commands/", {
+            "command_id": queued_release["command_id"],
+            "outcome": "applied",
+            "permission_granted": True,
+        }, format="json")
+        self.assertEqual(result.status_code, 200)
+        self.android.refresh_from_db()
+        self.assertFalse(self.android.lock_active)

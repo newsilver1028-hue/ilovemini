@@ -27,26 +27,34 @@ COMMAND_TTL = timedelta(minutes=2)
 DEVICE_STALE_AFTER = timedelta(seconds=120)
 
 
+def _ensure_firebase():
+    from core.push import _ensure_firebase as ensure_firebase
+
+    return ensure_firebase()
+
+
 class OnClassTokenObtainPairView(TokenObtainPairView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "onclass_login"
 
 
 def _send_device_wake(device, command):
-    """Send metadata-only wake payload through the shared, already-configured FCM service."""
+    """Notify the student that a command is waiting; this is not proof of application."""
     if not device.fcm_token:
         return
     try:
         from firebase_admin import messaging
-        from core.push import _ensure_firebase
-
         if not _ensure_firebase():
             return
         messaging.send(messaging.Message(
             token=device.fcm_token,
             data={"type": "onclass_command", "command_id": str(command.command_id)},
+            notification=messaging.Notification(
+                title="수업쉼표 · 수업 집중 요청",
+                body="앱을 열어 요청 내용과 제한 권한을 확인해 주세요.",
+            ),
             android=messaging.AndroidConfig(priority="high"),
-            apns=messaging.APNSConfig(headers={"apns-priority": "5"}),
+            apns=messaging.APNSConfig(headers={"apns-priority": "10"}),
         ))
     except Exception as exc:
         # Command remains in the durable queue; foreground polling is the fallback.
@@ -63,7 +71,9 @@ def _new_command(device, action, *, session=None, expires_at=None, initial_state
         expires_at=expires_at or (timezone.now() + COMMAND_TTL),
     )
     if initial_state == RemoteCommand.State.PENDING:
-        _send_device_wake(device, command)
+        # Commit the durable command before sending its wake notification.
+        # A client that opens immediately can then always retrieve the row.
+        transaction.on_commit(lambda: _send_device_wake(device, command))
     return command
 
 
@@ -102,7 +112,11 @@ def _student_status(student):
         elif latest.state == RemoteCommand.State.FAILED:
             state = "failed"
         elif latest.state == RemoteCommand.State.EXPIRED:
-            state = "offline"
+            state = (
+                "ready"
+                if latest.detail.startswith("수업이 종료되어 대기 중인 명령을 취소")
+                else "offline"
+            )
         else:
             state = "ready"
         result.append({
@@ -252,6 +266,7 @@ class DeviceEndpoint(APIView):
             "expires_at": command.expires_at,
         } for command in commands], "server_time": now})
 
+    @transaction.atomic
     def post(self, request):
         device = request.user
         serializer = DeviceEndpoint.Report(data=request.data)
@@ -263,7 +278,13 @@ class DeviceEndpoint(APIView):
         if "fcm_token" in data:
             device.fcm_token = data["fcm_token"]
         device.save(update_fields=["last_seen_at", "permission_granted", "fcm_token"])
-        command = get_object_or_404(device.commands, command_id=data["command_id"])
+        # Serialize command acknowledgement with class-session shutdown. If
+        # the teacher ends class first, a delayed device response must not
+        # resurrect the expired lock; if the device applies first, shutdown
+        # will observe lock_active and enqueue the matching release.
+        command = get_object_or_404(
+            device.commands.select_for_update(), command_id=data["command_id"]
+        )
         if command.state not in (RemoteCommand.State.PENDING, RemoteCommand.State.DELIVERED):
             return Response({"detail": "이미 처리된 명령입니다.", "state": command.state}, status=status.HTTP_409_CONFLICT)
         if command.expires_at <= timezone.now():
@@ -391,11 +412,40 @@ class ClassSessionEndView(APIView):
             return Response({"detail": "이 수업을 종료할 권한이 없습니다."}, status=status.HTTP_403_FORBIDDEN)
         if session.state == ClassSession.State.ENDED:
             return Response({"session_id": session.pk, "state": session.state})
+        # A delivered lock may already be active on the phone even if its
+        # acknowledgement has not reached the server yet. Include those
+        # devices when preparing release commands to cover that race.
+        potentially_locked_device_ids = set(
+            Device.objects.filter(
+                student__classroom=session.classroom,
+                is_active=True,
+                lock_active=True,
+            ).values_list("pk", flat=True)
+        )
+        potentially_locked_device_ids.update(
+            session.commands.filter(
+                action=RemoteCommand.Action.LOCK,
+                state=RemoteCommand.State.DELIVERED,
+            ).values_list("device_id", flat=True)
+        )
         session.state = ClassSession.State.ENDED
         session.ended_at = timezone.now()
         session.save(update_fields=["state", "ended_at"])
+        # Cancel queued/accepted work for this session before sending releases.
+        # Otherwise an offline device could receive a stale lock after the
+        # teacher has already ended class.
+        session.commands.filter(
+            state__in=(
+                RemoteCommand.State.PENDING,
+                RemoteCommand.State.DELIVERED,
+                RemoteCommand.State.ACCEPTED,
+            )
+        ).update(
+            state=RemoteCommand.State.EXPIRED,
+            detail="수업이 종료되어 대기 중인 명령을 취소했습니다.",
+        )
         count = 0
-        for device in Device.objects.filter(student__classroom=session.classroom, is_active=True, lock_active=True):
+        for device in Device.objects.filter(pk__in=potentially_locked_device_ids):
             _new_command(device, RemoteCommand.Action.UNLOCK, session=session, expires_at=timezone.now() + COMMAND_TTL)
             count += 1
         return Response({"session_id": session.pk, "state": session.state, "unlock_commands": count})
