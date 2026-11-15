@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 20400)
-Total output lines: 1597
-
 from datetime import date, datetime, time, timedelta
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.template.response import TemplateResponse
@@ -828,7 +825,28 @@ class PartnerBookingAdmin(AdminCalendarMixin, admin.ModelAdmin):
                 transaction_record.member_display = member_nickname(transaction_record.user)
                 totals = partner_report(transaction_record.partner)
                 if transaction_record.points_delta > 0 and transaction_record.transaction_type == PointTransaction.Type.SERVICE_EARN:
-                    totals["earned"] += transactio…400 tokens truncated…   extra_context["booking_day_report"] = {
+                    totals["earned"] += transaction_record.points_delta
+                elif transaction_record.transaction_type == PointTransaction.Type.REDEMPTION and transaction_record.points_delta < 0:
+                    totals["spent"] += abs(transaction_record.points_delta)
+                elif transaction_record.transaction_type == PointTransaction.Type.REFUND and transaction_record.points_delta > 0:
+                    totals["refunded"] += transaction_record.points_delta
+                totals["transactions"].append(transaction_record)
+            redemptions = PointRedemptionRequest.objects.filter(
+                status=PointRedemptionRequest.Status.COMPLETED,
+                completed_at__gte=day_start,
+                completed_at__lt=day_end,
+            ).select_related("partner", "member").order_by("partner__name", "-completed_at")
+            for redemption in redemptions:
+                redemption.member_display = member_nickname(redemption.member)
+                redemption.cash_payment_display = f'{max(redemption.payment_amount_krw - redemption.points_requested, 0):,}'
+                redemption.gross_payment_display = f'{redemption.payment_amount_krw:,}'
+                redemption.points_requested_display = f'{redemption.points_requested:,}'
+                totals = partner_report(redemption.partner)
+                totals["redemption_gross"] += redemption.payment_amount_krw
+                totals["redemption_net"] += max(redemption.payment_amount_krw - redemption.points_requested, 0)
+                totals["redemption_count"] += 1
+                totals["redemptions"].append(redemption)
+            extra_context["booking_day_report"] = {
                 "day": selected_day,
                 "bookings": bookings,
                 "booking_count": bookings.count(),
@@ -962,8 +980,6 @@ class PartnerAccessRequestAdmin(AdminCalendarMixin, admin.ModelAdmin):
         return member_nickname(obj.user)
 
     def _apply_decision(self, request, obj, status):
-        from django.utils import timezone
-
         obj.status = status
         obj.reviewed_by = request.user
         obj.reviewed_at = timezone.now()
