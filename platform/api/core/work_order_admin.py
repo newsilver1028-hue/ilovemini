@@ -7,6 +7,8 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.utils import timezone
 
+from .integrity import ledger_record_hash
+from .models import LedgerEntry, VehicleOwnership
 from .member_display import member_nickname
 from .models import PartnerBooking, PartnerStaff, PartnerWorkOrder, Partner, PartnerCustomer, PartnerVehicle, PartnerPart, PartnerWorkOrderLine, PartnerStockMovement, PartnerPayment, PartnerServicePreset, PartnerWorkResource, PartnerQuoteShare
 from .partner_admin import is_system_admin, staff_partners
@@ -225,8 +227,6 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
                 unlinked_parts.append(line.description)
             if line.kind == PartnerWorkOrderLine.Kind.PART and line.part_id:
                 required[line.part_id] = required.get(line.part_id, 0) + int(line.quantity)
-        if not required and not unlinked_parts:
-            return
         parts = {
             part.pk: part for part in PartnerPart.objects.select_for_update().filter(
                 pk__in=required, partner_id=order.partner_id, is_active=True
@@ -270,6 +270,46 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
                 note=f"작업 완료 WO-{order.pk}",
                 created_by=request.user,
             )
+
+        self.create_completion_record(request, order, lines)
+
+    def create_completion_record(self, request, order, lines):
+        if not order.vehicle_id or not order.booking_id:
+            self.message_user(request, "앱 예약에 등록된 차량이 없어 인증 정비기록을 만들지 않았습니다.", messages.WARNING)
+            return
+        ownership = VehicleOwnership.objects.select_for_update().filter(
+            vehicle_id=order.vehicle_id, user_id=order.booking.customer_id,
+            ended_at__isnull=True,
+        ).first()
+        if ownership is None:
+            self.message_user(request, "예약 회원의 현재 차량 등록을 확인할 수 없어 인증 정비기록을 만들지 않았습니다.", messages.WARNING)
+            return
+        items = [
+            {"name": line.description, "amount_krw": line.amount_krw}
+            for line in lines
+        ] if lines else [
+            {"name": item["title"], "amount_krw": item["amount_krw"]}
+            for item in order.items
+            if isinstance(item, dict) and isinstance(item.get("title"), str)
+            and type(item.get("amount_krw")) is int and item["amount_krw"] >= 0
+        ]
+        entry = LedgerEntry.objects.create(
+            vehicle_id=order.vehicle_id,
+            kind=LedgerEntry.Kind.SERVICE,
+            entry_date=timezone.localdate(order.completed_at),
+            odometer_km=order.odometer_km,
+            amount_krw=order.final_total_krw,
+            gross_amount_krw=order.final_total_krw,
+            payment_method=order.payment_method,
+            description=f"작업지시 #{order.pk} 정비 완료",
+            line_items=items,
+            source=LedgerEntry.Source.PARTNER,
+            partner_id=order.partner_id,
+            verified_by=request.user,
+            verified_at=order.completed_at,
+        )
+        entry.record_hash = ledger_record_hash(entry)
+        entry.save(update_fields=["record_hash"])
 
     def get_inline_instances(self, request, obj=None):
         return [
