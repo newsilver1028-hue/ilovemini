@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 20400)
+Total output lines: 1597
+
 from datetime import date, datetime, time, timedelta
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.template.response import TemplateResponse
@@ -20,7 +23,7 @@ from django.utils import timezone
 from .member_display import member_nickname, member_label, MemberAutocompleteView, MemberAutocompleteSelect
 
 from .models import (
-    LedgerEntry, Notice, Offer, Partner, PartnerImage, PartnerReview, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
+    LedgerEntry, Notice, Offer, Partner, PartnerImage, PartnerReview, PartnerStaff, PartnerAccessRequest, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
     VehicleOwnership, VehicleTransferCode, AttendanceCheckin, PointTransaction, PointRedemptionRequest,
     SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest, AppReviewAccount, AppleIdentity,
     PartnerServiceCategoryOption, PartnerBooking, AppRuntimeSettings,
@@ -825,28 +828,7 @@ class PartnerBookingAdmin(AdminCalendarMixin, admin.ModelAdmin):
                 transaction_record.member_display = member_nickname(transaction_record.user)
                 totals = partner_report(transaction_record.partner)
                 if transaction_record.points_delta > 0 and transaction_record.transaction_type == PointTransaction.Type.SERVICE_EARN:
-                    totals["earned"] += transaction_record.points_delta
-                elif transaction_record.transaction_type == PointTransaction.Type.REDEMPTION and transaction_record.points_delta < 0:
-                    totals["spent"] += abs(transaction_record.points_delta)
-                elif transaction_record.transaction_type == PointTransaction.Type.REFUND and transaction_record.points_delta > 0:
-                    totals["refunded"] += transaction_record.points_delta
-                totals["transactions"].append(transaction_record)
-            redemptions = PointRedemptionRequest.objects.filter(
-                status=PointRedemptionRequest.Status.COMPLETED,
-                completed_at__gte=day_start,
-                completed_at__lt=day_end,
-            ).select_related("partner", "member").order_by("partner__name", "-completed_at")
-            for redemption in redemptions:
-                redemption.member_display = member_nickname(redemption.member)
-                redemption.cash_payment_display = f'{max(redemption.payment_amount_krw - redemption.points_requested, 0):,}'
-                redemption.gross_payment_display = f'{redemption.payment_amount_krw:,}'
-                redemption.points_requested_display = f'{redemption.points_requested:,}'
-                totals = partner_report(redemption.partner)
-                totals["redemption_gross"] += redemption.payment_amount_krw
-                totals["redemption_net"] += max(redemption.payment_amount_krw - redemption.points_requested, 0)
-                totals["redemption_count"] += 1
-                totals["redemptions"].append(redemption)
-            extra_context["booking_day_report"] = {
+                    totals["earned"] += transactio…400 tokens truncated…   extra_context["booking_day_report"] = {
                 "day": selected_day,
                 "bookings": bookings,
                 "booking_count": bookings.count(),
@@ -937,6 +919,89 @@ class PartnerStaffAdmin(AdminCalendarMixin, admin.ModelAdmin):
     search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "user__apple_identity__cafe_nickname", "=user__id", "partner__name")
     readonly_fields = ("created_at",)
     date_hierarchy = "created_at"
+
+
+@admin.register(PartnerAccessRequest)
+class PartnerAccessRequestAdmin(AdminCalendarMixin, admin.ModelAdmin):
+    list_display = ("partner", "member_account", "status", "created_at", "reviewed_by", "reviewed_at")
+    list_filter = ("status", "partner", "created_at")
+    search_fields = (
+        "partner__name", "partner__branch_label", "user__username", "user__email",
+        "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "=user__id",
+    )
+    list_select_related = ("partner", "user__naver_identity", "reviewed_by")
+    readonly_fields = ("user", "partner", "created_at", "updated_at", "reviewed_by", "reviewed_at")
+    fields = ("partner", "user", "status", "can_manage_bookings", "can_verify_records", "created_at", "reviewed_by", "reviewed_at", "updated_at")
+    date_hierarchy = "created_at"
+    actions = ("approve_selected", "reject_selected")
+
+    def has_module_permission(self, request):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    def has_view_permission(self, request, obj=None):
+        return self.has_module_permission(request)
+
+    def has_change_permission(self, request, obj=None):
+        return self.has_module_permission(request)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        if not request.GET:
+            query = request.GET.copy()
+            query["status__exact"] = PartnerAccessRequest.Status.PENDING
+            return HttpResponseRedirect(f"{request.path}?{query.urlencode()}")
+        return super().changelist_view(request, extra_context)
+
+    @admin.display(description="네이버 회원", ordering="user__naver_identity__nickname")
+    def member_account(self, obj):
+        return member_nickname(obj.user)
+
+    def _apply_decision(self, request, obj, status):
+        from django.utils import timezone
+
+        obj.status = status
+        obj.reviewed_by = request.user
+        obj.reviewed_at = timezone.now()
+        obj.save(update_fields=("status", "reviewed_by", "reviewed_at", "updated_at"))
+        if status == PartnerAccessRequest.Status.APPROVED:
+            PartnerStaff.objects.update_or_create(
+                partner=obj.partner,
+                user=obj.user,
+                defaults={
+                    "can_manage_bookings": obj.can_manage_bookings,
+                    "can_verify_records": obj.can_verify_records,
+                    "is_active": True,
+                },
+            )
+        else:
+            PartnerStaff.objects.filter(partner=obj.partner, user=obj.user).update(is_active=False)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        self._apply_decision(request, obj, obj.status)
+
+    @admin.action(description="선택한 신청 승인 및 업체 담당자 권한 부여")
+    def approve_selected(self, request, queryset):
+        from django.db import transaction
+
+        with transaction.atomic():
+            for obj in queryset.select_related("partner", "user"):
+                self._apply_decision(request, obj, PartnerAccessRequest.Status.APPROVED)
+        self.message_user(request, f"{queryset.count()}건을 승인하고 선택한 업체 담당자로 등록했습니다.", messages.SUCCESS)
+
+    @admin.action(description="선택한 신청 반려")
+    def reject_selected(self, request, queryset):
+        from django.db import transaction
+
+        with transaction.atomic():
+            for obj in queryset.select_related("partner", "user"):
+                self._apply_decision(request, obj, PartnerAccessRequest.Status.REJECTED)
+        self.message_user(request, f"{queryset.count()}건의 신청을 반려했습니다.", messages.SUCCESS)
 
 
 @admin.register(Offer)
