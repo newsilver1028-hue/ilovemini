@@ -166,15 +166,26 @@
           shareButton.disabled = copyButton.disabled = false;
         }
       }
-      if (copy && navigator.clipboard) {
-        try {
-          await navigator.clipboard.writeText(address.value);
-          status.textContent = '견적 링크를 복사했습니다. 카카오톡 대화방에 붙여 넣어 보내세요.';
-          return;
-        } catch {}
-      }
       address.focus();
       address.select();
+      if (copy) {
+        let copied = false;
+        try { copied = document.execCommand('copy'); } catch {}
+        if (!copied && navigator.clipboard) {
+          try {
+            await navigator.clipboard.writeText(address.value);
+            copied = await navigator.clipboard.readText() === address.value;
+          } catch {}
+        }
+        if (copied) {
+          status.textContent = '견적 링크를 복사했습니다. 카카오톡 대화방에 붙여 넣어 보내세요.';
+          return;
+        }
+        address.focus();
+        address.select();
+        status.textContent = '자동 복사를 확인하지 못했습니다. 선택된 주소를 직접 복사하세요.';
+        return;
+      }
       status.textContent = navigator.share && !copy
         ? '공유 메뉴를 열어 카카오톡을 선택하세요.'
         : '선택된 주소를 복사해 카카오톡 대화방에 붙여 넣어 보내세요.';
