@@ -79,6 +79,9 @@
     .toolbar .share{border-color:#fee500;background:#fee500;color:#191919}.toolbar .button{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:0 18px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font:inherit;font-weight:700;text-decoration:none}.toolbar .channel{border-color:#d9dbe0;background:#fff;color:#191919}
     .quote-response{padding:18px;border:1px solid var(--line);border-radius:12px;background:#fbfbfc}.quote-response-form label{display:block;margin:12px 0 6px;font-size:13px;font-weight:700}.quote-response-form textarea{display:block;width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font:inherit}.quote-response-form>div{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.quote-response-form button{min-height:42px;padding:0 16px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit;font-weight:700}.quote-response-form button.primary{border-color:var(--red);background:var(--red);color:#fff}
     @media(max-width:600px){.toolbar{position:sticky;gap:6px;padding:8px}.toolbar button{flex:1;min-width:0;padding:0 8px;font-size:12px}}
+    .quote-share-panel[hidden] { display:none; }
+    .quote-share-panel input { width:min(100%, 32rem); }
+    @media print { .quote-share-panel { display:none !important; } }
   </style>
 </head>
 <body>
@@ -115,33 +118,81 @@
     {% if public_share and partner.kakao_channel_url %}<section class="section"><a href="{{ partner.kakao_channel_url }}" target="_blank" rel="noopener noreferrer">{{ partner.name }} 카카오톡 채널로 문의하기</a></section>{% endif %}
     <footer class="foot">I LOVE MINI · 협력업체 {{ document_title }}</footer>
   </main>
-  {% if share_endpoint and not public_share %}<script>
-    async function createQuoteShareUrl() {
-      const csrf = document.querySelector('#quote-share-csrf [name=csrfmiddlewaretoken]').value;
-      const response = await fetch('{{ share_endpoint }}', {method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':csrf, 'Accept':'application/json'}});
-      if (!response.ok) throw new Error('견적 공유 링크를 만들지 못했습니다.');
-      return (await response.json()).url;
+  {% if share_endpoint and not public_share %}
+  <script>
+    const shareButton = document.getElementById('quote-share');
+    const copyButton = document.getElementById('quote-copy');
+    const panel = document.createElement('section');
+    panel.hidden = true;
+    panel.className = 'toolbar quote-share-panel';
+    panel.setAttribute('aria-label', '견적 공유');
+    const status = document.createElement('p');
+    status.setAttribute('role', 'status');
+    const address = document.createElement('input');
+    address.readOnly = true;
+    address.setAttribute('aria-label', '견적 공유 주소');
+    const nativeButton = document.createElement('button');
+    nativeButton.type = 'button';
+    nativeButton.textContent = '공유 메뉴 열기';
+    nativeButton.hidden = !navigator.share;
+    panel.append(status, address, nativeButton);
+    document.getElementById('quote-share-csrf').after(panel);
+
+    async function prepareLink(copy) {
+      panel.hidden = false;
+      address.hidden = !address.value;
+      nativeButton.disabled = !address.value;
+      if (!address.value) {
+        shareButton.disabled = copyButton.disabled = true;
+        status.textContent = '견적 링크를 만드는 중입니다.';
+        try {
+          const csrf = document.querySelector('#quote-share-csrf [name=csrfmiddlewaretoken]').value;
+          const response = await fetch('{{ share_endpoint|escapejs }}', {
+            method: 'POST', credentials: 'same-origin',
+            headers: {'X-CSRFToken': csrf, 'Accept': 'application/json'}
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok || typeof result.url !== 'string') {
+            status.textContent = result.detail || '견적 링크를 만들지 못했습니다. 다시 시도해 주세요.';
+            return;
+          }
+          address.value = result.url;
+          address.hidden = false;
+          nativeButton.disabled = false;
+        } catch {
+          status.textContent = '견적 링크를 만들지 못했습니다. 연결을 확인하고 다시 시도해 주세요.';
+          return;
+        } finally {
+          shareButton.disabled = copyButton.disabled = false;
+        }
+      }
+      if (copy && navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(address.value);
+          status.textContent = '견적 링크를 복사했습니다. 카카오톡 대화방에 붙여 넣어 보내세요.';
+          return;
+        } catch {}
+      }
+      address.focus();
+      address.select();
+      status.textContent = navigator.share && !copy
+        ? '공유 메뉴를 열어 카카오톡을 선택하세요.'
+        : '선택된 주소를 복사해 카카오톡 대화방에 붙여 넣어 보내세요.';
     }
-    document.getElementById('quote-share').addEventListener('click', async function () {
-      const button = this; button.disabled = true;
+
+    shareButton.addEventListener('click', () => prepareLink(false));
+    copyButton.addEventListener('click', () => prepareLink(true));
+    nativeButton.addEventListener('click', async () => {
       try {
-        const url = await createQuoteShareUrl();
-        const shareData = {title:'{{ document_title|escapejs }} · {{ document_number|escapejs }}', text:'{{ partner.name|escapejs }}에서 보내드린 견적서입니다. 링크는 3일간 열 수 있습니다.', url};
-        if (navigator.share) await navigator.share(shareData);
-        else if (navigator.clipboard) { await navigator.clipboard.writeText(url); alert('견적 링크를 복사했습니다. 카카오톡 대화방에 붙여 넣어 보내세요. (3일간 유효)'); }
-        else { window.prompt('견적 링크를 복사해 카카오톡으로 보내세요. (3일간 유효)', url); }
-      } catch (error) { if (error.name !== 'AbortError') alert(error.message || '공유를 완료하지 못했습니다.'); }
-      finally { button.disabled = false; }
+        await navigator.share({title: '{{ document_title|escapejs }}', url: address.value});
+      } catch (error) {
+        if (error.name === 'AbortError') return;
+        address.focus();
+        address.select();
+        status.textContent = '공유 메뉴를 열지 못했습니다. 선택된 주소를 카카오톡으로 보내세요.';
+      }
     });
-    document.getElementById('quote-copy').addEventListener('click', async function () {
-      const button = this; button.disabled = true;
-      try {
-        const url = await createQuoteShareUrl();
-        if (navigator.clipboard) { await navigator.clipboard.writeText(url); alert('3일간 유효한 견적 링크를 복사했습니다. 카카오톡 대화방에 붙여 넣어 보내세요.'); }
-        else { window.prompt('견적 링크를 복사해 카카오톡으로 보내세요. (3일간 유효)', url); }
-      } catch (error) { alert(error.message || '견적 링크를 만들지 못했습니다.'); }
-      finally { button.disabled = false; }
-    });
-  </script>{% endif %}
+  </script>
+  {% endif %}
 </body>
 </html>
