@@ -4,7 +4,7 @@ from django.contrib.admin.widgets import AdminDateWidget
 from django.db import transaction
 from django.core.exceptions import PermissionDenied
 from django.urls import reverse
-from django.shortcuts import redirect
+from django.shortcuts import get_object_or_404, redirect
 from django.utils.html import format_html
 from .models import ServiceEstimate, MaintenanceRecommendation, PartnerBooking, LedgerEntry, VehicleOwnership, PartnerStaff
 from .models import PartnerWorkOrder, PartnerWorkOrderLine
@@ -96,9 +96,37 @@ class PhaseOneAdmin(admin.ModelAdmin):
 class EstimateAdmin(PhaseOneAdmin):
     form=EstimateForm
     change_list_template = "admin/core/serviceestimate/change_list.html"
-    list_display=['id','booking','revision','total_krw','status','created_at','print_document']
+    list_display=['id','booking','revision','total_krw','status','created_at','print_document','work_order_button']
 
     actions = ("create_work_order",)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("booking__partner", "booking__work_order")
+
+    def changelist_view(self, request, extra_context=None):
+        estimate_id = request.POST.get("convert_estimate")
+        if request.method == "POST" and estimate_id is not None:
+            if not self.has_change_permission(request) or not estimate_id.isascii() or not estimate_id.isdecimal() or len(estimate_id) > 18:
+                raise PermissionDenied
+            estimate = get_object_or_404(self.get_queryset(request), pk=estimate_id)
+            if not self.has_change_permission(request, estimate) or not estimate.booking.partner.is_active:
+                raise PermissionDenied
+            response = self.create_work_order(request, self.get_queryset(request).filter(pk=estimate.pk))
+            return response or redirect(reverse(f"{self.admin_site.name}:core_serviceestimate_changelist"))
+        return super().changelist_view(request, extra_context)
+
+    @admin.display(description="작업지시")
+    def work_order_button(self, obj):
+        booking = obj.booking
+        if not booking.partner.is_active:
+            return "—"
+        order = getattr(booking, "work_order", None)
+        if order and order.partner_id == booking.partner_id:
+            url = reverse(f"{self.admin_site.name}:core_partnerworkorder_change", args=[order.pk])
+            return format_html('<a class="button" href="{}">작업지시 열기</a>', url)
+        if booking.status in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED) and obj.status not in ("declined", "superseded"):
+            return format_html('<button type="submit" class="button" name="convert_estimate" value="{}">작업지시로 전환</button>', obj.pk)
+        return "—"
 
     @admin.action(description="선택한 견적을 작업지시로 전환")
     def create_work_order(self, request, queryset):
@@ -109,6 +137,8 @@ class EstimateAdmin(PhaseOneAdmin):
         with transaction.atomic():
             estimate = self.get_queryset(request).get(pk=estimate_ids[0])
             booking = PartnerBooking.objects.select_for_update().get(pk=estimate.booking_id)
+            if not booking.partner.is_active:
+                raise PermissionDenied
             estimate.refresh_from_db()
             order = PartnerWorkOrder.objects.filter(booking=booking, partner=booking.partner).first()
             if order is None:
