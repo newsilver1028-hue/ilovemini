@@ -8,7 +8,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
-from django.utils.html import format_html_join
+from django.utils.html import format_html, format_html_join
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
@@ -1035,6 +1035,28 @@ class PartnerLedgerEntryAdmin(admin.ModelAdmin):
     date_hierarchy = "entry_date"
     ordering = ("-entry_date", "-pk")
     actions = None
+
+    readonly_fields = ("repair_amount_table",)
+    exclude = ("line_items",)
+
+    @admin.display(description="정비 항목 및 금액")
+    def repair_amount_table(self, obj):
+        rows = format_html_join(
+            "", "<tr><td>{}</td><td>{}</td></tr>",
+            (
+                (item["name"], f"{item['amount_krw']:,}원")
+                for item in (obj.line_items if isinstance(obj.line_items, list) else [])
+                if isinstance(item, dict) and isinstance(item.get("name"), str)
+                and type(item.get("amount_krw")) is int
+            ),
+        )
+        total = obj.gross_amount_krw if obj.gross_amount_krw is not None else obj.amount_krw
+        return format_html(
+            '<table><thead><tr><th scope="col">정비 항목</th><th scope="col">금액</th></tr></thead>'
+            '<tbody>{}</tbody><tfoot><tr><th scope="row">총액</th><td>{}</td></tr></tfoot></table>',
+            rows or format_html('<tr><td colspan="2">{}</td></tr>', "등록된 항목 없음"),
+            f"{total:,}원",
+        )
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
