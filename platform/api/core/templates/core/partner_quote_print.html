@@ -142,41 +142,47 @@
       panel.hidden = false;
       address.hidden = !address.value;
       nativeButton.disabled = !address.value;
+      let linkReady = Promise.resolve(address.value);
       if (!address.value) {
         shareButton.disabled = copyButton.disabled = true;
         status.textContent = '견적 링크를 만드는 중입니다.';
-        try {
-          const csrf = document.querySelector('#quote-share-csrf [name=csrfmiddlewaretoken]').value;
-          const response = await fetch('{{ share_endpoint|escapejs }}', {
-            method: 'POST', credentials: 'same-origin',
-            headers: {'X-CSRFToken': csrf, 'Accept': 'application/json'}
-          });
+        const csrf = document.querySelector('#quote-share-csrf [name=csrfmiddlewaretoken]').value;
+        linkReady = fetch('{{ share_endpoint|escapejs }}', {
+          method: 'POST', credentials: 'same-origin',
+          headers: {'X-CSRFToken': csrf, 'Accept': 'application/json'}
+        }).then(async (response) => {
           const result = await response.json().catch(() => ({}));
           if (!response.ok || typeof result.url !== 'string') {
-            status.textContent = result.detail || '견적 링크를 만들지 못했습니다. 다시 시도해 주세요.';
-            return;
+            throw new Error(result.detail || '견적 링크를 만들지 못했습니다. 다시 시도해 주세요.');
           }
-          address.value = result.url;
-          address.hidden = false;
-          nativeButton.disabled = false;
-        } catch {
-          status.textContent = '견적 링크를 만들지 못했습니다. 연결을 확인하고 다시 시도해 주세요.';
-          return;
-        } finally {
-          shareButton.disabled = copyButton.disabled = false;
-        }
+          return result.url;
+        });
+      }
+      let clipboardWrite = Promise.resolve(false);
+      if (copy && navigator.clipboard) {
+        try {
+          if (address.value) {
+            clipboardWrite = navigator.clipboard.writeText(address.value).then(() => true, () => false);
+          } else if (typeof ClipboardItem === 'function' && navigator.clipboard.write) {
+            const content = linkReady.then(url => new Blob([url], {type: 'text/plain'}));
+            clipboardWrite = navigator.clipboard.write([new ClipboardItem({'text/plain': content})]).then(() => true, () => false);
+          }
+        } catch {}
+      }
+      try {
+        address.value = await linkReady;
+        address.hidden = false;
+        nativeButton.disabled = false;
+      } catch (error) {
+        status.textContent = error.message || '견적 링크를 만들지 못했습니다.';
+        return;
+      } finally {
+        shareButton.disabled = copyButton.disabled = false;
       }
       address.focus();
       address.select();
       if (copy) {
-        let copied = false;
-        if (navigator.clipboard) {
-          try {
-            await navigator.clipboard.writeText(address.value);
-            copied = await navigator.clipboard.readText() === address.value;
-          } catch {}
-        }
-        if (copied) {
+        if (await clipboardWrite) {
           status.textContent = '견적 링크를 복사했습니다. 카카오톡 대화방에 붙여 넣어 보내세요.';
           return;
         }
