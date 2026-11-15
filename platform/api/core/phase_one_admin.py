@@ -98,7 +98,7 @@ class EstimateAdmin(PhaseOneAdmin):
     change_list_template = "admin/core/serviceestimate/change_list.html"
     list_display=['id','booking','revision','total_krw','status','created_at','print_document','work_order_button']
 
-    actions = ("create_work_order",)
+    actions = None
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("booking__partner", "booking__work_order")
@@ -128,7 +128,6 @@ class EstimateAdmin(PhaseOneAdmin):
             return format_html('<button type="submit" class="button" name="convert_estimate" value="{}">작업지시로 전환</button>', obj.pk)
         return "—"
 
-    @admin.action(description="선택한 견적을 작업지시로 전환")
     def create_work_order(self, request, queryset):
         estimate_ids = list(queryset.values_list("pk", flat=True)[:2])
         if len(estimate_ids) != 1:
