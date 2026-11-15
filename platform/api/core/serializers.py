@@ -60,11 +60,11 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
     class Meta:
         model = LedgerEntry
         fields = [
-            "id", "vehicle", "kind", "entry_date", "odometer_km", "amount_krw", "gross_amount_krw", "payment_method", "description",
+            "id", "vehicle", "kind", "entry_date", "odometer_km", "amount_krw", "gross_amount_krw", "payment_method", "description", "line_items",
             "quantity_liters", "source", "partner_name", "verified_at", "part_number", "evidence_url",
             "corrects", "correction_reason", "is_corrected", "trust_label", "integrity_valid", "created_at", "evidence_images",
         ]
-        read_only_fields = ["id", "source", "partner_name", "verified_at", "corrects", "correction_reason", "is_corrected", "trust_label", "integrity_valid", "created_at"]
+        read_only_fields = ["id", "line_items", "source", "partner_name", "verified_at", "corrects", "correction_reason", "is_corrected", "trust_label", "integrity_valid", "created_at"]
 
     def is_inherited(self, obj):
         request = self.context.get("request")
