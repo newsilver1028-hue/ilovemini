@@ -1,11 +1,13 @@
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.admin.widgets import AdminDateWidget
 from django.db import transaction
 from django.core.exceptions import PermissionDenied
 from django.urls import reverse
+from django.shortcuts import redirect
 from django.utils.html import format_html
 from .models import ServiceEstimate, MaintenanceRecommendation, PartnerBooking, LedgerEntry, VehicleOwnership, PartnerStaff
+from .models import PartnerWorkOrder, PartnerWorkOrderLine
 from .phase_one_views import EstimateSerializer, RecommendationSerializer
 
 class EstimateItemsWidget(forms.Textarea):
@@ -95,6 +97,48 @@ class EstimateAdmin(PhaseOneAdmin):
     form=EstimateForm
     change_list_template = "admin/core/serviceestimate/change_list.html"
     list_display=['id','booking','revision','total_krw','status','created_at','print_document']
+
+    actions = ("create_work_order",)
+
+    @admin.action(description="선택한 견적을 작업지시로 전환")
+    def create_work_order(self, request, queryset):
+        estimate_ids = list(queryset.values_list("pk", flat=True)[:2])
+        if len(estimate_ids) != 1:
+            self.message_user(request, "전환할 견적을 한 건만 선택해 주세요.", messages.WARNING)
+            return
+        with transaction.atomic():
+            estimate = self.get_queryset(request).get(pk=estimate_ids[0])
+            booking = PartnerBooking.objects.select_for_update().get(pk=estimate.booking_id)
+            estimate.refresh_from_db()
+            order = PartnerWorkOrder.objects.filter(booking=booking, partner=booking.partner).first()
+            if order is None:
+                if booking.status not in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED) or estimate.status in ("declined", "superseded"):
+                    self.message_user(request, "진행 가능한 예약의 유효한 견적만 전환할 수 있습니다.", messages.WARNING)
+                    return
+                vehicle = booking.vehicle
+                order = PartnerWorkOrder.objects.create(
+                    partner=booking.partner, booking=booking, vehicle=vehicle,
+                    contact_phone=booking.contact_phone,
+                    vehicle_model=vehicle.model_name if vehicle else "",
+                    plate_number=vehicle.plate_number if vehicle else "",
+                    odometer_km=vehicle.current_odometer_km if vehicle else None,
+                    customer_concern=booking.customer_note,
+                    assigned_resource=booking.assigned_resource,
+                    items=estimate.items, quoted_total_krw=estimate.total_krw,
+                    created_by=request.user,
+                )
+                PartnerWorkOrderLine.objects.bulk_create([
+                    PartnerWorkOrderLine(
+                        work_order=order, kind=PartnerWorkOrderLine.Kind.OTHER,
+                        description=item["title"], quantity=1,
+                        unit_price_krw=item["amount_krw"], sort_order=index,
+                    )
+                    for index, item in enumerate(estimate.items)
+                ])
+                self.message_user(request, "차량 정보와 견적 항목을 작업지시로 옮겼습니다.", messages.SUCCESS)
+            else:
+                self.message_user(request, "이 예약에 연결된 기존 작업지시를 열었습니다.", messages.INFO)
+        return redirect(reverse(f"{self.admin_site.name}:core_partnerworkorder_change", args=[order.pk]))
 
     @admin.display(description='견적서 출력')
     def print_document(self, obj):
