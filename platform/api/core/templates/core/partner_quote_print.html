@@ -170,8 +170,7 @@
       address.select();
       if (copy) {
         let copied = false;
-        try { copied = document.execCommand('copy'); } catch {}
-        if (!copied && navigator.clipboard) {
+        if (navigator.clipboard) {
           try {
             await navigator.clipboard.writeText(address.value);
             copied = await navigator.clipboard.readText() === address.value;
