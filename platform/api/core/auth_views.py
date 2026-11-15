@@ -28,7 +28,8 @@ from .models import (NaverOAuthAttempt, MemberConsent, NaverIdentity, AppleIdent
                      VehicleTransferCode,
                      LedgerEvidence, PointTransaction, RecordCorrectionRequest,
                      PushDevice, AttendanceCheckin, Reminder, PartnerBooking, PartnerReview,
-                     MemberPreference, AppReviewAccount, PartnerStaff)
+                     MemberPreference, AppReviewAccount, PartnerStaff, Partner,
+                     PartnerAccessRequest)
 
 from .naver_auth import digest, exchange_code, get_profile, jwt_pair, sync_identity, user_for_profile, NaverUnavailable
 from .apple_auth import (apple_revocation_configured, verify_apple_identity,
@@ -41,7 +42,7 @@ class NaverAppRedirect(HttpResponseRedirect):
 
 
 class PartnerNaverLoginStartView(APIView):
-    """Start Naver OAuth for an existing, administrator-linked partner employee."""
+    """Start Naver OAuth for an existing member applying to a selected partner."""
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "partner_naver_start"
     permission_classes = [permissions.AllowAny]
@@ -51,9 +52,16 @@ class PartnerNaverLoginStartView(APIView):
         if not settings.NAVER_CLIENT_ID or not settings.NAVER_CLIENT_SECRET or not settings.NAVER_REDIRECT_URI:
             messages.error(request, "네이버 로그인 설정을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.")
             return redirect("partner_admin:login")
+        partner = Partner.objects.filter(
+            pk=request.query_params.get("partner_id"), is_active=True,
+        ).first()
+        if partner is None:
+            messages.error(request, "신청할 협력업체를 선택해 주세요.")
+            return redirect("partner_admin:login")
         state = secrets.token_urlsafe(32)
         NaverOAuthAttempt.objects.create(
             flow=NaverOAuthAttempt.Flow.PARTNER_ADMIN,
+            partner=partner,
             state_digest=digest(state),
             expires_at=timezone.now() + timedelta(minutes=10),
         )
@@ -70,21 +78,22 @@ def partner_login_redirect(error):
     return redirect(settings.ADMIN_CUSTOM_ORIGIN + "/partner-admin/login/?naver_error=" + error)
 
 
-def partner_user_for_naver_profile(profile):
+def partner_user_for_naver_profile(profile, partner):
     identity = NaverIdentity.objects.select_related("user").filter(
         subject=str(profile.get("id", ""))
     ).first()
     if identity is None:
         return None
     user = identity.user
+    if not user.is_active or user.is_superuser:
+        return None
     staff = PartnerStaff.objects.filter(
         user=user,
+        partner=partner,
         is_active=True,
         partner__is_active=True,
     ).exists()
-    if not staff or not user.is_active or user.is_superuser:
-        return None
-    return identity, user
+    return identity, user, staff
 
 
 def partner_naver_handoff(ticket):
@@ -121,12 +130,30 @@ def complete_partner_naver_callback(attempt, state, code):
         attempt.delete()
         return partner_login_redirect("provider")
 
-    match = partner_user_for_naver_profile(profile)
-    if match is None:
+    partner = attempt.partner
+    if partner is None or not partner.is_active:
         attempt.delete()
         return partner_login_redirect("not_partner")
-    identity, user = match
+    match = partner_user_for_naver_profile(profile, partner)
+    if match is None:
+        attempt.delete()
+        return partner_login_redirect("not_registered")
+    identity, user, has_partner_access = match
     sync_identity(identity, profile)
+    if not has_partner_access:
+        PartnerAccessRequest.objects.update_or_create(
+            partner=partner,
+            user=user,
+            defaults={
+                "status": PartnerAccessRequest.Status.PENDING,
+                "can_verify_records": False,
+                "can_manage_bookings": False,
+                "reviewed_by": None,
+                "reviewed_at": None,
+            },
+        )
+        attempt.delete()
+        return partner_login_redirect("approval_pending")
     ticket = secrets.token_urlsafe(32)
     with transaction.atomic():
         attempt = NaverOAuthAttempt.objects.select_for_update().get(pk=attempt.pk)
