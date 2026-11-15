@@ -51,6 +51,7 @@ class VehicleSerializer(serializers.ModelSerializer):
         return normalized
 
 class LedgerEntrySerializer(serializers.ModelSerializer):
+    line_items = serializers.SerializerMethodField()
     partner_name = serializers.CharField(source="partner.name", read_only=True)
     trust_label = serializers.SerializerMethodField()
     integrity_valid = serializers.SerializerMethodField()
@@ -65,6 +66,18 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
             "corrects", "correction_reason", "is_corrected", "trust_label", "integrity_valid", "created_at", "evidence_images",
         ]
         read_only_fields = ["id", "line_items", "source", "partner_name", "verified_at", "corrects", "correction_reason", "is_corrected", "trust_label", "integrity_valid", "created_at"]
+
+    def get_line_items(self, obj):
+        if not isinstance(obj.line_items, list):
+            return []
+        return [
+            {
+                **item,
+                "description": str(item.get("description") or item.get("name") or "정비 항목"),
+            }
+            for item in obj.line_items
+            if isinstance(item, dict) and type(item.get("amount_krw")) is int
+        ]
 
     def is_inherited(self, obj):
         request = self.context.get("request")
