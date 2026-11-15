@@ -80,6 +80,11 @@ class PartnerAdminSite(AdminSite):
     login_template = "core/partner_admin_login.html"
     site_url = None
 
+    def login(self, request, extra_context=None):
+        extra_context = dict(extra_context or {})
+        extra_context["partner_login_options"] = Partner.objects.filter(is_active=True)
+        return super().login(request, extra_context)
+
     def each_context(self, request):
         context = super().each_context(request)
         context["is_partner_admin"] = True
