@@ -709,6 +709,12 @@ class PartnerBookingAdminForm(forms.ModelForm):
         model = PartnerBooking
         fields = "__all__"
 
+    def clean_duration_minutes(self):
+        duration = self.cleaned_data["duration_minutes"]
+        if duration < 30 or duration > 480 or duration % 30:
+            raise forms.ValidationError("작업 시간은 30분 단위로 30~480분 사이에서 입력해 주세요.")
+        return duration
+
     def clean(self):
         data = super().clean()
         resource = data.get("assigned_resource")

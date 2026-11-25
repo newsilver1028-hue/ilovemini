@@ -1,4 +1,6 @@
+import json
 from datetime import timedelta
+from django.core.serializers.json import DjangoJSONEncoder
 
 from django.http import Http404, JsonResponse
 from django.db import transaction
@@ -54,7 +56,7 @@ def estimate_quote_context(estimate):
 def quote_snapshot(context):
     """Freeze customer-visible quote values at issuance time."""
     partner = context["partner"]
-    return {
+    snapshot = {
         key: value.isoformat() if hasattr(value, "isoformat") else value
         for key, value in {
             **context,
@@ -68,6 +70,9 @@ def quote_snapshot(context):
         }.items()
         if key != "partner"
     }
+    # JSONField uses the standard encoder; normalize nested Decimal quantities
+    # without converting precise monetary or quantity values to binary floats.
+    return json.loads(json.dumps(snapshot, cls=DjangoJSONEncoder))
 
 
 def create_quote_share(request, *, work_order=None, estimate=None):

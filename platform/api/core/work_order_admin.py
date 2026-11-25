@@ -368,6 +368,21 @@ class PartnerWorkOrderLineForm(forms.ModelForm):
         partner_id = getattr(parent, "partner_id", None) or (request.POST.get("partner") if request and request.method == "POST" else None)
         self.fields["part"].queryset = PartnerPart.objects.filter(partner_id=partner_id, is_active=True) if partner_id else PartnerPart.objects.none()
         self.fields["preset"].queryset = PartnerServicePreset.objects.filter(partner_id=partner_id, is_active=True) if partner_id else PartnerServicePreset.objects.none()
+        if self.is_bound:
+            raw_preset = self.data.get(self.add_prefix("preset"))
+            try:
+                preset = self.fields["preset"].queryset.filter(pk=raw_preset).first() if raw_preset else None
+            except (ValueError, TypeError):
+                preset = None  # Let ModelChoiceField report malformed selections.
+            if preset:
+                # Populate required fields before field-level validation runs.
+                self.data = self.data.copy()
+                defaults = {"description": preset.name, "quantity": preset.default_quantity,
+                            "kind": preset.kind, "unit_price_krw": preset.default_price_krw}
+                for name, value in defaults.items():
+                    key = self.add_prefix(name)
+                    if self.data.get(key) in (None, ""):
+                        self.data[key] = str(value)
 
     def clean(self):
         data = super().clean()
@@ -385,8 +400,10 @@ class PartnerWorkOrderLineForm(forms.ModelForm):
             if preset.part_id:
                 if preset.part.partner_id != int(partner_id):
                     self.add_error("preset", "연결 재고 부품의 업체가 일치하지 않습니다.")
+                elif not preset.part.is_active:
+                    self.add_error("preset", "연결된 재고 부품이 비활성화되어 있습니다.")
                 else:
-                    data["part"] = preset.part
+                    part = data["part"] = preset.part
         if part and str(part.partner_id) != str(partner_id):
             self.add_error("part", "다른 업체의 재고 부품은 선택할 수 없습니다.")
         if data.get("kind") == PartnerWorkOrderLine.Kind.PART and not part:
