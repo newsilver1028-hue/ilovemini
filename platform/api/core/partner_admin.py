@@ -186,6 +186,14 @@ class PartnerAdminSite(AdminSite):
         ] + super().get_urls()
 
     @method_decorator(never_cache)
+    def app_index(self, request, app_label, extra_context=None):
+        # The default app index extends the global operations dashboard, whose
+        # point/member URLs do not exist in the scoped partner AdminSite.
+        # Validate the requested application and reuse the partner dashboard.
+        self.get_app_list(request, app_label)
+        return self.index(request, extra_context)
+
+    @method_decorator(never_cache)
     def index(self, request, extra_context=None):
         context = self.each_context(request)
         context.update(extra_context or {})
@@ -639,8 +647,26 @@ class PartnerAdminSite(AdminSite):
 partner_admin_site = PartnerAdminSite(name="partner_admin")
 
 
+# Admin presentation only; keep persisted fields and API names unchanged.
+PartnerQuoteShare._meta.verbose_name = "견적 링크 관리"
+PartnerQuoteShare._meta.verbose_name_plural = "견적 링크 관리"
+
 @admin.register(PartnerQuoteShare, site=partner_admin_site)
 class PartnerQuoteShareAdmin(admin.ModelAdmin):
+    def has_module_permission(self, request):
+        return is_system_admin(request) or staff_partners(request, booking=True).exists()
+
+    def has_view_permission(self, request, obj=None):
+        if not self.has_module_permission(request):
+            return False
+        if obj is None or is_system_admin(request):
+            return True
+        partner_id = obj.work_order.partner_id if obj.work_order_id else obj.estimate.booking.partner_id
+        return partner_id in staff_partners(request, booking=True)
+
+    def has_change_permission(self, request, obj=None):
+        return self.has_view_permission(request, obj)
+
     list_display = ("token", "source_label", "quote_revision", "created_at", "expires_at", "revoked_at")
     list_filter = ("created_at", "expires_at", "revoked_at")
     readonly_fields = ("token", "work_order", "estimate", "quote_revision", "created_by", "created_at", "expires_at")
