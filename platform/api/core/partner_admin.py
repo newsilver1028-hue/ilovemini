@@ -4,7 +4,7 @@ from django.contrib.admin import AdminSite
 from django import forms
 from django.db.models import F, Q, Sum
 from django.db import transaction
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import BadRequest, PermissionDenied, ValidationError
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
@@ -334,6 +334,8 @@ class PartnerAdminSite(AdminSite):
         requested_month = request.GET.get("month", "")
         try:
             report_month = datetime.strptime(requested_month, "%Y-%m").date().replace(day=1)
+            if not 1900 <= report_month.year <= 2100:
+                raise BadRequest("조회 연도는 1900~2100년 범위에서 선택해 주세요.")
         except ValueError:
             report_month = today.replace(day=1)
         partner_ids = staff_partners(request, booking=True)
@@ -879,6 +881,8 @@ class PartnerBookingAdmin(admin.ModelAdmin):
         month_number = request.GET.get("scheduled_at__month", "")
         try:
             month_start = datetime.strptime(f"{year}-{month_number}", "%Y-%m").date().replace(day=1)
+            if not 1900 <= month_start.year <= 2100:
+                raise BadRequest("조회 연도는 1900~2100년 범위에서 선택해 주세요.")
         except ValueError:
             month_start = today.replace(day=1)
         next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
@@ -1125,6 +1129,8 @@ class PartnerLedgerEntryAdmin(admin.ModelAdmin):
         month_number = request.GET.get("entry_date__month", "")
         try:
             month_start = datetime.strptime(f"{year}-{month_number}", "%Y-%m").date().replace(day=1)
+            if not 1900 <= month_start.year <= 2100:
+                raise BadRequest("조회 연도는 1900~2100년 범위에서 선택해 주세요.")
         except ValueError:
             month_start = today.replace(day=1)
         next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)

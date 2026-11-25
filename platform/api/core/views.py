@@ -703,7 +703,10 @@ class LedgerEntryViewSet(viewsets.ModelViewSet):
         if not self.request.user.is_superuser:
             qs = qs.filter(vehicle__ownerships__user=self.request.user, vehicle__ownerships__ended_at__isnull=True)
         vehicle_id = self.request.query_params.get("vehicle")
-        return qs.filter(vehicle_id=vehicle_id) if vehicle_id else qs
+        if vehicle_id:
+            vehicle_id = serializers.IntegerField(min_value=1, max_value=9223372036854775807).run_validation(vehicle_id)
+            return qs.filter(vehicle_id=vehicle_id)
+        return qs
     def perform_create(self, serializer):
         entry = serializer.save(source=LedgerEntry.Source.OWNER)
         if entry.odometer_km is not None and (
@@ -990,7 +993,10 @@ class ReminderViewSet(viewsets.ModelViewSet):
                            vehicle__ownerships__ended_at__isnull=True,
                            created_at__gte=F("vehicle__ownerships__started_at"))
         vehicle_id = self.request.query_params.get("vehicle")
-        return qs.filter(vehicle_id=vehicle_id) if vehicle_id else qs
+        if vehicle_id:
+            vehicle_id = serializers.IntegerField(min_value=1, max_value=9223372036854775807).run_validation(vehicle_id)
+            return qs.filter(vehicle_id=vehicle_id)
+        return qs
     def perform_update(self, serializer):
         serializer.save(notification_sent_at=None)
     @action(detail=True, methods=["post"])
@@ -1151,8 +1157,11 @@ class PartnerBookingViewSet(viewsets.ModelViewSet):
         transaction.on_commit(notify_partner)
 
     @action(detail=True, methods=["post"], url_path="cancel")
+    @transaction.atomic
     def cancel_booking(self, request, pk=None):
-        booking = self.get_object()
+        # Re-read under a row lock: get_object() may have observed a state
+        # superseded by a concurrent cancellation or confirmation.
+        booking = get_object_or_404(PartnerBooking.objects.select_for_update(), pk=self.get_object().pk)
         if booking.customer_id != request.user.id:
             return Response({"detail": "예약자만 취소할 수 있습니다."}, status=status.HTTP_403_FORBIDDEN)
         if booking.status not in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED):
@@ -1178,8 +1187,11 @@ class PartnerBookingViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(booking).data)
 
     @action(detail=True, methods=["post"], url_path="respond")
+    @transaction.atomic
     def respond(self, request, pk=None):
-        booking = self.get_object()
+        # Re-read under a row lock: get_object() may have observed a state
+        # superseded by a concurrent cancellation or confirmation.
+        booking = get_object_or_404(PartnerBooking.objects.select_for_update(), pk=self.get_object().pk)
         if not PartnerStaff.objects.filter(user=request.user, partner=booking.partner,
                 is_active=True, can_manage_bookings=True, partner__is_active=True).exists():
             return Response({"detail": "이 업체의 예약 관리 권한이 없습니다."}, status=status.HTTP_403_FORBIDDEN)
