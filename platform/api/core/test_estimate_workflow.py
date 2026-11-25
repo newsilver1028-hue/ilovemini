@@ -70,3 +70,14 @@ class EstimateWorkflowTests(TestCase):
         response = self.client.post(reverse('partner_admin:core_serviceestimate_changelist'), {'convert_estimate':str(self.estimate.pk)})
         self.assertEqual(response.status_code,404)
         self.assertFalse(PartnerWorkOrder.objects.exists())
+
+    def test_partner_titles_and_navigation_are_contextual(self):
+        self.client.force_login(self.worker)
+        for model in ['serviceestimate', 'partnerworkorder', 'partnertaxinvoice']:
+            response = self.client.get(f'/partner-admin/core/{model}/add/')
+            self.assertEqual(response.status_code, 200)
+            html = response.content.decode()
+            self.assertIn('· 업체 관리자</title>', html)
+            self.assertIn('href="/partner-admin/"', html)
+        history = self.client.get('/partner-admin/core/ledgerentry/')
+        self.assertContains(history, '<h1>인증 정비기록</h1>', html=True)
