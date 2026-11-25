@@ -119,9 +119,10 @@ class PartnerPortalTests(TestCase):
                 response = client.get(reverse("naver_callback") + f"?state={state}&code=authorization-code")
         self.assertRedirects(
             response,
-            "https://admin.ilovemini.co.kr/partner-admin/login/?naver_error=not_partner",
+            "https://admin.ilovemini.co.kr/partner-admin/login/?naver_error=not_registered",
             fetch_redirect_response=False,
         )
+        self.assertNotIn("_auth_user_id", client.session)
         self.assertFalse(PartnerAccessRequest.objects.filter(
             partner=self.partner, user__naver_identity__subject="unknown-subject",
         ).exists())
@@ -138,7 +139,12 @@ class PartnerPortalTests(TestCase):
         self.assertFalse(ledger_admin.has_change_permission(request))
         self.assertEqual(
             {model._meta.model_name for model in partner_admin_site._registry},
-            {"partnerbooking", "ledgerentry", "maintenancerecommendation", "serviceestimate"},
+            {"partnerbooking", "ledgerentry", "maintenancerecommendation", "serviceestimate",
+             "partnerworkorder", "partnerquoteshare", "partnercustomer", "partnervehicle",
+             "partnerworkresource", "partnerservicepreset", "partnerdailyclose",
+             "partnersupplier", "partnerpart", "partnerpurchaseline", "partnerstockmovement",
+             "partnerfinancialentry", "partnerposintegration", "partnerpayment", "partnertaxinvoice",
+             "partnerweeklyschedule", "partnerscheduleblock", "partnerserviceduration", "partnerscheduleexception"},
         )
 
     def test_direct_delete_url_is_denied_for_partner_user(self):
@@ -175,7 +181,7 @@ class PartnerPortalTests(TestCase):
         self.assertContains(response, "차량번호")
         self.assertContains(response, "12가3456")
         self.assertContains(response, "정비기록 미니 캘린더")
-        self.assertContains(response, "인증 정비기록 조회")
+        self.assertEqual(response.context["title"], "인증 정비기록 조회")
         self.assertNotContains(response, "보려면 기록을 선택")
 
     def test_inactive_membership_is_denied(self):
@@ -188,7 +194,8 @@ class PartnerPortalTests(TestCase):
         regular_page = client.get(reverse("admin:login"))
         self.assertEqual(partner_page.status_code, 200)
         self.assertEqual(regular_page.status_code, 200)
-        self.assertContains(partner_page, "네이버 아이디로 협력업체 로그인")
+        self.assertContains(partner_page, "네이버 아이디로 로그인")
+        self.assertContains(partner_page, "승인 전에는 업체 자료를 볼 수 없습니다.")
         self.assertContains(regular_page, "협력업체 네이버 로그인")
         self.assertContains(regular_page, 'id="login-form"')
 
