@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Vehicle, VehicleOwnership, LedgerEntry, Reminder, Notice, Partner, PartnerReview, Offer, PartnerBooking, PartnerStaff
+from .models import Vehicle, VehicleOwnership, LedgerEntry, Reminder, Notice, Partner, PartnerReview, Offer, PartnerBooking, PartnerStaff, PartnerWorkResource
 from .integrity import ledger_record_hash, legacy_ledger_record_hash
 from .vehicle_identity import normalize_plate_number
 from .media_views import uploaded_image_url
@@ -51,6 +51,7 @@ class VehicleSerializer(serializers.ModelSerializer):
         return normalized
 
 class LedgerEntrySerializer(serializers.ModelSerializer):
+    line_items = serializers.SerializerMethodField()
     partner_name = serializers.CharField(source="partner.name", read_only=True)
     trust_label = serializers.SerializerMethodField()
     integrity_valid = serializers.SerializerMethodField()
@@ -60,11 +61,23 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
     class Meta:
         model = LedgerEntry
         fields = [
-            "id", "vehicle", "kind", "entry_date", "odometer_km", "amount_krw", "gross_amount_krw", "payment_method", "description",
+            "id", "vehicle", "kind", "entry_date", "odometer_km", "amount_krw", "gross_amount_krw", "payment_method", "description", "line_items",
             "quantity_liters", "source", "partner_name", "verified_at", "part_number", "evidence_url",
             "corrects", "correction_reason", "is_corrected", "trust_label", "integrity_valid", "created_at", "evidence_images",
         ]
-        read_only_fields = ["id", "source", "partner_name", "verified_at", "corrects", "correction_reason", "is_corrected", "trust_label", "integrity_valid", "created_at"]
+        read_only_fields = ["id", "line_items", "source", "partner_name", "verified_at", "corrects", "correction_reason", "is_corrected", "trust_label", "integrity_valid", "created_at"]
+
+    def get_line_items(self, obj):
+        if not isinstance(obj.line_items, list):
+            return []
+        return [
+            {
+                **item,
+                "description": str(item.get("description") or item.get("name") or "정비 항목"),
+            }
+            for item in obj.line_items
+            if isinstance(item, dict) and type(item.get("amount_krw")) is int
+        ]
 
     def is_inherited(self, obj):
         request = self.context.get("request")
@@ -167,7 +180,7 @@ class PartnerSerializer(serializers.ModelSerializer):
     average_rating = serializers.FloatField(read_only=True)
     class Meta:
         model = Partner
-        fields = ["id", "name", "branch_label", "region", "service_categories", "description", "business_info", "storefront_photo_url", "introduction_images", "representative_name", "representative_title", "representative_experience_years", "representative_photo_url", "address", "phone", "hours", "cafe_url", "map_url", "is_sponsored", "display_order", "review_count", "average_rating"]
+        fields = ["id", "name", "branch_label", "region", "service_categories", "description", "business_info", "storefront_photo_url", "introduction_images", "representative_name", "representative_title", "representative_experience_years", "representative_photo_url", "address", "phone", "hours", "cafe_url", "kakao_channel_url", "map_url", "is_sponsored", "display_order", "review_count", "average_rating"]
 
 
 class PartnerReviewSerializer(serializers.ModelSerializer):
@@ -204,10 +217,12 @@ class PartnerBookingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PartnerBooking
-        fields = ["id", "partner", "partner_name", "partner_branch_label", "partner_region", "vehicle", "vehicle_name", "vehicle_plate_number", "scheduled_at",
+        fields = ["id", "partner", "partner_name", "partner_branch_label", "partner_region", "vehicle", "vehicle_name", "vehicle_plate_number", "scheduled_at", "duration_minutes", "assigned_resource",
                   "service_type", "customer_note", "contact_phone", "status", "status_label", "can_manage", "can_verify_records", "is_customer",
                   "cancellation_reason", "partner_note", "requested_at", "updated_at"]
-        read_only_fields = ["id", "partner_name", "vehicle_name", "status", "cancellation_reason", "partner_note", "requested_at", "updated_at"]
+        # Resource allocation is workshop-managed. Public booking callers must
+        # not choose a technician/bay to bypass capacity checks.
+        read_only_fields = ["id", "partner_name", "vehicle_name", "duration_minutes", "assigned_resource", "status", "cancellation_reason", "partner_note", "requested_at", "updated_at"]
 
     def get_can_manage(self, obj):
         request = self.context.get("request")
@@ -250,4 +265,26 @@ class PartnerBookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"vehicle": "차량을 선택해 주세요."})
         if not vehicle.plate_number:
             raise serializers.ValidationError({"vehicle": "차량 번호판을 먼저 등록해야 예약을 요청할 수 있습니다."})
+        partner = attrs.get("partner", getattr(self.instance, "partner", None))
+        scheduled_at = attrs.get("scheduled_at", getattr(self.instance, "scheduled_at", None))
+        if partner and scheduled_at:
+            from .booking_schedule import is_slot_available, service_duration
+            duration = service_duration(partner, attrs.get("service_type", getattr(self.instance, "service_type", "")))
+            available, reason = is_slot_available(partner, scheduled_at, duration,
+                exclude_booking_id=self.instance.pk if self.instance else None)
+            if not available:
+                raise serializers.ValidationError({"scheduled_at": reason})
         return attrs
+
+    def create(self, validated_data):
+        from django.db import transaction
+        from .booking_schedule import is_slot_available, service_duration
+        partner = validated_data["partner"]
+        with transaction.atomic():
+            # Serialize competing booking requests for the same workshop.
+            partner.__class__.objects.select_for_update().get(pk=partner.pk)
+            duration = service_duration(partner, validated_data["service_type"])
+            available, reason = is_slot_available(partner, validated_data["scheduled_at"], duration)
+            if not available:
+                raise serializers.ValidationError({"scheduled_at": reason})
+            return PartnerBooking.objects.create(duration_minutes=duration, **validated_data)

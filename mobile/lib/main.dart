@@ -772,7 +772,7 @@ class _CafeLatestFeedState extends State<CafeLatestFeed> {
             ])),
             const Icon(Icons.open_in_new_rounded, size: 16),
           ])),
-        )).toList()),
+        )).toList());
       },
     ),
   ])));
@@ -2060,6 +2060,11 @@ class _PartnerBookingPageState extends State<PartnerBookingPage> {
   final note = TextEditingController();
   late DateTime selected;
   bool busy = false;
+  bool loadingSlots = false;
+  bool scheduleLoaded = false;
+  bool scheduleConfigured = false;
+  int serviceDurationMinutes = 60;
+  List<DateTime> availableSlots = [];
   String? error;
 
   @override
@@ -2069,9 +2074,38 @@ class _PartnerBookingPageState extends State<PartnerBookingPage> {
     selected = DateTime(now.year, now.month, now.day + 1, 10);
     final cats = (widget.partner['service_categories'] as List? ?? const []).map((e) => e.toString()).toList();
     service.text = cats.isEmpty ? '정비·점검' : cats.first;
+    WidgetsBinding.instance.addPostFrameCallback((_) => loadSlots());
   }
 
-  Future<void> chooseTime() async {
+  Future<void> loadSlots() async {
+    setState(() { loadingSlots = true; scheduleLoaded = false; scheduleConfigured = false; availableSlots = []; error = null; });
+    try {
+      final partnerId = int.parse(widget.partner['id'].toString());
+      final result = await widget.api.partnerBookingSlots(partnerId, selected, service.text.trim());
+      if (!mounted) return;
+      final rawSlots = result['slots'] as List? ?? const [];
+      setState(() {
+        scheduleLoaded = true;
+        scheduleConfigured = result['configured'] == true;
+        serviceDurationMinutes = int.tryParse(result['duration_minutes']?.toString() ?? '') ?? 60;
+        availableSlots = rawSlots.map((value) => DateTime.tryParse(value.toString())?.toLocal()).whereType<DateTime>().toList();
+        if (scheduleConfigured && availableSlots.isNotEmpty && !availableSlots.any((slot) => slot.isAtSameMomentAs(selected))) selected = availableSlots.first;
+      });
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => loadingSlots = false);
+    }
+  }
+
+  Future<void> chooseDate() async {
+    final date = await showDatePicker(context: context, initialDate: selected, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 180)));
+    if (date == null || !mounted) return;
+    setState(() => selected = DateTime(date.year, date.month, date.day, selected.hour, selected.minute));
+    await loadSlots();
+  }
+
+  Future<void> chooseManualTime() async {
     final date = await showDatePicker(context: context, initialDate: selected, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 180)));
     if (date == null || !mounted) return;
     final time = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(selected));
@@ -2081,6 +2115,14 @@ class _PartnerBookingPageState extends State<PartnerBookingPage> {
 
   Future<void> submit() async {
     if (!formKey.currentState!.validate()) return;
+    if (!scheduleLoaded) {
+      setState(() => error = '예약 시간을 먼저 조회해 주세요.');
+      return;
+    }
+    if (scheduleConfigured && !availableSlots.any((slot) => slot.isAtSameMomentAs(selected))) {
+      setState(() => error = '예약 가능한 시간을 선택해 주세요.');
+      return;
+    }
     setState(() { busy = true; error = null; });
     try {
       final payload = <String, dynamic>{
@@ -2107,9 +2149,24 @@ class _PartnerBookingPageState extends State<PartnerBookingPage> {
       const SizedBox(height: 8),
       const InfoCard(text: '예약 요청을 보내면 업체 담당자가 확인 후 확정하거나 안내를 남깁니다. 예약 확정 전에는 업체와 통화해 주세요.'),
       const SizedBox(height: 16),
-      TextFormField(controller: service, decoration: const InputDecoration(labelText: '방문 목적'), validator: (v) => v?.trim().isNotEmpty == true ? null : '방문 목적을 입력해 주세요.'),
-      const SizedBox(height: 12),
-      OutlinedButton.icon(onPressed: chooseTime, icon: const Icon(Icons.schedule), label: Text('희망 일시  ${selected.year}-${selected.month.toString().padLeft(2, '0')}-${selected.day.toString().padLeft(2, '0')}  ${selected.hour.toString().padLeft(2, '0')}:${selected.minute.toString().padLeft(2, '0')}')),
+      TextFormField(controller: service, onChanged: (_) => setState(() { availableSlots = []; scheduleConfigured = false; scheduleLoaded = false; }), decoration: const InputDecoration(labelText: '방문 목적', hintText: '예: 엔진오일 교환'), validator: (v) => v?.trim().isNotEmpty == true ? null : '방문 목적을 입력해 주세요.'),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(onPressed: loadingSlots ? null : loadSlots, icon: const Icon(Icons.refresh), label: const Text('작업 시간과 예약 가능 시간 확인')),
+      if (loadingSlots) const Padding(padding: EdgeInsets.all(12), child: Center(child: CircularProgressIndicator())),
+      if (!loadingSlots && scheduleConfigured) ...[
+        Text('예상 작업 시간  ${serviceDurationMinutes ~/ 60 > 0 ? '${serviceDurationMinutes ~/ 60}시간 ' : ''}${serviceDurationMinutes % 60 > 0 ? '${serviceDurationMinutes % 60}분' : ''}', style: Theme.of(context).textTheme.titleSmall),
+        OutlinedButton.icon(onPressed: chooseDate, icon: const Icon(Icons.calendar_month), label: Text('날짜  ${selected.year}-${selected.month.toString().padLeft(2, '0')}-${selected.day.toString().padLeft(2, '0')}')),
+        if (availableSlots.isEmpty) const InfoCard(text: '선택한 날짜에는 예약 가능한 시간이 없습니다. 다른 날짜를 선택하거나 업체에 문의해 주세요.'),
+        if (availableSlots.isNotEmpty) Wrap(spacing: 8, runSpacing: 8, children: availableSlots.map((slot) => ChoiceChip(
+          label: Text('${slot.hour.toString().padLeft(2, '0')}:${slot.minute.toString().padLeft(2, '0')}'),
+          selected: slot.isAtSameMomentAs(selected),
+          onSelected: (_) => setState(() => selected = slot),
+        )).toList()),
+      ],
+      if (!loadingSlots && scheduleLoaded && !scheduleConfigured) ...[
+        const InfoCard(text: '이 업체는 온라인 운영시간을 아직 설정하지 않았습니다. 희망 시간을 보내면 업체가 확인 후 확정합니다.'),
+        OutlinedButton.icon(onPressed: chooseManualTime, icon: const Icon(Icons.schedule), label: Text('희망 일시  ${selected.year}-${selected.month.toString().padLeft(2, '0')}-${selected.day.toString().padLeft(2, '0')}  ${selected.hour.toString().padLeft(2, '0')}:${selected.minute.toString().padLeft(2, '0')}')),
+      ],
       const SizedBox(height: 12),
       TextFormField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: '연락처 (선택)', hintText: '업체가 연락할 번호')),
       const SizedBox(height: 12),

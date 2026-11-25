@@ -1,8 +1,11 @@
 from datetime import date, datetime, time, timedelta
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
+from django.template.response import TemplateResponse
+from django.http import HttpResponseRedirect
 from django.utils.html import format_html
 from django import forms
 from django.contrib import admin
+from django.contrib import messages
 from django.contrib.admin.widgets import AdminDateWidget, AdminSplitDateTime
 from django.contrib.auth.models import Group
 from django.contrib.auth import get_user_model
@@ -17,10 +20,10 @@ from django.utils import timezone
 from .member_display import member_nickname, member_label, MemberAutocompleteView, MemberAutocompleteSelect
 
 from .models import (
-    LedgerEntry, Notice, Offer, Partner, PartnerImage, PartnerReview, PartnerStaff, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
+    LedgerEntry, Notice, Offer, Partner, PartnerImage, PartnerReview, PartnerStaff, PartnerAccessRequest, PushDevice, Reminder, Vehicle, VehiclePlateHistory,
     VehicleOwnership, VehicleTransferCode, AttendanceCheckin, PointTransaction, PointRedemptionRequest,
     SeasonBanner, AppContent, AppRelease, MemberPreference, RecordCorrectionRequest, AppReviewAccount, AppleIdentity,
-    PartnerServiceCategoryOption, PartnerBooking, AppRuntimeSettings, PartnerAccessRequest,
+    PartnerServiceCategoryOption, PartnerBooking, AppRuntimeSettings,
 )
 
 
@@ -600,7 +603,7 @@ class PartnerAdmin(AdminCalendarMixin, admin.ModelAdmin):
         ("매장 상세 안내", {"description": "앱의 업체 정보에 표시할 방문 및 이용 안내입니다.", "fields": ("business_info",)}),
         ("대표 매장 사진", {"fields": ("storefront_upload_status", "storefront_photo_url", "storefront_photo_upload", "clear_storefront_photo_upload")}),
         ("대표 정비사", {"fields": ("representative_name", "representative_title", "representative_experience_years", "representative_upload_status", "representative_photo_url", "representative_photo_upload", "clear_representative_photo_upload")}),
-        ("연락처 및 연결", {"fields": ("address", "phone", "hours", "cafe_url", "map_url")}),
+        ("연락처 및 연결", {"fields": ("address", "phone", "hours", "cafe_url", "kakao_channel_url", "map_url")}),
         ("앱 노출 설정", {"fields": ("is_active", "is_sponsored", "display_order")}),
     )
 
@@ -936,64 +939,85 @@ class PartnerStaffAdmin(AdminCalendarMixin, admin.ModelAdmin):
     date_hierarchy = "created_at"
 
 
-class PartnerAccessRequestAdminForm(forms.ModelForm):
-    class Meta:
-        model = PartnerAccessRequest
-        fields = "__all__"
-
-    def clean(self):
-        cleaned = super().clean()
-        if cleaned.get("status") == PartnerAccessRequest.Status.APPROVED:
-            partner = cleaned.get("partner")
-            if partner and not partner.is_active:
-                self.add_error("partner", "활성화된 업체만 승인할 수 있습니다.")
-            if not (cleaned.get("can_verify_records") or cleaned.get("can_manage_bookings")):
-                raise forms.ValidationError("승인할 권한을 하나 이상 선택해 주세요.")
-            user = cleaned.get("user")
-            if user and (not user.is_active or user.is_superuser):
-                self.add_error("user", "비활성 또는 최고관리자 계정은 협력업체 담당자로 승인할 수 없습니다.")
-        return cleaned
-
-
 @admin.register(PartnerAccessRequest)
 class PartnerAccessRequestAdmin(AdminCalendarMixin, admin.ModelAdmin):
-    form = PartnerAccessRequestAdminForm
-    list_display = ("applicant", "partner", "status", "can_manage_bookings", "can_verify_records", "created_at", "reviewed_at")
+    list_display = ("partner", "member_account", "status", "created_at", "reviewed_by", "reviewed_at")
     list_filter = ("status", "partner", "created_at")
-    search_fields = ("user__username", "user__email", "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "partner__name")
-    readonly_fields = ("partner", "user", "created_at", "updated_at", "reviewed_by", "reviewed_at")
+    search_fields = (
+        "partner__name", "partner__branch_label", "user__username", "user__email",
+        "user__naver_identity__nickname", "user__naver_identity__cafe_nickname", "=user__id",
+    )
+    list_select_related = ("partner", "user__naver_identity", "reviewed_by")
+    readonly_fields = ("user", "partner", "created_at", "updated_at", "reviewed_by", "reviewed_at")
+    fields = ("partner", "user", "status", "can_manage_bookings", "can_verify_records", "created_at", "reviewed_by", "reviewed_at", "updated_at")
     date_hierarchy = "created_at"
-    save_on_top = True
+    actions = ("approve_selected", "reject_selected")
 
-    @admin.display(description="신청자")
-    def applicant(self, obj):
-        return member_nickname(obj.user)
+    def has_module_permission(self, request):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    def has_view_permission(self, request, obj=None):
+        return self.has_module_permission(request)
+
+    def has_change_permission(self, request, obj=None):
+        return self.has_module_permission(request)
 
     def has_add_permission(self, request):
         return False
 
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        if not request.GET:
+            query = request.GET.copy()
+            query["status__exact"] = PartnerAccessRequest.Status.PENDING
+            return HttpResponseRedirect(f"{request.path}?{query.urlencode()}")
+        return super().changelist_view(request, extra_context)
+
+    @admin.display(description="네이버 회원", ordering="user__naver_identity__nickname")
+    def member_account(self, obj):
+        return member_nickname(obj.user)
+
+    def _apply_decision(self, request, obj, status):
+        obj.status = status
+        obj.reviewed_by = request.user
+        obj.reviewed_at = timezone.now()
+        obj.save(update_fields=("status", "reviewed_by", "reviewed_at", "updated_at"))
+        if status == PartnerAccessRequest.Status.APPROVED:
+            PartnerStaff.objects.update_or_create(
+                partner=obj.partner,
+                user=obj.user,
+                defaults={
+                    "can_manage_bookings": obj.can_manage_bookings,
+                    "can_verify_records": obj.can_verify_records,
+                    "is_active": True,
+                },
+            )
+        else:
+            PartnerStaff.objects.filter(partner=obj.partner, user=obj.user).update(is_active=False)
+
     def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        self._apply_decision(request, obj, obj.status)
+
+    @admin.action(description="선택한 신청 승인 및 업체 담당자 권한 부여")
+    def approve_selected(self, request, queryset):
+        from django.db import transaction
+
         with transaction.atomic():
-            if obj.status == PartnerAccessRequest.Status.PENDING:
-                obj.reviewed_by = None
-                obj.reviewed_at = None
-            else:
-                obj.reviewed_by = request.user
-                obj.reviewed_at = timezone.now()
-            super().save_model(request, obj, form, change)
-            if obj.status == PartnerAccessRequest.Status.APPROVED:
-                user = obj.user
-                PartnerStaff.objects.update_or_create(
-                    partner=obj.partner,
-                    user=user,
-                    defaults={
-                        "can_manage_bookings": obj.can_manage_bookings,
-                        "can_verify_records": obj.can_verify_records,
-                        "is_active": True,
-                    },
-                )
-            else:
-                PartnerStaff.objects.filter(partner=obj.partner, user=obj.user).update(is_active=False)
+            for obj in queryset.select_related("partner", "user"):
+                self._apply_decision(request, obj, PartnerAccessRequest.Status.APPROVED)
+        self.message_user(request, f"{queryset.count()}건을 승인하고 선택한 업체 담당자로 등록했습니다.", messages.SUCCESS)
+
+    @admin.action(description="선택한 신청 반려")
+    def reject_selected(self, request, queryset):
+        from django.db import transaction
+
+        with transaction.atomic():
+            for obj in queryset.select_related("partner", "user"):
+                self._apply_decision(request, obj, PartnerAccessRequest.Status.REJECTED)
+        self.message_user(request, f"{queryset.count()}건의 신청을 반려했습니다.", messages.SUCCESS)
 
 
 @admin.register(Offer)
@@ -1057,14 +1081,64 @@ from .member_roles import GRADES, assign_member_grade, member_grade
 def grade_action(code):
     @admin.action(description=f"회원 등급을 {GRADES[code]}(으)로 변경")
     def action(modeladmin, request, queryset):
+        partner_form = None
+        if code == "partner":
+            confirming = "confirm_partner_assignment" in request.POST
+            partner_form = PartnerGradeAssignmentForm(request.POST if confirming else None)
+            if not confirming:
+                return TemplateResponse(request, "admin/core/assign_partner_grade.html", {
+                    **modeladmin.admin_site.each_context(request),
+                    "opts": modeladmin.model._meta,
+                    "title": "협력업체 등급 적용",
+                    "form": partner_form,
+                    "selected_members": list(queryset),
+                    "action_name": "set_grade_partner",
+                })
+            if not partner_form.is_valid():
+                return TemplateResponse(request, "admin/core/assign_partner_grade.html", {
+                    **modeladmin.admin_site.each_context(request),
+                    "opts": modeladmin.model._meta,
+                    "title": "협력업체 등급 적용",
+                    "form": partner_form,
+                    "selected_members": list(queryset),
+                    "action_name": "set_grade_partner",
+                })
+        updated = 0
+        rejected = 0
         for user in queryset:
             try:
-                assign_member_grade(request.user, user, code)
+                assignment = {}
+                if code == "partner":
+                    assignment = {
+                        "partner": partner_form.cleaned_data["partner"],
+                        "can_manage_bookings": partner_form.cleaned_data["can_manage_bookings"],
+                        "can_verify_records": partner_form.cleaned_data["can_verify_records"],
+                    }
+                assign_member_grade(request.user, user, code, **assignment)
                 modeladmin.log_change(request, user, f"회원 등급: {GRADES[code]}")
-            except ValidationError as exc:
-                modeladmin.message_user(request, f"{user}: {' '.join(exc.messages)}", level="ERROR")
+                updated += 1
+            except (ValidationError, PermissionDenied) as exc:
+                details = " ".join(exc.messages) if isinstance(exc, ValidationError) else str(exc)
+                modeladmin.message_user(request, f"{user}: {details}", level="ERROR")
+                rejected += 1
+        if updated:
+            modeladmin.message_user(request, f"{updated}명의 회원 등급을 {GRADES[code]}(으)로 변경했습니다.", level=messages.SUCCESS)
+        if rejected:
+            modeladmin.message_user(request, f"{rejected}명은 조건을 충족하지 않아 변경하지 않았습니다. 위 안내를 확인해 주세요.", level=messages.WARNING)
+        if code == "partner" and updated:
+            return HttpResponseRedirect(reverse("admin:auth_user_changelist"))
     action.__name__ = f"set_grade_{code}"
     return action
+
+
+class PartnerGradeAssignmentForm(forms.Form):
+    partner = forms.ModelChoiceField(
+        label="소속 업체",
+        queryset=Partner.objects.filter(is_active=True).order_by("name", "id"),
+        empty_label="업체 선택",
+    )
+    can_manage_bookings = forms.BooleanField(label="예약 관리", required=False, initial=True)
+    can_verify_records = forms.BooleanField(label="정비기록 인증", required=False, initial=True)
 
 
 class NaverProfileInline(admin.StackedInline):
@@ -1185,6 +1259,17 @@ class MemberUserAdmin(AdminCalendarMixin, UserAdmin):
                 .prefetch_related("partner_memberships__partner", "groups")
                 .annotate(_point_balance=Coalesce(Subquery(point_total, output_field=IntegerField()), Value(0))))
     actions = [grade_action(code) for code in GRADES] + ["export_members_csv"]
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if not request.user.is_superuser:
+            actions = {name: value for name, value in actions.items() if not name.startswith("set_grade_")}
+        return actions
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context["member_grade_help"] = True
+        return super().changelist_view(request, extra_context=extra_context)
 
     @admin.display(description="소속 협력업체")
     def display_workplaces(self, obj):
@@ -1324,7 +1409,7 @@ for _model, _label in _MODEL_LABELS.items():
             _field.verbose_name = _FIELD_LABELS[_field.name]
 PartnerStaff._meta.get_field("can_verify_records").help_text = "담당자가 앱에서 QR로 차량을 조회하고 업체 인증 정비기록을 등록할 수 있습니다."
 PartnerStaff._meta.get_field("can_manage_bookings").help_text = "소속 업체의 예약을 확인하고 처리할 수 있습니다."
-PartnerStaff._meta.get_field("is_active").help_text = "담당자와 소속 업체가 모두 활성화되어야 협력업체 등급으로 인식합니다."
+PartnerStaff._meta.get_field("is_active").help_text = "활성화하면 해당 계정에 협력업체 등급을 부여하고 업체 관리자 네이버 로그인을 허용합니다. 회원 등급 목록에서 업체와 담당 권한을 한 번에 지정할 수도 있습니다. 업체별 자료는 연결된 업체만 조회할 수 있습니다."
 PartnerAdminForm.base_fields["service_categories"].label = "서비스 분야"
 admin.site.index_title = "운영 대시보드"
 

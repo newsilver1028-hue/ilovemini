@@ -1,7 +1,8 @@
 {% extends "admin/base_site.html" %}
 {% load i18n admin_urls static admin_list admin_calendar %}
 
-{% block title %}{% if cl.formset and cl.formset.errors %}{% translate "Error:" %} {% endif %}{{ block.super }}{% endblock %}
+{% block title %}{% if cl.formset and cl.formset.errors %}{% translate "Error:" %} {% endif %}{% if is_partner_admin %}{% if cl.opts.model_name == "ledgerentry" %}인증 정비기록{% else %}{{ cl.opts.verbose_name_plural|capfirst }}{% endif %} · 업체 관리자{% else %}{{ block.super }}{% endif %}{% endblock %}
+{% block content_title %}{% if is_partner_admin %}<h1>{% if cl.opts.model_name == "ledgerentry" %}인증 정비기록{% else %}{{ cl.opts.verbose_name_plural|capfirst }}{% endif %}</h1>{% else %}{{ block.super }}{% endif %}{% endblock %}
 {% block extrastyle %}
   {{ block.super }}
   <link rel="stylesheet" href="{% static "admin/css/changelists.css" %}">
@@ -32,7 +33,7 @@
 <div class="breadcrumbs">
 <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
 &rsaquo; <a href="{% url 'admin:app_list' app_label=cl.opts.app_label %}">{{ cl.opts.app_config.verbose_name }}</a>
-&rsaquo; {{ cl.opts.verbose_name_plural|capfirst }}
+&rsaquo; {% if cl.opts.model_name == "ledgerentry" %}인증 정비기록{% else %}{{ cl.opts.verbose_name_plural|capfirst }}{% endif %}
 </div>
 {% endblock %}
 {% endif %}
@@ -115,6 +116,13 @@
     <div class="module{% if cl.has_filters %} filtered{% endif %}" id="changelist">
       <div class="changelist-form-container">
         {% block search %}{% search_form cl %}{% endblock %}
+        {% if member_grade_help %}
+          <aside role="note" style="margin: 12px 0 16px; padding: 12px 16px; border: 1px solid #d9dce2; border-left: 4px solid #c8102e; border-radius: 6px; background: #fff; line-height: 1.65;">
+            <strong>회원 등급 변경</strong>
+            <span> 회원을 선택하고 작업 메뉴에서 등급을 선택한 뒤 ‘적용’을 누르세요. 협력업체 등급은 다음 화면에서 소속 업체와 예약·정비기록 권한을 지정하면 바로 활성화됩니다.</span>
+            <br><span>저장 후 이 목록의 ‘회원 등급’과 ‘소속 협력업체’에서 결과를 확인할 수 있습니다. 일반회원·미니회원으로 변경하면 업체 접근 권한도 비활성화됩니다.</span>
+          </aside>
+        {% endif %}
 
         <form id="changelist-form" method="post"{% if cl.formset and cl.formset.is_multipart %} enctype="multipart/form-data"{% endif %} novalidate>{% csrf_token %}
         {% if cl.formset %}

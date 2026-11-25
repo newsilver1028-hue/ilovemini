@@ -255,4 +255,4 @@ class MemberDisplayTests(TestCase):
         self.assertEqual(response.context["calendar_field_label"], "등록 시각")
         self.assertContains(response, "1,750P 적립")
         self.assertContains(response, "500P 사용")
-        self.assertEqual(response.content.decode().count("class=\\\"partner-calendar partner-calendar--mini admin-mini-calendar\\\""), 1)
+        self.assertEqual(response.content.decode().count('class="partner-calendar partner-calendar--mini admin-mini-calendar"'), 1)

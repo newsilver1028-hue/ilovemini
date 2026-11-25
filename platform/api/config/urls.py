@@ -4,7 +4,7 @@ from core.app_views import AppContentView, ShoppingSearchView, MemberPreferenceV
 from rest_framework_simplejwt.views import TokenRefreshView
 from django.contrib import admin
 from django.urls import include, path
-from django.http import HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
 from django.conf import settings
 from django.views.generic import RedirectView
 from rest_framework.routers import DefaultRouter
@@ -16,6 +16,7 @@ from core.privacy_views import privacy_policy, terms_of_service
 from core.partner_push_views import web_push_subscribe, web_push_unsubscribe, partner_service_worker
 from core.partner_pos_views import partner_pos_event
 from core.media_views import app_content_image, season_banner_image, partner_image
+from core.quote_sharing import public_partner_quote
 
 router = DefaultRouter()
 from core.app_sync import AppSyncView, MemberPointHistoryView
@@ -37,11 +38,20 @@ def public_home(request):
     return HttpResponseRedirect("/privacy/")
 
 
+def robots_txt(request):
+    response = HttpResponse("User-agent: *\nDisallow: /\n", content_type="text/plain; charset=utf-8")
+    response["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
+
+
 urlpatterns = [
+    path("robots.txt", robots_txt, name="robots_txt"),
     path("", public_home, name="public_home"),
     path("partner/", RedirectView.as_view(url="/partner-admin/login/", permanent=False), name="partner_admin_shortcut"),
     path("privacy/", privacy_policy, name="privacy_policy"),
     path("terms/", terms_of_service, name="terms_of_service"),
+    path("q/<uuid:token>/", public_partner_quote, name="public_partner_quote"),
+    path("quote/shared/<uuid:token>/", public_partner_quote),
     path("api/app/content/", AppContentView.as_view(), name="app_content"),
     path("api/media/app-content/<int:pk>/", app_content_image, name="app_content_image"),
     path("api/media/season-banner/<int:pk>/", season_banner_image, name="season_banner_image"),
@@ -77,6 +87,7 @@ urlpatterns = [
     path("api/me/account/", AccountDeletionView.as_view(), name="account_delete"),
     path("api/push/devices/", PushDeviceView.as_view(), name="push_devices"),
     path("api/attendance/", AttendanceView.as_view(), name="attendance"),
+    path("api/v1/onclass/", include("onclass_control.urls")),
     path("api/points/balance/", PartnerPointBalanceView.as_view(), name="partner_point_balance"),
     path("api/points/redemptions/", PartnerPointRedemptionView.as_view(), name="partner_point_redemptions"),
     path("api/points/redemptions/pending/", MemberPointRedemptionView.as_view(), name="member_pending_point_redemption"),

@@ -1,4 +1,11 @@
 {% extends "admin/change_form.html" %}
+{% block form_top %}
+  {{ block.super }}
+  <div class="help" role="note" style="margin:0 0 18px;padding:14px 18px;border-left:4px solid #c82036;background:#f7f7f8;color:#26272a">
+    <strong>연동 방식 안내</strong>
+    <p style="margin:6px 0 0">이 기능은 표준 웹훅 수신기입니다. POS/VAN 제공사 이름만 입력해도 토스·네이버 POS와 자동 연결되는 것은 아닙니다. 실제 결제 동기화에는 해당 단말기 또는 POS 프로그램이 이 서버 규격으로 승인·취소 이벤트를 전송하도록 별도 설정해야 합니다. 카드 결제 승인 기능은 포함하지 않습니다.</p>
+  </div>
+{% endblock %}
 {% block object-tools-items %}
   {% if original %}
     <li>

@@ -1,12 +1,13 @@
 import hashlib
 import secrets
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django import forms
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import F
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse
 from django.urls import path, reverse
 from django.utils import timezone
 from django.conf import settings
@@ -26,6 +27,10 @@ from .models import (
     PartnerPosIntegration,
     PartnerPayment,
     PartnerTaxInvoice,
+    PartnerWorkResource,
+    PartnerServicePreset,
+    PartnerDailyClose,
+    PartnerServiceDuration,
 )
 from .partner_admin import active_staff_for, is_system_admin, partner_admin_site, staff_partners
 
@@ -135,6 +140,122 @@ class PartnerVehicleAdmin(PartnerScopedAdmin):
         return form
 
 
+class PartnerServicePresetForm(forms.ModelForm):
+    class Meta:
+        model = PartnerServicePreset
+        fields = ("partner", "name", "kind", "duration_minutes", "default_quantity", "unit", "default_price_krw", "part", "is_active")
+
+    def clean(self):
+        data = super().clean()
+        partner, part = data.get("partner"), data.get("part")
+        if partner and part and part.partner_id != partner.pk:
+            self.add_error("part", "연결 부품과 협력업체가 일치하지 않습니다.")
+        duration = data.get("duration_minutes")
+        if duration is not None and (duration < 30 or duration > 480 or duration % 30):
+            self.add_error("duration_minutes", "정비 소요시간은 30분 단위, 30~480분으로 입력해 주세요.")
+        return data
+
+
+class PartnerWorkResourceAdmin(PartnerScopedAdmin):
+    list_display = ("partner", "kind", "name", "is_active")
+    list_filter = ("partner", "kind", "is_active")
+    search_fields = ("name", "partner__name", "partner__branch_label")
+    fields = ("partner", "kind", "name", "is_active")
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj:
+            form.base_fields["partner"].disabled = True
+        return form
+
+
+class PartnerServicePresetAdmin(PartnerScopedAdmin):
+    form = PartnerServicePresetForm
+    list_display = ("name", "partner", "kind", "duration_minutes", "default_quantity", "unit", "default_price_krw", "part", "is_active")
+    list_filter = ("partner", "kind", "is_active")
+    search_fields = ("name", "part__name", "part__sku")
+    fields = ("partner", "name", "kind", "duration_minutes", "default_quantity", "unit", "default_price_krw", "part", "is_active")
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj:
+            form.base_fields["partner"].disabled = True
+        return form
+
+    @transaction.atomic
+    def save_model(self, request, obj, form, change):
+        if obj.partner_id not in self.allowed_partner_ids(request):
+            raise PermissionDenied("접근 권한이 없는 업체의 정비 항목입니다.")
+        previous_name = PartnerServicePreset.objects.filter(pk=obj.pk).values_list("name", flat=True).first() if change else None
+        super().save_model(request, obj, form, change)
+        # Reuse the preset's duration for public booking slot calculation.
+        if previous_name and previous_name != obj.name:
+            PartnerServiceDuration.objects.filter(partner_id=obj.partner_id, service_name=previous_name).update(is_active=False)
+        PartnerServiceDuration.objects.update_or_create(
+            partner_id=obj.partner_id, service_name=obj.name,
+            defaults={"duration_minutes": obj.duration_minutes, "is_active": obj.is_active},
+        )
+
+
+class PartnerDailyCloseForm(forms.ModelForm):
+    class Meta:
+        model = PartnerDailyClose
+        fields = ("partner", "business_date", "expected_cash_krw", "counted_cash_krw", "expected_card_krw", "counted_card_krw", "expected_transfer_krw", "counted_transfer_krw", "expected_refund_krw", "counted_refund_krw", "note")
+
+
+class PartnerDailyCloseAdmin(PartnerScopedAdmin):
+    form = PartnerDailyCloseForm
+    list_display = ("business_date", "partner", "expected_cash_krw", "counted_cash_krw", "cash_variance", "expected_card_krw", "counted_card_krw", "card_variance", "expected_transfer_krw", "counted_transfer_krw", "transfer_variance", "expected_refund_krw", "counted_refund_krw", "refund_variance", "closed_by", "closed_at")
+    list_filter = ("partner", "business_date")
+    date_hierarchy = "business_date"
+    fields = ("partner", "business_date", ("expected_cash_krw", "counted_cash_krw"), ("expected_card_krw", "counted_card_krw"), ("expected_transfer_krw", "counted_transfer_krw"), ("expected_refund_krw", "counted_refund_krw"), "note", "closed_by", "closed_at")
+    readonly_fields = ("expected_cash_krw", "expected_card_krw", "expected_transfer_krw", "expected_refund_krw", "closed_by", "closed_at")
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj:
+            form.base_fields["partner"].disabled = True
+            form.base_fields["business_date"].disabled = True
+        return form
+
+    def _variance(self, obj, expected, counted):
+        return getattr(obj, counted) - getattr(obj, expected)
+
+    @admin.display(description="현금 차이")
+    def cash_variance(self, obj):
+        return f"{self._variance(obj, 'expected_cash_krw', 'counted_cash_krw'):+,}원"
+
+    @admin.display(description="카드 차이")
+    def card_variance(self, obj):
+        return f"{self._variance(obj, 'expected_card_krw', 'counted_card_krw'):+,}원"
+
+    @admin.display(description="이체 차이")
+    def transfer_variance(self, obj):
+        return f"{self._variance(obj, 'expected_transfer_krw', 'counted_transfer_krw'):+,}원"
+
+    @admin.display(description="환불 차이")
+    def refund_variance(self, obj):
+        return f"{self._variance(obj, 'expected_refund_krw', 'counted_refund_krw'):+,}원"
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        field = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if field and db_field.name.startswith("expected_"):
+            field.help_text = "POS 승인·취소 웹훅이 도착하면 해당 영업일의 시스템 합계가 다시 계산됩니다. 외부 단말 수납·환불은 실제 정산액에 직접 입력하세요."
+        return field
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            super().save_model(request, obj, form, change)
+            from .partner_accounting import refresh_daily_close_expected
+            refresh_daily_close_expected(obj.partner_id, obj.business_date)
+            obj.refresh_from_db()
+            obj.closed_by = request.user
+        super().save_model(request, obj, form, change)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 class PartStockFilter(admin.SimpleListFilter):
     title = "재고 상태"
     parameter_name = "stock"
@@ -237,17 +358,39 @@ class PartnerStockMovementForm(forms.ModelForm):
         model = PartnerStockMovement
         fields = ("partner", "part", "work_order", "direction", "reason", "quantity", "note")
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Purchases and completed repairs already create stock movements. Prevent
+        # manual entries for these reasons to avoid double-counting inventory.
+        automatic_reasons = {
+            PartnerStockMovement.Reason.PURCHASE,
+            PartnerStockMovement.Reason.REPAIR_USE,
+        }
+        self.fields["reason"].choices = [
+            (value, label)
+            for value, label in self.fields["reason"].choices
+            if value not in automatic_reasons
+        ]
+        self.fields["reason"].help_text = (
+            "매입 입고와 정비 사용 출고는 매입 등록·작업 완료 시 자동 반영됩니다. "
+            "이 화면에서는 수동 조정, 반품, 파손·폐기만 기록하세요."
+        )
+
     def clean(self):
         data = super().clean()
         if data.get("part") and data.get("partner") and data["part"].partner_id != data["partner"].pk:
             self.add_error("part", "부품과 업체가 일치하지 않습니다.")
         if data.get("work_order") and data.get("partner") and data["work_order"].partner_id != data["partner"].pk:
             self.add_error("work_order", "작업과 업체가 일치하지 않습니다.")
-        if data.get("reason") == PartnerStockMovement.Reason.REPAIR_USE:
-            if data.get("direction") != PartnerStockMovement.Direction.OUT:
-                self.add_error("direction", "정비 사용은 재고 출고로 등록해 주세요.")
-            if not data.get("work_order"):
-                self.add_error("work_order", "정비 사용에는 연결 작업을 지정해야 합니다.")
+        part, quantity = data.get("part"), data.get("quantity")
+        if part and quantity and data.get("direction") == PartnerStockMovement.Direction.OUT:
+            # ModelAdmin's POST transaction keeps this lock through save_model.
+            # Re-read after taking the lock so a concurrent outbound movement
+            # becomes a field error rather than a save-time server error.
+            with transaction.atomic():
+                current = PartnerPart.objects.select_for_update().get(pk=part.pk)
+                if quantity > current.stock_quantity:
+                    self.add_error("quantity", f"현재고는 {current.stock_quantity:,}개입니다. 현재고보다 많은 수량을 출고할 수 없습니다.")
         return data
 
 
@@ -320,6 +463,9 @@ partner_admin_site.register(PartnerSupplier, PartnerSupplierAdmin)
 partner_admin_site.register(PartnerPart, PartnerPartAdmin)
 partner_admin_site.register(PartnerCustomer, PartnerCustomerAdmin)
 partner_admin_site.register(PartnerVehicle, PartnerVehicleAdmin)
+partner_admin_site.register(PartnerWorkResource, PartnerWorkResourceAdmin)
+partner_admin_site.register(PartnerServicePreset, PartnerServicePresetAdmin)
+partner_admin_site.register(PartnerDailyClose, PartnerDailyCloseAdmin)
 partner_admin_site.register(PartnerPurchaseLine, PartnerPurchaseAdmin)
 partner_admin_site.register(PartnerStockMovement, PartnerStockMovementAdmin)
 partner_admin_site.register(PartnerFinancialEntry, PartnerFinancialEntryAdmin)
@@ -340,6 +486,17 @@ class PartnerPosIntegrationAdmin(PartnerScopedAdmin):
     @admin.display(description="수신 규격")
     def event_contract(self, obj):
         return 'POST JSON · Authorization: Bearer {토큰} · {"event_id":"거래고유값","work_order_id":123,"status":"approved|cancelled","method":"card|cash|transfer|easy_pay|other","amount_krw":55000,"approval_code":"승인번호","paid_at":"ISO-8601"} · 취소는 승인 거래의 event_id와 work_order_id를 그대로 사용합니다.'
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        field = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if field and db_field.name == "provider_name":
+            field.label = "POS/VAN 제공사 이름"
+            field.help_text = (
+                "업체명 입력만으로 토스·네이버 등 POS가 자동 연결되지는 않습니다. "
+                "해당 POS/VAN 프로그램이 아래 표준 웹훅 규격으로 결제 승인·취소 이벤트를 "
+                "서버에 전송하도록 별도 설정되어야 결제 내역이 반영됩니다. 이 화면은 카드 결제를 처리하지 않습니다."
+            )
+        return field
 
     def get_urls(self):
         return [path("<path:object_id>/rotate-token/", self.admin_site.admin_view(self.rotate_token), name="partner-pos-rotate-token")] + super().get_urls()
@@ -378,11 +535,11 @@ class PartnerPosIntegrationAdmin(PartnerScopedAdmin):
 
 
 class PartnerPaymentAdmin(PartnerScopedAdmin):
-    list_display = ("paid_at", "work_order", "provider_name", "method", "status", "amount_krw", "provider_transaction_id", "approval_code")
+    list_display = ("paid_at", "work_order", "provider_name", "method", "status", "amount_krw", "cancelled_amount_krw", "cancelled_at", "provider_transaction_id", "approval_code")
     list_filter = ("provider_name", "method", "status", "paid_at")
     search_fields = ("provider_transaction_id", "approval_code", "work_order__plate_number", "work_order__customer_name")
     readonly_fields = tuple(field.name for field in PartnerPayment._meta.fields)
-    fields = ("partner", "work_order", "provider_name", "provider_transaction_id", "method", "status", "amount_krw", "approval_code", "paid_at", "created_at")
+    fields = ("partner", "work_order", "provider_name", "provider_transaction_id", "method", "status", "amount_krw", "cancelled_amount_krw", "cancelled_at", "approval_code", "paid_at", "created_at")
 
     def has_add_permission(self, request):
         return False
@@ -395,17 +552,73 @@ class PartnerPaymentAdmin(PartnerScopedAdmin):
 
 
 class PartnerTaxInvoiceForm(forms.ModelForm):
+    items = forms.JSONField(
+        label="품목",
+        required=False,
+        help_text="작업지시에서 불러오거나 아래 표에 품목·수량·단가를 입력하세요. 금액은 수량×단가로 계산됩니다.",
+        widget=forms.Textarea(attrs={"rows": 5, "class": "invoice-items-source", "spellcheck": "false"}),
+    )
+
     class Meta:
         model = PartnerTaxInvoice
         fields = "__all__"
+
+    def clean_items(self):
+        raw_items = self.cleaned_data.get("items") or []
+        if not isinstance(raw_items, list):
+            raise ValidationError("품목은 목록 형식이어야 합니다.")
+        if len(raw_items) > 99:
+            raise ValidationError("품목은 최대 99개까지 입력할 수 있습니다.")
+
+        items = []
+        for index, raw in enumerate(raw_items, start=1):
+            if not isinstance(raw, dict):
+                raise ValidationError(f"{index}번 품목 형식을 확인해 주세요.")
+            description = str(raw.get("description", "")).strip()
+            if not description:
+                continue
+            if len(description) > 100:
+                raise ValidationError(f"{index}번 품목명은 100자 이내로 입력해 주세요.")
+            try:
+                quantity = Decimal(str(raw.get("quantity", "1")))
+                price_value = Decimal(str(raw.get("unit_price_krw", 0)))
+            except (InvalidOperation, TypeError, ValueError):
+                raise ValidationError(f"{index}번 품목의 수량과 단가를 확인해 주세요.")
+            if not quantity.is_finite() or quantity <= 0 or quantity > Decimal("1000000"):
+                raise ValidationError(f"{index}번 품목의 수량은 0보다 큰 값이어야 합니다.")
+            if not price_value.is_finite() or price_value < 0 or price_value != price_value.to_integral_value():
+                raise ValidationError(f"{index}번 품목의 단가는 0 이상의 원 단위로 입력해 주세요.")
+            unit_price = int(price_value)
+            amount = int((quantity * unit_price).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            items.append({
+                "description": description,
+                "quantity": format(quantity.normalize(), "f"),
+                "unit_price_krw": unit_price,
+                "amount_krw": amount,
+            })
+        return items
 
     def clean(self):
         data = super().clean()
         partner, work_order = data.get("partner"), data.get("work_order")
         if partner and work_order and partner.pk != work_order.partner_id:
             self.add_error("work_order", "정비 작업과 협력업체가 일치하지 않습니다.")
-        if data.get("total_krw") != (data.get("supply_cost_krw", 0) + data.get("tax_krw", 0)):
+
+        supply = data.get("supply_cost_krw")
+        tax = data.get("tax_krw")
+        total = data.get("total_krw")
+        if supply is not None and tax is not None and total is not None and total != supply + tax:
             self.add_error("total_krw", "합계는 공급가액과 세액의 합이어야 합니다.")
+        if supply is not None and tax is not None:
+            tax_type = data.get("tax_type")
+            if tax_type in (PartnerTaxInvoice.TaxType.EXEMPT, PartnerTaxInvoice.TaxType.ZERO) and tax != 0:
+                self.add_error("tax_krw", "면세·영세 계산서의 세액은 0원이어야 합니다.")
+            elif tax_type == PartnerTaxInvoice.TaxType.TAXABLE and total is not None:
+                expected_supply = int((Decimal(total) / Decimal("1.1")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+                expected_tax = total - expected_supply
+                if supply != expected_supply or tax != expected_tax:
+                    self.add_error("tax_krw", f"과세 금액 기준 세액은 {expected_tax:,}원이어야 합니다.")
+
         for field in ("seller_business_number", "buyer_business_number"):
             value = "".join(char for char in data.get(field, "") if char.isdigit())
             if value and len(value) != 10:
@@ -432,15 +645,61 @@ class PartnerTaxInvoiceAdmin(PartnerScopedAdmin):
         ("seller_business_number", "seller_name"), ("seller_representative", "seller_email"), "seller_address",
         ("buyer_business_number", "buyer_name"), ("buyer_representative", "buyer_email"), "buyer_address",
         ("supply_cost_krw", "tax_krw", "total_krw"), "items",
-        ("provider_name", "provider_user_id", "provider_document_id"), "provider_error_code", "issued_at", "created_by", "created_at",
+        ("provider_name", "provider_user_id", "provider_document_id"), "provider_error_code", "issued_at", "created_by_display", "created_at",
     )
-    readonly_fields = ("status", "provider_error_code", "issued_at", "created_by", "created_at")
+    readonly_fields = ("status", "provider_error_code", "issued_at", "created_by_display", "created_at")
+
+    @admin.display(description="등록자")
+    def created_by_display(self, obj):
+        if not obj or not obj.pk:
+            return "저장 시 로그인 계정 자동 기록"
+        return obj.created_by or "기록 없음"
 
     def has_change_permission(self, request, obj=None):
         return self.has_view_permission(request, obj) and (obj is None or obj.status == PartnerTaxInvoice.Status.DRAFT)
 
     def get_urls(self):
-        return [path("<path:object_id>/issue/", self.admin_site.admin_view(self.issue_invoice), name="partner-taxinvoice-issue")] + super().get_urls()
+        custom_urls = [
+            path("tax-invoice-work-orders/", self.admin_site.admin_view(self.work_order_options), name="partner-taxinvoice-work-orders"),
+            path("<path:object_id>/issue/", self.admin_site.admin_view(self.issue_invoice), name="partner-taxinvoice-issue"),
+        ]
+        return custom_urls + super().get_urls()
+
+    def work_order_options(self, request):
+        if request.method != "GET":
+            return HttpResponseNotAllowed(["GET"])
+        try:
+            partner_id = int(request.GET.get("partner_id", ""))
+        except (TypeError, ValueError):
+            return JsonResponse({"error": "업체를 먼저 선택해 주세요."}, status=400)
+        if not Partner.objects.filter(pk=partner_id, pk__in=self.allowed_partner_ids(request)).exists():
+            return JsonResponse({"error": "접근 권한이 없는 업체입니다."}, status=403)
+
+        orders = PartnerWorkOrder.objects.filter(partner_id=partner_id).select_related(
+            "customer"
+        ).prefetch_related("lines").order_by("-pk")
+        results = []
+        for order in orders:
+            vehicle = order.plate_number or order.vehicle_model or "차량 미등록"
+            lines = [{
+                "description": line.description,
+                "quantity": str(line.quantity),
+                "unit_price_krw": line.unit_price_krw,
+                "amount_krw": line.amount_krw,
+            } for line in order.lines.all()]
+            total = order.final_total_krw or order.quoted_total_krw
+            results.append({
+                "id": order.pk,
+                "label": f"WO-{order.pk} · {vehicle} · {order.get_status_display()}",
+                "buyer_name": order.customer.name if order.customer_id else order.customer_name,
+                "buyer_business_number": order.customer.business_number if order.customer_id else "",
+                "buyer_representative": "",
+                "buyer_email": order.customer.email if order.customer_id else "",
+                "buyer_address": order.customer.address if order.customer_id else "",
+                "total_krw": total,
+                "items": lines,
+            })
+        return JsonResponse({"work_orders": results})
 
     def issue_invoice(self, request, object_id):
         invoice = self.get_object(request, object_id)
@@ -459,6 +718,10 @@ class PartnerTaxInvoiceAdmin(PartnerScopedAdmin):
         }
         if request.method != "POST":
             return render(request, "admin/core/partnertaxinvoice/issue_confirm.html", confirmation_context)
+        item_rows = invoice.items if isinstance(invoice.items, list) else []
+        if not any(isinstance(item, dict) and str(item.get("description", "")).strip() for item in item_rows):
+            self.message_user(request, "실제 발행 전에 품목을 한 줄 이상 입력해 주세요.", level="error")
+            return HttpResponseRedirect(confirmation_context["change_url"])
         if not getattr(settings, "POPBILL_LINK_ID", "") or not getattr(settings, "POPBILL_SECRET_KEY", ""):
             self.message_user(request, "Render 환경변수 POPBILL_LINK_ID와 POPBILL_SECRET_KEY를 먼저 설정해 주세요.", level="error")
             return HttpResponseRedirect(confirmation_context["change_url"])

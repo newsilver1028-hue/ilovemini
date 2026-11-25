@@ -15,6 +15,7 @@ from .models import (
     PartnerBooking,
     PartnerReview,
     PartnerStaff,
+    PartnerAccessRequest,
     Vehicle,
     WebPushSubscription,
 )
@@ -72,7 +73,7 @@ class PartnerPortalTests(TestCase):
             NAVER_CLIENT_SECRET="client-secret",
             NAVER_REDIRECT_URI="https://example.test/api/auth/naver/callback/",
         ):
-            response = client.get(reverse("partner_naver_start"))
+            response = client.get(reverse("partner_naver_start"), {"partner_id": self.partner.pk})
             self.assertEqual(response.status_code, 302)
             self.assertIn("nid.naver.com/oauth2.0/authorize", response["Location"])
             state = parse_qs(urlparse(response["Location"]).query)["state"][0]
@@ -110,7 +111,7 @@ class PartnerPortalTests(TestCase):
             NAVER_CLIENT_SECRET="client-secret",
             NAVER_REDIRECT_URI="https://example.test/api/auth/naver/callback/",
         ):
-            start_response = client.get(reverse("partner_naver_start"))
+            start_response = client.get(reverse("partner_naver_start"), {"partner_id": self.partner.pk})
             state = parse_qs(urlparse(start_response["Location"]).query)["state"][0]
             with patch("core.auth_views.exchange_code", return_value="access-token"), patch(
                 "core.auth_views.get_profile", return_value={"id": "unknown-subject"}
@@ -121,7 +122,10 @@ class PartnerPortalTests(TestCase):
             "https://admin.ilovemini.co.kr/partner-admin/login/?naver_error=not_registered",
             fetch_redirect_response=False,
         )
-        self.assertFalse(get_user_model().objects.filter(username__startswith="naver_").exclude(pk=self.user.pk).exists())
+        self.assertNotIn("_auth_user_id", client.session)
+        self.assertFalse(PartnerAccessRequest.objects.filter(
+            partner=self.partner, user__naver_identity__subject="unknown-subject",
+        ).exists())
 
     def test_partner_staff_sees_only_own_partner_and_cannot_delete(self):
         request = self.request_for_partner()
@@ -135,7 +139,12 @@ class PartnerPortalTests(TestCase):
         self.assertFalse(ledger_admin.has_change_permission(request))
         self.assertEqual(
             {model._meta.model_name for model in partner_admin_site._registry},
-            {"partnerbooking", "ledgerentry", "maintenancerecommendation", "serviceestimate"},
+            {"partnerbooking", "ledgerentry", "maintenancerecommendation", "serviceestimate",
+             "partnerworkorder", "partnerquoteshare", "partnercustomer", "partnervehicle",
+             "partnerworkresource", "partnerservicepreset", "partnerdailyclose",
+             "partnersupplier", "partnerpart", "partnerpurchaseline", "partnerstockmovement",
+             "partnerfinancialentry", "partnerposintegration", "partnerpayment", "partnertaxinvoice",
+             "partnerweeklyschedule", "partnerscheduleblock", "partnerserviceduration", "partnerscheduleexception"},
         )
 
     def test_direct_delete_url_is_denied_for_partner_user(self):
@@ -172,7 +181,7 @@ class PartnerPortalTests(TestCase):
         self.assertContains(response, "차량번호")
         self.assertContains(response, "12가3456")
         self.assertContains(response, "정비기록 미니 캘린더")
-        self.assertContains(response, "인증 정비기록 조회")
+        self.assertEqual(response.context["title"], "인증 정비기록 조회")
         self.assertNotContains(response, "보려면 기록을 선택")
 
     def test_inactive_membership_is_denied(self):
@@ -185,7 +194,8 @@ class PartnerPortalTests(TestCase):
         regular_page = client.get(reverse("admin:login"))
         self.assertEqual(partner_page.status_code, 200)
         self.assertEqual(regular_page.status_code, 200)
-        self.assertContains(partner_page, "네이버 아이디로 협력업체 로그인")
+        self.assertContains(partner_page, "네이버 아이디로 로그인")
+        self.assertContains(partner_page, "승인 전에는 업체 자료를 볼 수 없습니다.")
         self.assertContains(regular_page, "협력업체 네이버 로그인")
         self.assertContains(regular_page, 'id="login-form"')
 
@@ -205,6 +215,37 @@ class PartnerPortalTests(TestCase):
         self.assertNotContains(response, "naver-subject-1")
         self.assertContains(response, "예약대장 엑셀 다운로드")
         self.assertNotContains(response, "다른 업체")
+
+    def test_calendar_status_filter_still_detects_conflicts_with_hidden_statuses(self):
+        from datetime import timedelta
+
+        confirmed = PartnerBooking.objects.create(
+            customer=self.other_user,
+            partner=self.partner,
+            vehicle=self.own_vehicle,
+            scheduled_at=self.booking.scheduled_at + timedelta(minutes=30),
+            duration_minutes=60,
+            service_type="확정 정비",
+            contact_phone="010-1234-5678",
+            status=PartnerBooking.Status.CONFIRMED,
+        )
+        client = Client()
+        client.force_login(self.user)
+        year, month = self.booking.scheduled_at.strftime("%Y-%m").split("-")
+        response = client.get(
+            reverse("partner_admin:core_partnerbooking_changelist"),
+            {"scheduled_at__year": year, "scheduled_at__month": month, "status": PartnerBooking.Status.REQUESTED},
+        )
+        self.assertEqual(response.status_code, 200)
+        visible_events = [
+            event
+            for week in response.context["partner_calendar_weeks"]
+            for cell in week
+            for event in cell["events"]
+        ]
+        self.assertEqual(len(visible_events), 1)
+        self.assertTrue(visible_events[0]["has_conflict"])
+        self.assertNotIn(confirmed.service_type, str(visible_events))
 
     def test_partner_booking_export_is_xlsx_and_only_contains_assigned_partner_rows(self):
         client = Client()

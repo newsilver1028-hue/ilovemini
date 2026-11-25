@@ -1,12 +1,14 @@
 from django.contrib import admin
+from django.contrib import messages
 from django.contrib.admin import AdminSite
+from django import forms
 from django.db.models import F, Q, Sum
 from django.db import transaction
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
-from django.utils.html import format_html_join
+from django.utils.html import format_html, format_html_join
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
@@ -18,14 +20,30 @@ from .models import (
     LedgerEvidence,
     Partner,
     PartnerBooking,
+    PartnerServiceDuration,
+    PartnerWeeklySchedule,
+    PartnerScheduleException,
+    PartnerScheduleBlock,
     PartnerStaff,
     PartnerWorkOrder,
     PartnerPart,
     PartnerFinancialEntry,
     PartnerPurchaseLine,
     ServiceEstimate,
+    PartnerQuoteShare,
+    PartnerWorkResource,
+    PartnerServicePreset,
+    PartnerDailyClose,
+    PartnerCustomer,
+    PartnerVehicle,
+    PartnerSupplier,
+    PartnerStockMovement,
+    PartnerPayment,
+    PartnerTaxInvoice,
+    PartnerWorkOrderLine,
 )
 from .member_display import member_nickname
+from .quote_sharing import create_quote_share, estimate_quote_context, work_order_quote_context
 
 
 def active_staff_for(request):
@@ -62,10 +80,14 @@ class PartnerAdminSite(AdminSite):
     login_template = "core/partner_admin_login.html"
     site_url = None
 
+    def login(self, request, extra_context=None):
+        extra_context = dict(extra_context or {})
+        extra_context["partner_login_options"] = Partner.objects.filter(is_active=True)
+        return super().login(request, extra_context)
+
     def each_context(self, request):
         context = super().each_context(request)
         context["is_partner_admin"] = True
-        context["partner_application_options"] = Partner.objects.filter(is_active=True).order_by("name", "branch_label")
         context["partner_web_push_public_key"] = (
             getattr(settings, "WEB_PUSH_VAPID_PUBLIC_KEY", "") if self.has_permission(request) else ""
         )
@@ -77,9 +99,7 @@ class PartnerAdminSite(AdminSite):
             and request.user.is_active
             and (
                 is_system_admin(request)
-                or active_staff_for(request).filter(
-                    Q(can_manage_bookings=True) | Q(can_verify_records=True)
-                ).exists()
+                or active_staff_for(request).exists()
             )
         )
 
@@ -87,12 +107,20 @@ class PartnerAdminSite(AdminSite):
         app_list = super().get_app_list(request, app_label)
         names = {
             "PartnerBooking": "업체 예약",
+            "PartnerServiceDuration": "정비 항목별 작업 시간",
+            "PartnerWeeklySchedule": "주간 예약 운영시간",
+            "PartnerScheduleException": "날짜별 일정 변경·휴무",
+            "PartnerScheduleBlock": "임시 예약 차단",
             "PartnerWorkOrder": "정비 접수·작업지시",
+            "PartnerWorkResource": "정비사·작업대",
+            "PartnerServicePreset": "표준 정비 항목·공임",
+            "PartnerDailyClose": "일일 매출 마감",
             "PartnerCustomer": "고객 대장",
             "PartnerVehicle": "업체 차량 대장",
             "PartnerPosIntegration": "POS 연동 설정",
             "PartnerPayment": "POS 결제 내역",
             "PartnerTaxInvoice": "전자세금계산서 발행 준비",
+            "PartnerQuoteShare": "견적 링크 관리",
             "LedgerEntry": "인증 정비기록",
         }
         for app in app_list:
@@ -120,6 +148,21 @@ class PartnerAdminSite(AdminSite):
                 name="partner-estimate-print",
             ),
             path(
+                "quotes/work-orders/<int:work_order_id>/share/",
+                self.admin_view(self.share_work_order_quote),
+                name="partner-workorder-quote-share",
+            ),
+            path(
+                "quotes/estimates/<int:estimate_id>/share/",
+                self.admin_view(self.share_service_estimate),
+                name="partner-estimate-quote-share",
+            ),
+            path(
+                "settings/kakao-channel/",
+                self.admin_view(self.kakao_channel_settings),
+                name="partner-kakao-channel-settings",
+            ),
+            path(
                 "exports/bookings.xlsx",
                 self.admin_view(self.export_bookings),
                 name="partner-booking-export",
@@ -129,6 +172,11 @@ class PartnerAdminSite(AdminSite):
                 self.admin_view(self.export_maintenance_records),
                 name="partner-maintenance-export",
             ),
+            path(
+                "exports/workshop-data.xlsx",
+                self.admin_view(self.export_workshop_data),
+                name="partner-workshop-export",
+            ),
             path("reports/", self.admin_view(self.operations_report), name="partner-operations-report"),
             path(
                 "ledger/<int:entry_id>/evidence/<int:evidence_id>/",
@@ -136,6 +184,14 @@ class PartnerAdminSite(AdminSite):
                 name="ledger-evidence",
             ),
         ] + super().get_urls()
+
+    @method_decorator(never_cache)
+    def app_index(self, request, app_label, extra_context=None):
+        # The default app index extends the global operations dashboard, whose
+        # point/member URLs do not exist in the scoped partner AdminSite.
+        # Validate the requested application and reuse the partner dashboard.
+        self.get_app_list(request, app_label)
+        return self.index(request, extra_context)
 
     @method_decorator(never_cache)
     def index(self, request, extra_context=None):
@@ -149,6 +205,13 @@ class PartnerAdminSite(AdminSite):
         partner_ids = staff_partners(request, booking=True)
         bookings = PartnerBooking.objects.filter(partner_id__in=partner_ids)
         orders = PartnerWorkOrder.objects.filter(partner_id__in=partner_ids).select_related("partner", "booking", "vehicle")
+        partners_without_weekly_hours = Partner.objects.filter(
+            pk__in=partner_ids, is_active=True
+        ).exclude(
+            pk__in=PartnerWeeklySchedule.objects.filter(
+                partner_id__in=partner_ids, is_closed=False
+            ).values("partner_id")
+        ).count()
         today = timezone.localdate()
         active_statuses = [
             PartnerWorkOrder.Status.RECEIVED,
@@ -164,6 +227,7 @@ class PartnerAdminSite(AdminSite):
             "can_verify_records": can_verify_records,
             "today_bookings": bookings.filter(scheduled_at__date=today).count(),
             "booking_requests": bookings.filter(status=PartnerBooking.Status.REQUESTED).count(),
+            "partners_without_weekly_hours": partners_without_weekly_hours,
             "active_orders": orders.filter(status__in=active_statuses).count(),
             "awaiting_approval": orders.filter(status=PartnerWorkOrder.Status.WAITING_APPROVAL).count(),
             "low_stock_parts": PartnerPart.objects.filter(partner_id__in=partner_ids, is_active=True, stock_quantity__lte=F("reorder_level")).count(),
@@ -172,6 +236,7 @@ class PartnerAdminSite(AdminSite):
             "recent_orders": orders.order_by("-updated_at", "-pk")[:8],
             "today": today,
         }
+        context["kakao_channel_settings_url"] = reverse("partner_admin:partner-kakao-channel-settings")
         # Surface urgent work in one tenant-scoped queue so staff can act without
         # searching across separate booking and repair lists.
         now = timezone.now()
@@ -187,8 +252,8 @@ class PartnerAdminSite(AdminSite):
                 queue.append({
                     "priority": priority, "sort_at": row.updated_at, "title": title,
                     "instruction": instruction,
-                    "primary": row.plate_number or row.vehicle_model or row.customer_name or "차량 미입력",
-                    "secondary": f"{row.customer_name or '고객 미입력'} · {row.updated_at:%m-%d %H:%M} 변경",
+                    "primary": " · ".join(value for value in (row.plate_number, row.vehicle_model) if value) or "차량 정보 미입력",
+                    "secondary": f"{row.contact_phone or '연락처 미등록'} · {row.updated_at:%m-%d %H:%M} 변경",
                     "url": reverse("partner_admin:core_partnerworkorder_change", args=[row.pk]),
                     "status": row.status,
                 })
@@ -201,14 +266,41 @@ class PartnerAdminSite(AdminSite):
                 "priority": 2, "sort_at": booking.requested_at,
                 "title": "예약 요청 24시간 초과",
                 "instruction": "고객에게 예약 가능 여부 회신",
-                "primary": booking.vehicle.model_name if booking.vehicle else booking.service_type,
-                "secondary": f"{member_nickname(booking.customer)} · {booking.requested_at:%m-%d %H:%M} 요청",
+                "primary": " · ".join(value for value in (
+                    booking.vehicle.plate_number if booking.vehicle else "",
+                    booking.vehicle.model_name if booking.vehicle else booking.service_type,
+                ) if value) or "차량 정보 미입력",
+                "secondary": f"{booking.contact_phone or '연락처 미등록'} · {booking.requested_at:%m-%d %H:%M} 요청",
                 "url": reverse("partner_admin:core_partnerbooking_change", args=[booking.pk]),
                 "status": "booking",
             })
         queue.sort(key=lambda item: (item["priority"], item["sort_at"]))
         context["partner_dashboard"]["action_queue"] = queue[:12]
         return render(request, self.index_template, context)
+
+    def kakao_channel_settings(self, request):
+        from urllib.parse import urlparse
+        partner_ids = staff_partners(request, booking=True)
+        partners = Partner.objects.filter(pk__in=partner_ids, is_active=True).order_by("name", "branch_label")
+        selected_id = request.POST.get("partner_id") if request.method == "POST" else request.GET.get("partner")
+        partner = partners.filter(pk=selected_id).first() if selected_id else partners.first()
+        if not partner:
+            raise PermissionDenied
+        if request.method == "POST":
+            raw_url = request.POST.get("kakao_channel_url", "").strip()
+            parsed = urlparse(raw_url) if raw_url else None
+            if raw_url and (parsed.scheme != "https" or parsed.hostname not in {"pf.kakao.com", "open.kakao.com"}):
+                messages.error(request, "카카오 채널의 HTTPS 주소를 입력해 주세요. (pf.kakao.com 또는 open.kakao.com)")
+            else:
+                partner.kakao_channel_url = raw_url
+                partner.save(update_fields=["kakao_channel_url"])
+                messages.success(request, "업체 카카오톡 채널 주소를 저장했습니다.")
+                from django.shortcuts import redirect
+                return redirect(f"{reverse('partner_admin:partner-kakao-channel-settings')}?partner={partner.pk}")
+        return render(request, "core/partner_kakao_channel_settings.html", {
+            **self.each_context(request), "title": "카카오톡 채널 설정", "partners": partners,
+            "selected_partner": partner,
+        })
 
     def print_work_order_document(self, request, work_order_id, document_type=None, **kwargs):
         document_type = document_type or kwargs.get("document_type")
@@ -225,43 +317,17 @@ class PartnerAdminSite(AdminSite):
             pk=work_order_id,
             partner_id__in=staff_partners(request, booking=True),
         )
-        line_items = [
-            {"title": line.description, "amount_krw": line.amount_krw, "quantity": line.quantity, "unit": line.unit, "unit_price_krw": line.unit_price_krw}
-            for line in work_order.lines.all()
-        ]
-        total = work_order.final_total_krw if document_type in {"repair-statement", "receipt"} else (
-            work_order.quoted_total_krw or sum(
-                item.get("amount_krw", 0) for item in work_order.items
-                if isinstance(item, dict) and type(item.get("amount_krw")) is int
-            )
+        context = work_order_quote_context(work_order, document_type)
+        if document_type == "quote":
+            context["share_endpoint"] = reverse("partner_admin:partner-workorder-quote-share", args=[work_order.pk])
+        return render(request, "core/partner_quote_print.html", context)
+
+    def share_work_order_quote(self, request, work_order_id):
+        work_order = get_object_or_404(
+            PartnerWorkOrder.objects.select_related("partner"), pk=work_order_id,
+            partner_id__in=staff_partners(request, booking=True),
         )
-        if line_items and document_type not in {"repair-statement", "receipt"}:
-            total = work_order.quoted_total_krw or sum(item["amount_krw"] for item in line_items)
-        customer_name = work_order.customer_name or (work_order.customer.name if work_order.customer else "")
-        contact_phone = work_order.contact_phone or (work_order.customer.phone if work_order.customer else "")
-        vehicle_model = work_order.vehicle_model or (work_order.partner_vehicle.model_name if work_order.partner_vehicle else (work_order.vehicle.model_name if work_order.vehicle else "미입력"))
-        plate_number = work_order.plate_number or (work_order.partner_vehicle.plate_number if work_order.partner_vehicle else (work_order.vehicle.plate_number if work_order.vehicle else "미입력"))
-        return render(request, "core/partner_quote_print.html", {
-            "document_title": document_types[document_type],
-            "document_type": document_type,
-            "document_number": f"WO-{work_order.created_at:%y%m%d}-{work_order.pk:05d}",
-            "issued_at": work_order.updated_at,
-            "partner": work_order.partner,
-            "customer_name": customer_name,
-            "contact_phone": contact_phone,
-            "vehicle_model": vehicle_model,
-            "plate_number": plate_number,
-            "odometer_km": work_order.odometer_km,
-            "customer_concern": work_order.customer_concern,
-            "inspection_notes": work_order.inspection_notes,
-            "items": line_items or (work_order.items if isinstance(work_order.items, list) else []),
-            "total_krw": total,
-            "paid_krw": work_order.paid_amount_krw,
-            "balance_krw": max(0, total - work_order.paid_amount_krw),
-            "work_notes": work_order.work_notes,
-            "note": work_order.customer_message,
-            "status": work_order.get_status_display(),
-        })
+        return create_quote_share(request, work_order=work_order)
 
     def operations_report(self, request):
         today = timezone.localdate()
@@ -279,6 +345,16 @@ class PartnerAdminSite(AdminSite):
             partner_id__in=partner_ids, kind=PartnerFinancialEntry.Kind.EXPENSE,
             occurred_at__year=report_month.year, occurred_at__month=report_month.month,
         ).aggregate(total=Sum("amount_krw"))["total"] or 0
+        pos_payments = PartnerPayment.objects.filter(
+            partner_id__in=partner_ids, status=PartnerPayment.Status.APPROVED,
+            paid_at__year=report_month.year, paid_at__month=report_month.month,
+        )
+        pos_income = pos_payments.aggregate(total=Sum("amount_krw"))["total"] or 0
+        pos_refunds = PartnerPayment.objects.filter(
+            partner_id__in=partner_ids,
+            cancelled_at__year=report_month.year,
+            cancelled_at__month=report_month.month,
+        ).aggregate(total=Sum("cancelled_amount_krw"))["total"] or 0
         work_orders = PartnerWorkOrder.objects.filter(
             partner_id__in=partner_ids, created_at__year=report_month.year,
             created_at__month=report_month.month,
@@ -293,6 +369,9 @@ class PartnerAdminSite(AdminSite):
             "income": income,
             "expenses": expenses,
             "net_cash": income - expenses,
+            "pos_income": pos_income,
+            "pos_refunds": pos_refunds,
+            "pos_payment_count": pos_payments.count(),
             "receivable": receivable,
             "stock_value": stock_value,
             "completed_orders": work_orders.filter(status=PartnerWorkOrder.Status.COMPLETED).count(),
@@ -301,6 +380,7 @@ class PartnerAdminSite(AdminSite):
                 partner_id__in=partner_ids, occurred_at__year=report_month.year,
                 occurred_at__month=report_month.month,
             ).select_related("partner", "work_order")[:20],
+            "recent_pos_payments": pos_payments.select_related("partner", "work_order").order_by("-paid_at", "-pk")[:20],
             "recent_purchases": PartnerPurchaseLine.objects.filter(
                 partner_id__in=partner_ids, purchased_at__year=report_month.year,
                 purchased_at__month=report_month.month,
@@ -317,25 +397,16 @@ class PartnerAdminSite(AdminSite):
             pk=estimate_id,
             booking__partner_id__in=staff_partners(request, booking=True),
         )
-        booking = estimate.booking
-        customer_name = member_nickname(booking.customer)
-        return render(request, "core/partner_quote_print.html", {
-            "document_title": "정비 견적서",
-            "document_number": f"EST-{booking.pk:06d}-{estimate.revision:02d}",
-            "issued_at": estimate.created_at,
-            "partner": booking.partner,
-            "customer_name": customer_name,
-            "contact_phone": booking.contact_phone,
-            "vehicle_model": booking.vehicle.model_name if booking.vehicle else "미입력",
-            "plate_number": booking.vehicle.plate_number if booking.vehicle else "미입력",
-            "odometer_km": booking.vehicle.current_odometer_km if booking.vehicle else None,
-            "customer_concern": booking.customer_note,
-            "inspection_notes": "",
-            "items": estimate.items if isinstance(estimate.items, list) else [],
-            "total_krw": estimate.total_krw,
-            "note": estimate.note,
-            "status": estimate.get_status_display(),
-        })
+        context = estimate_quote_context(estimate)
+        context["share_endpoint"] = reverse("partner_admin:partner-estimate-quote-share", args=[estimate.pk])
+        return render(request, "core/partner_quote_print.html", context)
+
+    def share_service_estimate(self, request, estimate_id):
+        estimate = get_object_or_404(
+            ServiceEstimate.objects.select_related("booking__partner"), pk=estimate_id,
+            booking__partner_id__in=staff_partners(request, booking=True),
+        )
+        return create_quote_share(request, estimate=estimate)
 
     @staticmethod
     def _excel_response(filename, title, headers, rows):
@@ -456,6 +527,105 @@ class PartnerAdminSite(AdminSite):
             rows,
         )
 
+    def export_workshop_data(self, request):
+        """Download a tenant-scoped workbook of operational data for backup/migration."""
+        if not is_system_admin(request) and not active_staff_for(request).filter(can_manage_bookings=True).exists():
+            raise Http404
+        partner_ids = list(staff_partners(request, booking=True))
+        from io import BytesIO
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill
+        from openpyxl.utils import get_column_letter
+
+        workbook = Workbook()
+        workbook.remove(workbook.active)
+
+        def add_sheet(title, headers, queryset, row_builder):
+            sheet = workbook.create_sheet(title[:31])
+            sheet.append(headers)
+            for obj in queryset.iterator(chunk_size=500):
+                row = row_builder(obj)
+                sheet.append([("'" + value) if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t") else value for value in row])
+            sheet.freeze_panes = "A2"
+            sheet.auto_filter.ref = sheet.dimensions
+            sheet.row_dimensions[1].height = 24
+            for cell in sheet[1]:
+                cell.font = Font(name="맑은 고딕", bold=True, color="FFFFFF")
+                cell.fill = PatternFill("solid", fgColor="B3213B")
+            for column in sheet.columns:
+                width = min(max(max((len(str(cell.value or "")) for cell in column), default=8) + 2, 12), 42)
+                sheet.column_dimensions[get_column_letter(column[0].column)].width = width
+                for cell in column[1:]:
+                    cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+        add_sheet("고객", ["업체", "고객명", "연락처", "이메일", "주소", "사업자번호", "메모", "관리 상태", "등록일"],
+            PartnerCustomer.objects.filter(partner_id__in=partner_ids).select_related("partner").order_by("partner_id", "pk"),
+            lambda x: [x.partner.name, x.name, x.phone, x.email, x.address, x.business_number, x.notes, x.is_active, x.created_at.strftime("%Y-%m-%d")])
+        add_sheet("차량", ["업체", "고객", "연락처", "차량번호", "제조사", "차종", "연식", "차대번호", "최초등록일", "주행거리 km", "메모"],
+            PartnerVehicle.objects.filter(partner_id__in=partner_ids).select_related("partner", "customer").order_by("partner_id", "pk"),
+            lambda x: [x.partner.name, x.customer.name, x.customer.phone, x.plate_number, x.manufacturer, x.model_name, x.model_year or "", x.vin, x.first_registration_date.isoformat() if x.first_registration_date else "", x.current_odometer_km or "", x.notes])
+        add_sheet("부품재고", ["업체", "관리번호", "부품번호", "부품명", "제조사", "단위", "위치", "매입단가", "판매단가", "현재고", "재주문 기준", "사용"],
+            PartnerPart.objects.filter(partner_id__in=partner_ids).select_related("partner").order_by("partner_id", "pk"),
+            lambda x: [x.partner.name, x.sku, x.part_number, x.name, x.maker, x.unit, x.location, x.purchase_price_krw, x.sale_price_krw, x.stock_quantity, x.reorder_level, x.is_active])
+        add_sheet("작업지시", ["작업번호", "업체", "접수일", "차량번호", "차량", "고객", "연락처", "주행거리 km", "상태", "견적상태", "견적금액", "최종금액", "수납", "작업자", "요청", "진단", "작업내용"],
+            PartnerWorkOrder.objects.filter(partner_id__in=partner_ids).select_related("partner").order_by("partner_id", "pk"),
+            lambda x: [f"WO-{x.created_at:%y%m%d}-{x.pk:05d}", x.partner.name, x.created_at.strftime("%Y-%m-%d %H:%M"), x.plate_number, x.vehicle_model, x.customer_name, x.contact_phone, x.odometer_km or "", x.get_status_display(), x.get_quote_status_display(), x.quoted_total_krw, x.final_total_krw, x.paid_amount_krw, x.technician_name, x.customer_concern, x.inspection_notes, x.work_notes])
+        add_sheet("정비항목", ["작업번호", "유형", "항목", "수량", "단위", "단가", "금액", "재고 부품"],
+            PartnerWorkOrderLine.objects.filter(work_order__partner_id__in=partner_ids).select_related("work_order", "part").order_by("work_order_id", "pk"),
+            lambda x: [x.work_order_id, x.get_kind_display(), x.description, str(x.quantity), x.unit, x.unit_price_krw, x.amount_krw, x.part.name if x.part_id else ""])
+        add_sheet("매입", ["업체", "매입일", "전표", "공급처", "부품", "수량", "단가", "합계", "지불", "미지불", "메모"],
+            PartnerPurchaseLine.objects.filter(partner_id__in=partner_ids).select_related("partner", "supplier", "part").order_by("partner_id", "pk"),
+            lambda x: [x.partner.name, x.purchased_at.isoformat(), x.invoice_number, x.supplier.name, x.part.name, x.quantity, x.unit_price_krw, x.total_krw, x.paid_krw, max(0, x.total_krw-x.paid_krw), x.note])
+        add_sheet("재고이동", ["처리일", "업체", "부품", "방향", "사유", "수량", "처리후 재고", "작업번호", "메모"],
+            PartnerStockMovement.objects.filter(partner_id__in=partner_ids).select_related("partner", "part", "work_order").order_by("partner_id", "pk"),
+            lambda x: [x.created_at.strftime("%Y-%m-%d %H:%M"), x.partner.name, x.part.name, x.get_direction_display(), x.get_reason_display(), x.quantity, x.balance_after, x.work_order_id or "", x.note])
+        add_sheet("입금경비", ["업체", "처리일", "구분", "항목", "금액", "수단", "상대방", "작업번호", "메모"],
+            PartnerFinancialEntry.objects.filter(partner_id__in=partner_ids).select_related("partner", "work_order").order_by("partner_id", "pk"),
+            lambda x: [x.partner.name, x.occurred_at.isoformat(), x.get_kind_display(), x.category, x.amount_krw, x.get_payment_method_display() if x.payment_method else "", x.counterparty, x.work_order_id or "", x.note])
+        add_sheet("POS결제", ["결제 ID", "업체 ID", "업체", "일시", "취소 일시", "취소 금액", "제공사", "작업 ID", "거래번호", "수단", "상태", "금액", "승인번호"],
+            PartnerPayment.objects.filter(partner_id__in=partner_ids).select_related("partner").order_by("partner_id", "pk"),
+            lambda x: [x.pk, x.partner_id, x.partner.name, x.paid_at.strftime("%Y-%m-%d %H:%M"), x.cancelled_at.strftime("%Y-%m-%d %H:%M") if x.cancelled_at else "", x.cancelled_amount_krw, x.provider_name, x.work_order_id, x.provider_transaction_id, x.get_method_display(), x.get_status_display(), x.amount_krw, x.approval_code])
+        add_sheet("세금계산서", ["업체", "작성일", "상태", "유형", "목적", "공급자 사업자번호", "공급자", "공급받는자 사업자번호", "공급받는자", "공급가", "세액", "합계", "외부문서번호"],
+            PartnerTaxInvoice.objects.filter(partner_id__in=partner_ids).select_related("partner").order_by("partner_id", "pk"),
+            lambda x: [x.partner.name, x.write_date.isoformat(), x.get_status_display(), x.get_tax_type_display(), x.get_purpose_display(), x.seller_business_number, x.seller_name, x.buyer_business_number, x.buyer_name, x.supply_cost_krw, x.tax_krw, x.total_krw, x.provider_document_id])
+        add_sheet("공급처", ["업체", "공급처", "담당자", "연락처", "이메일", "사업자번호", "주소", "메모", "사용"],
+            PartnerSupplier.objects.filter(partner_id__in=partner_ids).select_related("partner").order_by("partner_id", "pk"),
+            lambda x: [x.partner.name, x.name, x.contact_name, x.phone, x.email, x.business_number, x.address, x.note, x.is_active])
+        add_sheet("정비템플릿", ["업체", "항목", "유형", "소요시간(분)", "기본수량", "단위", "기본단가", "연결부품", "사용"],
+            PartnerServicePreset.objects.filter(partner_id__in=partner_ids).select_related("partner", "part").order_by("partner_id", "pk"),
+            lambda x: [x.partner.name, x.name, x.get_kind_display(), x.duration_minutes, str(x.default_quantity), x.unit, x.default_price_krw, x.part.name if x.part_id else "", x.is_active])
+        add_sheet("작업자작업대", ["업체", "구분", "이름", "사용"],
+            PartnerWorkResource.objects.filter(partner_id__in=partner_ids).select_related("partner").order_by("partner_id", "pk"),
+            lambda x: [x.partner.name, x.get_kind_display(), x.name, x.is_active])
+        add_sheet("일일마감", ["마감 ID", "업체 ID", "업체", "영업일", "POS 현금", "실제 현금", "현금 차이", "POS 카드", "실제 카드", "카드 차이", "POS 이체", "실제 이체", "이체 차이", "POS 환불", "실제 환불", "환불 차이", "메모"],
+            PartnerDailyClose.objects.filter(partner_id__in=partner_ids).select_related("partner").order_by("partner_id", "business_date"),
+            lambda x: [x.pk, x.partner_id, x.partner.name, x.business_date.isoformat(), x.expected_cash_krw, x.counted_cash_krw, x.counted_cash_krw-x.expected_cash_krw, x.expected_card_krw, x.counted_card_krw, x.counted_card_krw-x.expected_card_krw, x.expected_transfer_krw, x.counted_transfer_krw, x.counted_transfer_krw-x.expected_transfer_krw, x.expected_refund_krw, x.counted_refund_krw, x.counted_refund_krw-x.expected_refund_krw, x.note])
+
+        # Include the booking rules and reservations required to reconstruct a
+        # workshop calendar. Row IDs and foreign keys are stable restore keys.
+        add_sheet("예약", ["예약 ID", "업체 ID", "고객 계정 ID", "차량 ID", "시작 시각", "소요 분", "담당 자원 ID", "정비 종류", "상태", "연락처", "고객 요청", "업체 메모"],
+            PartnerBooking.objects.filter(partner_id__in=partner_ids).order_by("partner_id", "pk"),
+            lambda x: [x.pk, x.partner_id, x.customer_id, x.vehicle_id or "", timezone.localtime(x.scheduled_at).isoformat(), x.duration_minutes, x.assigned_resource_id or "", x.service_type, x.get_status_display(), x.contact_phone, x.customer_note, x.partner_note])
+        add_sheet("주간일정", ["일정 ID", "업체 ID", "요일", "개점", "폐점", "예약 간격(분)", "휴무"],
+            PartnerWeeklySchedule.objects.filter(partner_id__in=partner_ids).order_by("partner_id", "weekday"),
+            lambda x: [x.pk, x.partner_id, x.weekday, x.opens_at.isoformat(), x.closes_at.isoformat(), x.slot_interval_minutes, x.is_closed])
+        add_sheet("일정 예외", ["예외 ID", "업체 ID", "날짜", "휴무", "개점", "폐점", "메모"],
+            PartnerScheduleException.objects.filter(partner_id__in=partner_ids).order_by("partner_id", "date"),
+            lambda x: [x.pk, x.partner_id, x.date.isoformat(), x.is_closed, x.opens_at.isoformat() if x.opens_at else "", x.closes_at.isoformat() if x.closes_at else "", x.note])
+        add_sheet("예약 차단", ["차단 ID", "업체 ID", "시작", "종료", "사유"],
+            PartnerScheduleBlock.objects.filter(partner_id__in=partner_ids).order_by("partner_id", "starts_at"),
+            lambda x: [x.pk, x.partner_id, timezone.localtime(x.starts_at).isoformat(), timezone.localtime(x.ends_at).isoformat(), x.reason])
+        add_sheet("정비 소요시간", ["설정 ID", "업체 ID", "정비 종류", "소요 분", "사용"],
+            PartnerServiceDuration.objects.filter(partner_id__in=partner_ids).order_by("partner_id", "service_name"),
+            lambda x: [x.pk, x.partner_id, x.service_name, x.duration_minutes, x.is_active])
+
+        output = BytesIO()
+        workbook.save(output)
+        response = HttpResponse(output.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        response["Content-Disposition"] = f'attachment; filename="ilovemini-workshop-backup-{timezone.localdate():%Y%m%d}.xlsx"'
+        response["Cache-Control"] = "private, no-store"
+        return response
+
     def ledger_evidence_view(self, request, entry_id, evidence_id):
         if not is_system_admin(request) and not active_staff_for(request).filter(can_verify_records=True).exists():
             raise Http404
@@ -477,6 +647,52 @@ class PartnerAdminSite(AdminSite):
 partner_admin_site = PartnerAdminSite(name="partner_admin")
 
 
+# Admin presentation only; keep persisted fields and API names unchanged.
+PartnerQuoteShare._meta.verbose_name = "견적 링크 관리"
+PartnerQuoteShare._meta.verbose_name_plural = "견적 링크 관리"
+
+@admin.register(PartnerQuoteShare, site=partner_admin_site)
+class PartnerQuoteShareAdmin(admin.ModelAdmin):
+    def has_module_permission(self, request):
+        return is_system_admin(request) or staff_partners(request, booking=True).exists()
+
+    def has_view_permission(self, request, obj=None):
+        if not self.has_module_permission(request):
+            return False
+        if obj is None or is_system_admin(request):
+            return True
+        partner_id = obj.work_order.partner_id if obj.work_order_id else obj.estimate.booking.partner_id
+        return partner_id in staff_partners(request, booking=True)
+
+    def has_change_permission(self, request, obj=None):
+        return self.has_view_permission(request, obj)
+
+    list_display = ("token", "source_label", "quote_revision", "created_at", "expires_at", "revoked_at")
+    list_filter = ("created_at", "expires_at", "revoked_at")
+    readonly_fields = ("token", "work_order", "estimate", "quote_revision", "created_by", "created_at", "expires_at")
+    fields = readonly_fields + ("revoked_at",)
+    actions = ("revoke_selected",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related("work_order__partner", "estimate__booking__partner")
+        partner_ids = staff_partners(request, booking=True)
+        return qs.filter(Q(work_order__partner_id__in=partner_ids) | Q(estimate__booking__partner_id__in=partner_ids))
+
+    @admin.display(description="견적")
+    def source_label(self, obj):
+        return f"{obj.work_order or obj.estimate}"
+
+    @admin.action(description="선택한 공유 링크 만료 처리")
+    def revoke_selected(self, request, queryset):
+        queryset.filter(revoked_at__isnull=True).update(revoked_at=timezone.now())
+
+
 class PartnerBookingStatusFilter(admin.SimpleListFilter):
     title = "예약 상태"
     parameter_name = "status"
@@ -488,19 +704,50 @@ class PartnerBookingStatusFilter(admin.SimpleListFilter):
         return queryset.filter(status=self.value()) if self.value() else queryset
 
 
+class PartnerBookingAdminForm(forms.ModelForm):
+    class Meta:
+        model = PartnerBooking
+        fields = "__all__"
+
+    def clean(self):
+        data = super().clean()
+        resource = data.get("assigned_resource")
+        if resource and self.instance.partner_id and resource.partner_id != self.instance.partner_id:
+            self.add_error("assigned_resource", "해당 예약 업체에 등록된 정비사·작업대만 배정할 수 있습니다.")
+        return data
+
+
 @admin.register(PartnerBooking, site=partner_admin_site)
 class PartnerBookingAdmin(admin.ModelAdmin):
+    form = PartnerBookingAdminForm
     change_list_template = "admin/core/partnerbooking/change_list.html"
     change_form_template = "admin/core/partnerbooking/change_form.html"
-    list_display = ("booking_time", "vehicle_plate", "contact_phone_display", "vehicle_model", "service_label", "status_label")
+    list_display = ("booking_time", "vehicle_plate", "contact_phone_display", "vehicle_model", "service_label", "duration_label", "schedule_conflict_label", "status_label")
     list_filter = (PartnerBookingStatusFilter,)
     search_fields = ("vehicle__model_name", "vehicle__plate_number", "contact_phone", "service_type")
     list_select_related = ("vehicle", "partner")
     date_hierarchy = None
     ordering = ("-requested_at",)
     actions = None
-    fields = ("vehicle_registration", "contact_phone_display", "booking_time", "service_label", "customer_note_display", "status", "partner_note")
-    readonly_fields = ("vehicle_registration", "contact_phone_display", "booking_time", "service_label", "customer_note_display")
+    # `booking_time` remains the compact list column. On the edit form, show
+    # only the editable `scheduled_at` field so the same appointment time is
+    # not presented twice as a read-only value and an input.
+    fields = ("vehicle_registration", "contact_phone_display", "scheduled_at", "service_label", "duration_minutes", "assigned_resource", "customer_note_display", "status", "partner_note")
+    readonly_fields = ("vehicle_registration", "contact_phone_display", "service_label", "customer_note_display")
+
+    def get_form(self, request, obj=None, **kwargs):
+        # Use only valid next steps in the status selector. The save guard
+        # already enforces these transitions; matching the UI avoids a form
+        # that offers actions which can only fail after submit.
+        request._partner_booking_status = obj.status if obj else None
+        return super().get_form(request, obj, **kwargs)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "assigned_resource":
+            kwargs["queryset"] = PartnerWorkResource.objects.filter(
+                partner_id__in=staff_partners(request, booking=True), is_active=True,
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     @admin.display(description="차량번호 / 차량")
     def vehicle_registration(self, obj):
@@ -529,6 +776,24 @@ class PartnerBookingAdmin(admin.ModelAdmin):
     def service_label(self, obj):
         return obj.service_type or "미등록"
 
+    @admin.display(description="예상 작업 시간", ordering="duration_minutes")
+    def duration_label(self, obj):
+        hours, minutes = divmod(obj.duration_minutes or 60, 60)
+        return f"{hours}시간" + (f" {minutes}분" if minutes else "")
+
+    @admin.display(description="일정 확인")
+    def schedule_conflict_label(self, obj):
+        from .booking_schedule import ACTIVE_BOOKING_STATUSES
+        start = obj.scheduled_at
+        end = start + timedelta(minutes=obj.duration_minutes or 60)
+        conflicts = PartnerBooking.objects.filter(partner=obj.partner, status__in=ACTIVE_BOOKING_STATUSES, scheduled_at__lt=end).exclude(pk=obj.pk)
+        if obj.assigned_resource_id:
+            conflicts = conflicts.filter(Q(assigned_resource__isnull=True) | Q(assigned_resource_id=obj.assigned_resource_id))
+        for other in conflicts.only("scheduled_at", "duration_minutes"):
+            if other.scheduled_at + timedelta(minutes=other.duration_minutes or 60) > start:
+                return "재조정 필요"
+        return "정상"
+
     @admin.display(description="예약 상태", ordering="status")
     def status_label(self, obj):
         return obj.get_status_display()
@@ -539,20 +804,43 @@ class PartnerBookingAdmin(admin.ModelAdmin):
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         field = super().formfield_for_dbfield(db_field, request, **kwargs)
-        labels = {"status": "예약 상태", "partner_note": "업체 메모"}
+        labels = {"status": "예약 상태", "partner_note": "업체 메모", "duration_minutes": "예상 작업 시간(분)"}
         if field and db_field.name in labels:
             field.label = labels[db_field.name]
+        if field and db_field.name == "scheduled_at":
+            field.label = "예약 날짜와 시간"
+            field.help_text = "일정을 변경하면 고객에게 변경 알림이 전송됩니다."
         if field and db_field.name == "status":
+            current = getattr(request, "_partner_booking_status", None)
+            if current == PartnerBooking.Status.REQUESTED:
+                allowed = {
+                    PartnerBooking.Status.REQUESTED,
+                    PartnerBooking.Status.CONFIRMED,
+                    PartnerBooking.Status.REJECTED,
+                }
+            elif current == PartnerBooking.Status.CONFIRMED:
+                allowed = {
+                    PartnerBooking.Status.CONFIRMED,
+                    PartnerBooking.Status.COMPLETED,
+                }
+            else:
+                allowed = {current} if current else {value for value, _label in PartnerBooking.Status.choices}
+            field.choices = [(value, label) for value, label in PartnerBooking.Status.choices if value in allowed]
+            field.help_text = "접수 대기는 확정 또는 거절할 수 있고, 확정된 예약은 완료 처리할 수 있습니다."
             field.widget.attrs.update({"class": "partner-booking-status"})
+        if field and db_field.name == "duration_minutes":
+            choices = [(value, str(value // 60) + "시간" + (" " + str(value % 60) + "분" if value % 60 else "")) for value in range(30, 481, 30)]
+            field.widget = forms.Select(choices=choices)
         return field
 
     def get_queryset(self, request):
         return super().get_queryset(request).filter(
             partner_id__in=staff_partners(request, booking=True)
-        ).select_related("partner", "customer", "vehicle")
+        ).select_related("partner", "customer", "vehicle", "assigned_resource")
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
+        extra_context["title"] = "업체 예약"
         today = timezone.localdate()
         year = request.GET.get("scheduled_at__year", "")
         month_number = request.GET.get("scheduled_at__month", "")
@@ -569,14 +857,44 @@ class PartnerBookingAdmin(admin.ModelAdmin):
             scheduled_at__gte=timezone.make_aware(datetime.combine(month_start, time.min)),
             scheduled_at__lt=timezone.make_aware(datetime.combine(next_month, time.min)),
         ).order_by("scheduled_at", "pk")
+        selected_status = request.GET.get("status", "")
+        valid_statuses = {value for value, _label in PartnerBooking.Status.choices}
+        if selected_status in valid_statuses:
+            display_status = selected_status
+        else:
+            selected_status = ""
+            display_status = ""
         events_by_day = {}
-        for booking in bookings:
+        booking_rows = list(bookings)
+        # Keep the status filter for visible calendar events, but compare each
+        # event against every active booking in the month. Filtering first
+        # would hide conflicts with bookings in another status (for example,
+        # a requested job overlapping a confirmed appointment).
+        visible_bookings = [
+            booking for booking in booking_rows
+            if not display_status or booking.status == display_status
+        ]
+        for booking in visible_bookings:
             vehicle = booking.vehicle
+            start = booking.scheduled_at
+            end = start + timedelta(minutes=booking.duration_minutes or 60)
+            has_conflict = any(
+                other.pk != booking.pk and other.partner_id == booking.partner_id
+                and (not booking.assigned_resource_id or not other.assigned_resource_id or booking.assigned_resource_id == other.assigned_resource_id)
+                and other.scheduled_at < end
+                and other.scheduled_at + timedelta(minutes=other.duration_minutes or 60) > start
+                and other.status in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED)
+                and booking.status in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED)
+                for other in booking_rows
+            )
             event = {
                 "time": timezone.localtime(booking.scheduled_at).strftime("%H:%M"),
+                "ends_at": timezone.localtime(end).strftime("%H:%M"),
+                "has_conflict": has_conflict,
                 "plate": vehicle.plate_number if vehicle and vehicle.plate_number else "차량번호 미등록",
                 "phone": booking.contact_phone or "연락처 미등록",
                 "service": booking.service_type,
+                "resource": str(booking.assigned_resource) if booking.assigned_resource_id else "미배정",
                 "status": booking.get_status_display(),
                 "status_code": booking.status,
                 "change_url": reverse(f"{self.admin_site.name}:core_partnerbooking_change", args=[booking.pk]) if booking.status in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED) else "",
@@ -602,6 +920,8 @@ class PartnerBookingAdmin(admin.ModelAdmin):
             "partner_calendar_next": next_month.strftime("%Y-%m"),
             "partner_calendar_weeks": weeks,
             "partner_calendar_weekdays": ["월", "화", "수", "목", "금", "토", "일"],
+            "partner_calendar_status": selected_status,
+            "partner_calendar_status_label": dict(PartnerBooking.Status.choices).get(selected_status, ""),
         })
         return super().changelist_view(request, extra_context=extra_context)
 
@@ -627,7 +947,7 @@ class PartnerBookingAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         if not change or obj.partner_id not in staff_partners(request, booking=True):
             raise Http404
-        previous = PartnerBooking.objects.filter(pk=obj.pk, partner_id=obj.partner_id).values("status", "partner_note").first()
+        previous = PartnerBooking.objects.filter(pk=obj.pk, partner_id=obj.partner_id).values("status", "partner_note", "scheduled_at", "duration_minutes", "assigned_resource_id").first()
         if previous is None:
             raise Http404
         allowed = {
@@ -636,6 +956,21 @@ class PartnerBookingAdmin(admin.ModelAdmin):
         }
         if obj.status != previous["status"] and obj.status not in allowed.get(previous["status"], set()):
             raise PermissionDenied("현재 상태에서 선택할 수 없는 예약 변경입니다.")
+        # Capacity matters while a booking still occupies a live slot. A
+        # conflicting request must remain rejectable, and completed bookings
+        # must not be blocked by another reservation's current schedule.
+        from .booking_schedule import ACTIVE_BOOKING_STATUSES, is_slot_available
+        if obj.status in ACTIVE_BOOKING_STATUSES:
+            available, reason = is_slot_available(
+                obj.partner, obj.scheduled_at, obj.duration_minutes,
+                exclude_booking_id=obj.pk, resource_id=obj.assigned_resource_id,
+            )
+            duration_extension = (
+                obj.duration_minutes > previous["duration_minutes"]
+                and obj.scheduled_at == previous["scheduled_at"]
+            )
+            if not available and not duration_extension:
+                raise ValidationError({"duration_minutes": reason})
         super().save_model(request, obj, form, change)
         if obj.status != previous["status"]:
             def notify_customer():
@@ -646,6 +981,74 @@ class PartnerBookingAdmin(admin.ModelAdmin):
                     import logging
                     logging.getLogger(__name__).exception("Partner admin booking notification failed (booking_id=%s)", obj.pk)
             transaction.on_commit(notify_customer)
+        elif obj.scheduled_at != previous["scheduled_at"] or obj.duration_minutes != previous["duration_minutes"]:
+            def notify_customer_schedule():
+                try:
+                    from .push import send_booking_schedule_notification
+                    send_booking_schedule_notification(obj)
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception("Partner admin booking schedule notification failed (booking_id=%s)", obj.pk)
+            transaction.on_commit(notify_customer_schedule)
+
+
+class PartnerScopedScheduleAdmin(admin.ModelAdmin):
+    """Keep workshop schedule controls inside the signed-in staff member's scope."""
+    booking_scope = True
+    list_filter = ()
+    search_fields = ("partner__name", "partner__branch_label")
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(partner_id__in=staff_partners(request, booking=self.booking_scope))
+
+    def has_module_permission(self, request):
+        return active_staff_for(request).filter(can_manage_bookings=True).exists() or is_system_admin(request)
+
+    def has_view_permission(self, request, obj=None):
+        return self.has_module_permission(request) and (obj is None or obj.partner_id in staff_partners(request, booking=self.booking_scope))
+
+    def has_change_permission(self, request, obj=None):
+        return self.has_view_permission(request, obj)
+
+    def has_add_permission(self, request):
+        return self.has_module_permission(request)
+
+    def has_delete_permission(self, request, obj=None):
+        return self.has_view_permission(request, obj)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        field = super().formfield_for_foreignkey(db_field, request, **kwargs)
+        if db_field.name == "partner" and field:
+            field.queryset = Partner.objects.filter(pk__in=staff_partners(request, booking=self.booking_scope))
+        return field
+
+
+@admin.register(PartnerServiceDuration, site=partner_admin_site)
+class PartnerServiceDurationAdmin(PartnerScopedScheduleAdmin):
+    list_display = ("partner", "service_name", "duration_minutes", "is_active")
+    list_editable = ("duration_minutes", "is_active")
+    fields = ("partner", "service_name", "duration_minutes", "is_active")
+
+
+@admin.register(PartnerWeeklySchedule, site=partner_admin_site)
+class PartnerWeeklyScheduleAdmin(PartnerScopedScheduleAdmin):
+    list_display = ("partner", "weekday", "opens_at", "closes_at", "slot_interval_minutes", "is_closed")
+    list_editable = ("opens_at", "closes_at", "slot_interval_minutes", "is_closed")
+    fields = ("partner", "weekday", "opens_at", "closes_at", "slot_interval_minutes", "is_closed")
+
+
+@admin.register(PartnerScheduleException, site=partner_admin_site)
+class PartnerScheduleExceptionAdmin(PartnerScopedScheduleAdmin):
+    list_display = ("partner", "date", "is_closed", "opens_at", "closes_at", "note")
+    list_editable = ("is_closed", "opens_at", "closes_at", "note")
+    fields = ("partner", "date", "is_closed", "opens_at", "closes_at", "note")
+
+
+@admin.register(PartnerScheduleBlock, site=partner_admin_site)
+class PartnerScheduleBlockAdmin(PartnerScopedScheduleAdmin):
+    list_display = ("partner", "starts_at", "ends_at", "reason")
+    list_editable = ("ends_at", "reason")
+    fields = ("partner", "starts_at", "ends_at", "reason")
 
 
 @admin.register(LedgerEntry, site=partner_admin_site)
@@ -658,6 +1061,28 @@ class PartnerLedgerEntryAdmin(admin.ModelAdmin):
     date_hierarchy = "entry_date"
     ordering = ("-entry_date", "-pk")
     actions = None
+
+    readonly_fields = ("repair_amount_table",)
+    exclude = ("line_items",)
+
+    @admin.display(description="정비 항목 및 금액")
+    def repair_amount_table(self, obj):
+        rows = format_html_join(
+            "", "<tr><td>{}</td><td>{}</td></tr>",
+            (
+                (item["name"], f"{item['amount_krw']:,}원")
+                for item in (obj.line_items if isinstance(obj.line_items, list) else [])
+                if isinstance(item, dict) and isinstance(item.get("name"), str)
+                and type(item.get("amount_krw")) is int
+            ),
+        )
+        total = obj.gross_amount_krw if obj.gross_amount_krw is not None else obj.amount_krw
+        return format_html(
+            '<table><thead><tr><th scope="col">정비 항목</th><th scope="col">금액</th></tr></thead>'
+            '<tbody>{}</tbody><tfoot><tr><th scope="row">총액</th><td>{}</td></tr></tfoot></table>',
+            rows or format_html('<tr><td colspan="2">{}</td></tr>', "등록된 항목 없음"),
+            f"{total:,}원",
+        )
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
