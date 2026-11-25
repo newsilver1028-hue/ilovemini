@@ -61,7 +61,7 @@ class WorkshopAuditTests(TestCase):
             scheduled_at=self.start+timedelta(hours=3),status='confirmed',service_type='검수')
         response=self.client.post(reverse('partner_admin:core_partnerbooking_change',args=[second.pk]),{
             'scheduled_at_0':str(self.day),'scheduled_at_1':'10:00:00','duration_minutes':60,
-            'status':'confirmed','assigned_resource':'','partner_note':'','_save':'저장'})
+            'status':'confirmed','assigned_resource':'','partner_note':'','_booking_version':second.updated_at.isoformat(),'_save':'저장'})
         self.assertEqual(response.status_code,200)
         self.assertIn('scheduled_at',response.context['adminform'].form.errors)
         second.refresh_from_db();self.assertEqual(second.scheduled_at,self.start+timedelta(hours=3))

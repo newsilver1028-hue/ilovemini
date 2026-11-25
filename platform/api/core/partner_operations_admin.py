@@ -485,7 +485,7 @@ class PartnerPosIntegrationAdmin(PartnerScopedAdmin):
 
     @admin.display(description="수신 규격")
     def event_contract(self, obj):
-        return 'POST JSON · Authorization: Bearer {토큰} · {"event_id":"거래고유값","work_order_id":123,"status":"approved|cancelled","method":"card|cash|transfer|easy_pay|other","amount_krw":55000,"approval_code":"승인번호","paid_at":"ISO-8601"} · 취소는 승인 거래의 event_id와 work_order_id를 그대로 사용합니다.'
+        return 'POST JSON · Authorization: Bearer {토큰} · {"event_id":"거래고유값","work_order_id":123,"status":"approved|cancelled","method":"card|cash|transfer|easy_pay|other","amount_krw":55000,"approval_code":"승인번호","paid_at":"ISO-8601"} · 취소는 승인 거래의 event_id와 work_order_id를 그대로 사용합니다. 전체 취소만 지원하며 amount_krw는 원 승인 금액과 같아야 합니다. 부분 취소는 400 응답으로 거절합니다.'
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         field = super().formfield_for_dbfield(db_field, request, **kwargs)

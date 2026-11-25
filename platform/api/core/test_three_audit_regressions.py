@@ -55,11 +55,11 @@ class ThreeAuditRegressionTests(TestCase):
         data={'scheduled_at_0':str(self.day),'scheduled_at_1':'09:00:00','status':'confirmed','assigned_resource':'','partner_note':'','_save':'저장'}
         for value in [0,1,31,481]:
             with self.subTest(duration=value):
-                response=self.client.post(url,{**data,'duration_minutes':value})
+                response=self.client.post(url,{**data,'duration_minutes':value,'_booking_version':booking.updated_at.isoformat()})
                 self.assertEqual(response.status_code,200)
                 self.assertIn('duration_minutes',response.context['adminform'].form.errors)
                 booking.refresh_from_db();self.assertEqual(booking.duration_minutes,60)
         for value in [30,90,480]:
-            response=self.client.post(url,{**data,'duration_minutes':value})
+            response=self.client.post(url,{**data,'duration_minutes':value,'_booking_version':booking.updated_at.isoformat()})
             self.assertEqual(response.status_code,302)
             booking.refresh_from_db();self.assertEqual(booking.duration_minutes,value)

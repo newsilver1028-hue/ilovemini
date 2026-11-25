@@ -13,3 +13,5 @@
   {% endif %}
   {{ block.super }}
 {% endblock %}
+
+{% block form_top %}{{ block.super }}{% if original %}<input type="hidden" name="_work_order_version" value="{{ original.updated_at|date:'c' }}">{% endif %}{% endblock %}

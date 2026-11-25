@@ -9,7 +9,7 @@ logger=logging.getLogger(__name__)
 @receiver(post_save, sender=ServiceEstimate)
 @receiver(post_save, sender=MaintenanceRecommendation)
 def notify_member(sender,instance,created,**kwargs):
-    if not created: return
+    if kwargs.get("raw") or not created: return
     is_estimate=sender is ServiceEstimate
     if is_estimate and instance.status!='sent': return
     member=instance.booking.customer if is_estimate else instance.member

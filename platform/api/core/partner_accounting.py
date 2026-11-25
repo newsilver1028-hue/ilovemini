@@ -13,7 +13,7 @@ def refresh_daily_close_expected(partner_id, day):
     end = timezone.make_aware(datetime.combine(day + timedelta(days=1), time.min), tz)
     sales = PartnerPayment.objects.filter(
         partner_id=partner_id,
-        status=PartnerPayment.Status.APPROVED,
+        status__in=(PartnerPayment.Status.APPROVED, PartnerPayment.Status.CANCELLED),
         paid_at__gte=start,
         paid_at__lt=end,
     ).values("method").annotate(total=Sum("amount_krw"))

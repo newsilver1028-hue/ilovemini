@@ -96,6 +96,11 @@ def partner_pos_event(request):
         else:
             if not existing or existing.work_order_id != order.pk:
                 return JsonResponse({"detail": "취소할 승인 거래를 찾을 수 없습니다."}, status=404)
+            # This normalized receiver currently supports full cancellation only.
+            # Never silently turn an explicit partial refund into a full refund.
+            for amount_key in ("amount_krw", "cancelled_amount_krw"):
+                if amount_key in event and (type(event[amount_key]) is not int or event[amount_key] != existing.amount_krw):
+                    return JsonResponse({"detail": "부분 취소는 현재 지원하지 않습니다. 전체 승인 금액과 일치하는 취소만 처리할 수 있습니다."}, status=400)
             if existing.status == PartnerPayment.Status.CANCELLED:
                 integration.last_received_at = timezone.now()
                 integration.save(update_fields=("last_received_at", "updated_at"))

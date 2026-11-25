@@ -53,6 +53,15 @@ class PartnerWorkOrderForm(forms.ModelForm):
 
     def clean(self):
         data = super().clean()
+        if self.instance.pk and self.request and self.request.method == "POST":
+            from django.utils.dateparse import parse_datetime
+            current = PartnerWorkOrder.objects.select_for_update().get(pk=self.instance.pk)
+            try:
+                version = parse_datetime(self.request.POST.get("_work_order_version", ""))
+            except (ValueError, TypeError):
+                version = None
+            if version != current.updated_at:
+                raise forms.ValidationError("이 작업지시가 다른 화면에서 변경되었습니다. 새로고침 후 변경 내용을 확인하고 다시 저장해 주세요.")
         booking = data.get("booking")
         partner = data.get("partner") or getattr(self.instance, "partner", None)
         if booking and partner and booking.partner_id != partner.pk:
@@ -255,6 +264,8 @@ class PartnerWorkOrderAdmin(admin.ModelAdmin):
             if order.status == PartnerWorkOrder.Status.COMPLETED and not order.final_total_krw:
                 PartnerWorkOrder.objects.filter(pk=order.pk).update(final_total_krw=line_total)
                 order.final_total_krw = line_total
+        from .quote_sharing import invalidate_changed_work_order_quote
+        invalidate_changed_work_order_quote(order)
         was_completed = getattr(form, "_previous_status", None) == PartnerWorkOrder.Status.COMPLETED
         if order.status != PartnerWorkOrder.Status.COMPLETED or was_completed:
             return

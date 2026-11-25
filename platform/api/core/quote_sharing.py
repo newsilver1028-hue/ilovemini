@@ -75,6 +75,28 @@ def quote_snapshot(context):
     return json.loads(json.dumps(snapshot, cls=DjangoJSONEncoder))
 
 
+def invalidate_changed_work_order_quote(order):
+    """An approval is valid only for the exact customer-visible quotation."""
+    if order.quote_status not in (PartnerWorkOrder.QuoteStatus.APPROVED, PartnerWorkOrder.QuoteStatus.DECLINED):
+        return
+    share = order.quote_shares.filter(revoked_at__isnull=True, quote_revision=order.quote_revision).order_by("-created_at").first()
+    if not share:
+        return
+    current = quote_snapshot(work_order_quote_context(order))
+    fields = ("items", "total_krw", "vehicle_model", "plate_number", "odometer_km", "customer_concern",
+              "inspection_notes", "note", "contact_phone", "customer_name")
+    if share.snapshot and all(share.snapshot.get(key) == current.get(key) for key in fields):
+        return
+    order.quote_shares.filter(revoked_at__isnull=True).update(revoked_at=timezone.now())
+    order.quote_revision += 1
+    order.quote_status = PartnerWorkOrder.QuoteStatus.DRAFT
+    order.quote_responded_at = None
+    order.quote_decline_reason = ""
+    if order.status in (PartnerWorkOrder.Status.IN_PROGRESS, PartnerWorkOrder.Status.WAITING_APPROVAL):
+        order.status = PartnerWorkOrder.Status.QUOTE
+    order.save(update_fields=("quote_revision", "quote_status", "quote_responded_at", "quote_decline_reason", "status", "updated_at"))
+
+
 def create_quote_share(request, *, work_order=None, estimate=None):
     if request.method != "POST":
         return JsonResponse({"detail": "POST 요청만 허용됩니다."}, status=405)

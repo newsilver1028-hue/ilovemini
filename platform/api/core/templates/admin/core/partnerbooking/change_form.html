@@ -1,3 +1,5 @@
 {% extends "admin/change_form.html" %}
 
 {% block object-tools-items %}{% endblock %}
+
+{% block form_top %}{{ block.super }}{% if original %}<input type="hidden" name="_booking_version" value="{{ original.updated_at|date:'c' }}">{% endif %}{% endblock %}

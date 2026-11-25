@@ -346,7 +346,7 @@ class PartnerAdminSite(AdminSite):
             occurred_at__year=report_month.year, occurred_at__month=report_month.month,
         ).aggregate(total=Sum("amount_krw"))["total"] or 0
         pos_payments = PartnerPayment.objects.filter(
-            partner_id__in=partner_ids, status=PartnerPayment.Status.APPROVED,
+            partner_id__in=partner_ids, status__in=(PartnerPayment.Status.APPROVED, PartnerPayment.Status.CANCELLED),
             paid_at__year=report_month.year, paid_at__month=report_month.month,
         )
         pos_income = pos_payments.aggregate(total=Sum("amount_krw"))["total"] or 0
@@ -528,7 +528,7 @@ class PartnerAdminSite(AdminSite):
         )
 
     def export_workshop_data(self, request):
-        """Download a tenant-scoped workbook of operational data for backup/migration."""
+        """Export tenant-scoped operational data; full recovery uses a DB backup."""
         if not is_system_admin(request) and not active_staff_for(request).filter(can_manage_bookings=True).exists():
             raise Http404
         partner_ids = list(staff_partners(request, booking=True))
@@ -539,6 +539,10 @@ class PartnerAdminSite(AdminSite):
 
         workbook = Workbook()
         workbook.remove(workbook.active)
+        guide = workbook.create_sheet("내보내기 안내")
+        guide.append(["용도", "운영자료 열람 및 이관 참고용 엑셀입니다."])
+        guide.append(["복원 범위", "전체 데이터베이스 복원 파일이 아닙니다. 완전 복구에는 별도 서버 DB 백업이 필요합니다."])
+        guide.append(["생성 시각", timezone.localtime().isoformat()])
 
         def add_sheet(title, headers, queryset, row_builder):
             sheet = workbook.create_sheet(title[:31])
@@ -608,7 +612,7 @@ class PartnerAdminSite(AdminSite):
             lambda x: [x.pk, x.partner_id, x.customer_id, x.vehicle_id or "", timezone.localtime(x.scheduled_at).isoformat(), x.duration_minutes, x.assigned_resource_id or "", x.service_type, x.get_status_display(), x.contact_phone, x.customer_note, x.partner_note])
         add_sheet("주간일정", ["일정 ID", "업체 ID", "요일", "개점", "폐점", "예약 간격(분)", "휴무"],
             PartnerWeeklySchedule.objects.filter(partner_id__in=partner_ids).order_by("partner_id", "weekday"),
-            lambda x: [x.pk, x.partner_id, x.weekday, x.opens_at.isoformat(), x.closes_at.isoformat(), x.slot_interval_minutes, x.is_closed])
+            lambda x: [x.pk, x.partner_id, x.weekday, x.opens_at.isoformat() if x.opens_at else "", x.closes_at.isoformat() if x.closes_at else "", x.slot_interval_minutes, x.is_closed])
         add_sheet("일정 예외", ["예외 ID", "업체 ID", "날짜", "휴무", "개점", "폐점", "메모"],
             PartnerScheduleException.objects.filter(partner_id__in=partner_ids).order_by("partner_id", "date"),
             lambda x: [x.pk, x.partner_id, x.date.isoformat(), x.is_closed, x.opens_at.isoformat() if x.opens_at else "", x.closes_at.isoformat() if x.closes_at else "", x.note])
@@ -720,20 +724,29 @@ class PartnerBookingAdminForm(forms.ModelForm):
         resource = data.get("assigned_resource")
         if resource and self.instance.partner_id and resource.partner_id != self.instance.partner_id:
             self.add_error("assigned_resource", "해당 예약 업체에 등록된 정비사·작업대만 배정할 수 있습니다.")
-        if self.instance.pk and data.get("status") in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED):
+        if self.instance.pk:
             from .booking_schedule import is_slot_available
             # ModelAdmin's POST transaction retains this same workshop lock
             # used by API booking creation until the edit has been saved.
             Partner.objects.select_for_update().get(pk=self.instance.partner_id)
-            start = data.get("scheduled_at", self.instance.scheduled_at)
-            duration = data.get("duration_minutes", self.instance.duration_minutes)
-            if start and duration:
-                available, reason = is_slot_available(self.instance.partner, start, duration,
-                    exclude_booking_id=self.instance.pk, resource_id=resource.pk if resource else None)
-                previous = PartnerBooking.objects.get(pk=self.instance.pk)
-                extension = duration > previous.duration_minutes and start == previous.scheduled_at
-                if not available and not extension:
-                    self.add_error("scheduled_at", reason)
+            from django.utils.dateparse import parse_datetime
+            current = PartnerBooking.objects.select_for_update().get(pk=self.instance.pk)
+            try:
+                version = parse_datetime(self.data.get("_booking_version", ""))
+            except (ValueError, TypeError):
+                version = None
+            if version != current.updated_at:
+                raise forms.ValidationError("이 예약이 다른 화면에서 변경되었습니다. 새로고침 후 변경 내용을 확인하고 다시 저장해 주세요.")
+            if data.get("status") in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED):
+                start = data.get("scheduled_at", self.instance.scheduled_at)
+                duration = data.get("duration_minutes", self.instance.duration_minutes)
+                if start and duration:
+                    available, reason = is_slot_available(self.instance.partner, start, duration,
+                        exclude_booking_id=self.instance.pk, resource_id=resource.pk if resource else None)
+                    previous = PartnerBooking.objects.get(pk=self.instance.pk)
+                    extension = duration > previous.duration_minutes and start == previous.scheduled_at
+                    if not available and not extension:
+                        self.add_error("scheduled_at", reason)
         return data
 
 
