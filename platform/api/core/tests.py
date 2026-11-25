@@ -111,11 +111,15 @@ class PointAdminVisibilityTests(TestCase):
         index_response = self.client.get("/admin/")
         self.assertEqual(transaction_response.status_code, 200)
         self.assertContains(transaction_response, "포인트 거래 내역")
+        self.assertNotContains(transaction_response, "/admin/core/pointtransaction/add/")
         self.assertEqual(redemption_response.status_code, 200)
         self.assertContains(redemption_response, "포인트 사용 승인 요청")
+        self.assertNotContains(redemption_response, "/admin/core/pointredemptionrequest/add/")
         self.assertEqual(index_response.status_code, 200)
-        self.assertContains(index_response, "출석 1회 100P")
-        self.assertContains(index_response, "적립 다음 날 사용 가능")
+        self.assertContains(index_response, "포인트·출석")
+        self.assertContains(index_response, 'href="/admin/core/pointtransaction/"')
+        self.assertContains(index_response, 'href="/admin/core/pointredemptionrequest/"')
+
 
     def test_member_list_includes_point_balance(self):
         admin_user = User.objects.create_superuser(username="points-admin", email="admin@example.com", password="Long-test-password-789")

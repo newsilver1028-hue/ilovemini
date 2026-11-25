@@ -382,6 +382,15 @@ class PartnerStockMovementForm(forms.ModelForm):
             self.add_error("part", "부품과 업체가 일치하지 않습니다.")
         if data.get("work_order") and data.get("partner") and data["work_order"].partner_id != data["partner"].pk:
             self.add_error("work_order", "작업과 업체가 일치하지 않습니다.")
+        part, quantity = data.get("part"), data.get("quantity")
+        if part and quantity and data.get("direction") == PartnerStockMovement.Direction.OUT:
+            # ModelAdmin's POST transaction keeps this lock through save_model.
+            # Re-read after taking the lock so a concurrent outbound movement
+            # becomes a field error rather than a save-time server error.
+            with transaction.atomic():
+                current = PartnerPart.objects.select_for_update().get(pk=part.pk)
+                if quantity > current.stock_quantity:
+                    self.add_error("quantity", f"현재고는 {current.stock_quantity:,}개입니다. 현재고보다 많은 수량을 출고할 수 없습니다.")
         return data
 
 
