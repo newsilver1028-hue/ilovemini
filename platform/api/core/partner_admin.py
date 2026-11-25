@@ -714,6 +714,20 @@ class PartnerBookingAdminForm(forms.ModelForm):
         resource = data.get("assigned_resource")
         if resource and self.instance.partner_id and resource.partner_id != self.instance.partner_id:
             self.add_error("assigned_resource", "해당 예약 업체에 등록된 정비사·작업대만 배정할 수 있습니다.")
+        if self.instance.pk and data.get("status") in (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED):
+            from .booking_schedule import is_slot_available
+            # ModelAdmin's POST transaction retains this same workshop lock
+            # used by API booking creation until the edit has been saved.
+            Partner.objects.select_for_update().get(pk=self.instance.partner_id)
+            start = data.get("scheduled_at", self.instance.scheduled_at)
+            duration = data.get("duration_minutes", self.instance.duration_minutes)
+            if start and duration:
+                available, reason = is_slot_available(self.instance.partner, start, duration,
+                    exclude_booking_id=self.instance.pk, resource_id=resource.pk if resource else None)
+                previous = PartnerBooking.objects.get(pk=self.instance.pk)
+                extension = duration > previous.duration_minutes and start == previous.scheduled_at
+                if not available and not extension:
+                    self.add_error("scheduled_at", reason)
         return data
 
 

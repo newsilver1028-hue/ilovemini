@@ -12,6 +12,8 @@ from .models import (
 )
 
 
+BOOKING_OVERLAP_REASON = "선택한 시간에 다른 예약이 있습니다. 정비 시간 또는 작업대를 확인해 주세요."
+
 ACTIVE_BOOKING_STATUSES = (PartnerBooking.Status.REQUESTED, PartnerBooking.Status.CONFIRMED)
 
 
@@ -42,6 +44,8 @@ def is_slot_available(partner, starts_at, duration_minutes, *, exclude_booking_i
     local_start = timezone.localtime(starts_at)
     day = local_start.date()
     window = opening_window(partner, day)
+    if not window:
+        return False, "업체 휴무일이거나 예약 운영시간이 설정되지 않았습니다."
     if window:
         opens_at, closes_at, interval = window
         end_at = starts_at + timedelta(minutes=duration_minutes)

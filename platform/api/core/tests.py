@@ -209,7 +209,7 @@ class ApiAccessTests(TestCase):
 
     def test_partner_booking_is_saved_and_visible_to_customer(self):
         partner = Partner.objects.create(name="예약 테스트 업체", is_active=True)
-        scheduled_at = (timezone.now() + timedelta(days=2)).isoformat()
+        scheduled_at = (timezone.localtime() + timedelta(days=2)).replace(hour=10, minute=0, second=0, microsecond=0).isoformat()
         response = self.client.post("/api/bookings/", {
             "partner": partner.pk, "vehicle": self.mine.pk, "scheduled_at": scheduled_at,
             "service_type": "엔진오일 교환", "contact_phone": "010-1234-5678", "customer_note": "오전 희망",

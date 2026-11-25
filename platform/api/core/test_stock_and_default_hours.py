@@ -14,6 +14,7 @@ class StockAndDefaultHoursTests(TestCase):
         self.partner = Partner.objects.create(name='검수용 업체',is_active=True)
         self.user = get_user_model().objects.create_user('qa-stock')
         PartnerStaff.objects.create(user=self.user,partner=self.partner,is_active=True,can_manage_bookings=True)
+        PartnerWeeklySchedule.objects.all().delete()
         self.part = PartnerPart.objects.create(partner=self.partner,name='검수 부품',stock_quantity=1)
         self.client.force_login(self.user)
 
@@ -47,6 +48,7 @@ class StockAndDefaultHoursTests(TestCase):
 
     def test_all_partners_get_seven_days_and_preserve_exceptions(self):
         other=Partner.objects.create(name='비활성 검수업체',is_active=False)
+        PartnerWeeklySchedule.objects.filter(partner=other).delete()
         row=PartnerWeeklySchedule.objects.create(partner=self.partner,weekday=0,opens_at=time(10),closes_at=time(17),slot_interval_minutes=60,is_closed=True)
         exception=PartnerScheduleException.objects.create(partner=self.partner,date=date(2026,12,25),is_closed=True)
         with tempfile.TemporaryDirectory() as directory:
