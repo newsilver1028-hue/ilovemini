@@ -79,3 +79,21 @@ class RemoteCommandAdmin(AdminCalendarMixin, admin.ModelAdmin):
     list_display = ("command_id", "device", "action", "state", "created_at", "expires_at", "responded_at")
     list_filter = ("action", "state", "device__platform")
     readonly_fields = ("command_id", "created_at", "responded_at")
+
+
+# Administrator display labels only; database schema and API identifiers stay stable.
+_ADMIN_MODEL_LABELS = {
+    ClassSession: "수업 진행 기록",
+    Classroom: "학급·반",
+    Device: "등록 기기",
+    GuardianLink: "보호자 연결",
+    OrganizationAdministrator: "기관 관리자",
+    Organization: "학교·학원",
+    PairingCode: "기기 연결 코드",
+    RemoteCommand: "원격 제어 명령",
+    Student: "학생",
+    TeacherAssignment: "교사 배정",
+}
+for _model, _label in _ADMIN_MODEL_LABELS.items():
+    _model._meta.verbose_name = _label
+    _model._meta.verbose_name_plural = _label
